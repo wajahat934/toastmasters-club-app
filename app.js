@@ -498,6 +498,31 @@ async function meGoalAdd(){
 function meGoalToggle(id,done){ const g=S.goals.find(g=>g.id===id); if(g)g.done=done; sync(api.updGoal(id,{done})); rebuild();render(); }
 function meGoalDel(id){ S.goals=S.goals.filter(g=>g.id!==id); sync(api.delGoal(id)); rebuild();render(); }
 
+/* Standing roles: SAA and Presiding Officer stay the same unless changed.
+   The latest booked value propagates into EMPTY slots of upcoming meetings. */
+function autoFillStanding(){
+  if(!isAdmin)return;
+  const t=todayStr();
+  const ms=state.meetings.filter(m=>!m.cancelled).sort((a,b)=>a.date<b.date?-1:1);
+  let changed=false;
+  for(const rid of ['saa','po']){
+    if(!state.settings.roles.some(r=>r.id===rid))continue;
+    const key=rid+'|0';
+    let src=null;
+    for(const m of ms)if(m.assignments[key]&&m.assignments[key].memberId)src=m;
+    if(!src)continue;
+    const pid=src.assignments[key].memberId;
+    if(!memberById(pid)||memberById(pid).archived)continue;
+    for(const m of ms){
+      if(m.date<t)continue;
+      if(m.assignments[key]&&m.assignments[key].memberId)continue;
+      S.assignments.push({meeting_id:m.id,slot_key:key,profile_id:pid,status:'booked',actual_role:null});
+      sync(api.adminAssign(m.id,key,pid));
+      changed=true;
+    }
+  }
+  if(changed)rebuild();
+}
 /* ================= ADMIN: schedule ================= */
 function memberOptions(sel){
   const mem=state.members.filter(m=>!m.archived&&!m.external);
@@ -594,7 +619,7 @@ async function cancelMeeting(id){
   if(Object.values(m.assignments||{}).some(a=>a&&a.memberId)&&!confirm('This meeting has bookings. Cancel it anyway?'))return;
   const row=S.meetings.find(x=>x.id===id); if(row)row.cancelled=true;
   sync(api.updateMeeting(id,{cancelled:true}));
-  await ensureMeetings(); render(); toast('Meeting cancelled — next date added');
+  await ensureMeetings(); autoFillStanding(); render(); toast('Meeting cancelled — next date added');
 }
 async function assign(mid,key,sel){
   let v=sel.value;
@@ -614,7 +639,9 @@ async function assign(mid,key,sel){
     else S.assignments.push({meeting_id:mid,slot_key:key,profile_id:v,status:'booked',actual_role:null});
     sync(api.adminAssign(mid,key,v));
   }
-  rebuild(); render();
+  rebuild();
+  if(v&&(key==='saa|0'||key==='po|0'))autoFillStanding();
+  render();
 }
 function setOutcome(mid,key,st){
   const a=S.assignments.find(a=>a.meeting_id===mid&&a.slot_key===key); if(!a)return;
@@ -1441,7 +1468,9 @@ const AgendaApp=(function(){
       sync(api.saveAgenda(mid,data));
     },500);
   }
-  const PAGE_W=210,PAGE_H=296.5;
+  /* Target a few mm short of true A4 (297mm): printer rendering differs
+     slightly from screen, and a sub-mm overflow spills a near-empty page 2. */
+  const PAGE_W=210,PAGE_H=291;
   let pxPerMm=null,savedTitle=null;
   function measurePxPerMm(){
     const probe=document.createElement('div');
@@ -1457,12 +1486,12 @@ const AgendaApp=(function(){
     if(!pxPerMm)measurePxPerMm();
     sheet.style.zoom='';
     let z=1;
-    for(let i=0;i<4;i++){
+    for(let i=0;i<8;i++){
       sheet.style.width=(PAGE_W/z)+'mm';
       const hMm=sheet.offsetHeight/pxPerMm;
       const rendered=z*hMm;
       if(rendered<=PAGE_H)break;
-      z=z*PAGE_H/rendered*0.995;
+      z=z*PAGE_H/rendered*0.99;
     }
     sheet.style.zoom=z;
   }
@@ -1585,6 +1614,7 @@ async function enterApp(profile){
   if(isAdmin){
     if(!S._hadSettings)sync(api.saveSettings(S.settings));
     await ensureMeetings();
+    autoFillStanding();
   }
   tab=isAdmin?'schedule':'book';
   show('appWrap'); render();
@@ -1600,7 +1630,7 @@ async function dateRollCheck(){
   const t=todayStr();
   if(t===_renderedDate)return;
   _renderedDate=t;
-  await ensureMeetings(); render();
+  await ensureMeetings(); autoFillStanding(); render();
 }
 async function route(){
   try{
