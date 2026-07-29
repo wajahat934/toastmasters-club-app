@@ -31,6 +31,12 @@ admin or member). Nothing is saved in demo mode.
    turn **OFF** "Confirm email" (otherwise every member needs a confirmation
    email; you can turn it back on later if you set up SMTP).
 
+### 1b. Load the club's real data (recommended)
+
+Still in the SQL Editor, run the contents of `seed.sql` — it loads the 20
+members and all bookings imported from the club's role-booking Google Sheet
+(Jul 18 – Sep 26, 2026), so nobody starts from an empty app.
+
 ### 2. Connect the app
 
 1. In Supabase: **Project Settings → API** (or **Data API**). Copy:
@@ -45,7 +51,9 @@ admin or member). Nothing is saved in demo mode.
 1. Open `index.html` in your browser (double-click works now that config is set).
 2. **Create an account** with your name, email, password.
    You'll land on the "waiting for approval" screen — expected.
-3. Back in Supabase → **SQL Editor** → run (with your email):
+3. Back in Supabase → **SQL Editor** → run the "FIRST ADMIN" block from the
+   bottom of `seed.sql` (it links your login to your seeded roster entry and
+   makes it admin). If you skipped seeding, run instead:
 
    ```sql
    update profiles set role='admin', approved=true
@@ -53,8 +61,9 @@ admin or member). Nothing is saved in demo mode.
    ```
 
 4. Refresh the app — you're in with full admin tabs.
-5. Ask the President and your co-officer to sign up in the app, then promote
-   them: **Members tab → their card → Make admin** (approval included).
+5. Ask the President and your co-officer to sign up in the app, then in the
+   **Members** tab use **Approve & merge with roster** on their signup (links
+   them to their seeded entry) and **Make admin** on their card.
 
 ### 4. Publish on GitHub Pages
 

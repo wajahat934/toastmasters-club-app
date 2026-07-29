@@ -615,11 +615,14 @@ function viewMembers(){
   let html=`<h2>Members</h2>`;
   if(pending.length){
     html+=`<div class="card" style="border-color:var(--gold)"><h3>Waiting for approval</h3>
-      ${pending.map(m=>`<div class="row" style="padding:4px 0">
+      ${pending.map(m=>{
+        const match=state.members.find(x=>!x.hasAccount&&!x.external&&!x.archived&&x.id!==m.id&&x.name.trim().toLowerCase()===m.name.trim().toLowerCase());
+        return `<div class="row" style="padding:4px 0">
         <span class="grow"><b>${esc(m.name)}</b> <span class="muted small">${esc(m.email)}</span></span>
-        <button class="btn good small" onclick="approveMember('${m.id}',true)">Approve</button>
+        ${match?`<button class="btn good small" onclick="approveMerge('${m.id}','${match.id}')" title="Link this login to the existing roster entry so their booking history carries over">Approve &amp; merge with roster</button>`:''}
+        <button class="btn ${match?'ghost':'good'} small" onclick="approveMember('${m.id}',true)">Approve as new</button>
         <button class="btn danger small" onclick="delMember('${m.id}')">Reject</button>
-      </div>`).join('')}</div>`;
+      </div>`;}).join('')}</div>`;
   }
   html+=`<div class="card sub"><div class="row">
     <input type="text" id="nmName" class="grow" placeholder="Full name" style="min-width:180px">
@@ -758,6 +761,17 @@ async function admGoalAdd(memId){
 }
 function admGoalToggle(id,done,memId){ const g=S.goals.find(g=>g.id===id); if(g)g.done=done; sync(api.updGoal(id,{done})); rebuild();render();keepOpen(memId); }
 function admGoalDel(id,memId){ S.goals=S.goals.filter(g=>g.id!==id); sync(api.delGoal(id)); rebuild();render();keepOpen(memId); }
+async function approveMerge(pendId,rosterId){
+  const pend=S.profiles.find(p=>p.id===pendId); if(!pend)return;
+  try{
+    await api.deleteProfile(pendId);                      // free the unique auth_id first
+    await api.updateProfile(rosterId,{auth_id:pend.auth_id,email:pend.email,approved:true,active:true});
+    S.profiles=S.profiles.filter(p=>p.id!==pendId);
+    const r=S.profiles.find(p=>p.id===rosterId);
+    if(r){ r.auth_id=pend.auth_id; r.email=pend.email; r.approved=true; r.active=true; }
+    rebuild();render();toast('Merged & approved ✓');
+  }catch(e){ toast('Merge failed: '+(e.message||e)); }
+}
 function approveMember(id,ok){
   const p=S.profiles.find(p=>p.id===id); if(p)p.approved=ok;
   sync(api.updateProfile(id,{approved:ok}));
@@ -1561,7 +1575,7 @@ function bindAuth(){
 
 /* ---------- boot ---------- */
 Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
-  addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,setRole,
+  addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});
