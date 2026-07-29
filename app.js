@@ -725,6 +725,12 @@ function memberCard(mem,hist,absCount){
       ${absCount?`<span class="chip bad small">absent ×${absCount}</span>`:''}
     </summary>
     <div class="body">
+      <div class="row" style="margin-bottom:${mem.external?'0':'10px'}">
+        <div><label class="small muted">Name</label><br>
+          <input type="text" value="${esc(mem.name)}" style="max-width:220px" onchange="setMem('${mem.id}','name',this.value)"></div>
+        ${mem.external?`<div><label class="small muted">Home club</label><br>
+          <input type="text" value="${esc(mem.homeClub)}" style="max-width:180px" onchange="setMem('${mem.id}','homeClub',this.value)"></div>`:''}
+      </div>
       ${mem.external?'':`
       <div class="row">
         <div><label class="small muted">Path</label><br>
@@ -796,9 +802,10 @@ async function addMember(){
 }
 function setMem(id,k,v){
   const mem=memberById(id); if(!mem)return;
+  if(k==='name'){ v=String(v).trim(); if(!v){toast('Name cannot be empty');render();return;} }
   mem[k]=v;
   const p=S.profiles.find(p=>p.id===id);
-  const col={path:'path',baseLevel:'base_level',projectsDone:'projects_done'}[k];
+  const col={path:'path',baseLevel:'base_level',projectsDone:'projects_done',name:'name',homeClub:'home_club'}[k];
   if(p&&col)p[col]=v;
   sync(api.updateProfile(id,{[col]:v}));
   if(k!=='path'){render();keepOpen(id);}
