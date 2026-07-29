@@ -219,7 +219,7 @@ function rebuild(){
       awards:(awardsBy[p.id]||[]).map(a=>({id:a.id,level:a.level,path:a.path||'',date:a.date})).sort((a,b)=>a.date<b.date?-1:1),
       goals:(goalsBy[p.id]||[]).map(g=>({id:g.id,text:g.text,done:g.done})),
       archived:!p.active,role:p.role,approved:p.approved,hasAccount:!!p.auth_id,email:p.email||''})),
-    meetings:S.meetings.map(m=>({id:m.id,date:m.date,theme:m.theme||'',cancelled:m.cancelled,reviewed:m.reviewed,assignments:asgBy[m.id]||{}}))
+    meetings:S.meetings.map(m=>({id:m.id,date:m.date,theme:m.theme||'',cancelled:m.cancelled,reviewed:m.reviewed,config:m.config||{},assignments:asgBy[m.id]||{}}))
       .sort((a,b)=>a.date<b.date?-1:1),
     dcp:S.dcp, agendas:S.agendas
   };
@@ -232,6 +232,22 @@ function slotList(){
   for(const r of state.settings.roles)
     for(let i=0;i<(r.count||1);i++)
       out.push({key:r.id+'|'+i,role:r,label:(r.count>1?r.name+' '+(i+1):r.name)});
+  return out;
+}
+/* per-meeting overrides (admin-set): {speakers: N, tt: false} */
+function speakersFor(m){
+  const def=(state.settings.roles.find(r=>r.id==='spk')||{count:3}).count||3;
+  return (m&&m.config&&m.config.speakers!=null)?m.config.speakers:def;
+}
+function ttOn(m){ return !(m&&m.config&&m.config.tt===false); }
+function slotListFor(m){
+  const out=[];
+  for(const r of state.settings.roles){
+    if(m&&!ttOn(m)&&(r.id==='ttm'||r.id==='tte'))continue;
+    let count=r.count||1;
+    if(m&&(r.id==='spk'||r.id==='eval'))count=speakersFor(m);
+    for(let i=0;i<count;i++)out.push({key:r.id+'|'+i,role:r,label:(count>1?r.name+' '+(i+1):r.name)});
+  }
   return out;
 }
 function roleNameById(id){ const r=state.settings.roles.find(r=>r.id===id); return r?r.name:'(removed role)'; }
@@ -379,10 +395,11 @@ function viewBook(){
   <p class="small muted">Tap an open slot to take it. You can release your own bookings any time before the meeting. Slots update live as others book.</p>`;
   if(!up.length)html+=`<div class="empty">No upcoming meetings scheduled yet — check back soon.</div>`;
   for(const m of up){
-    const slots=slotList();
+    const slots=slotListFor(m);
     const mineCount=Object.values(m.assignments||{}).filter(a=>a&&a.memberId===me.profileId).length;
     html+=`<div class="card">
-      <div class="row"><h3 style="margin:0" class="grow">${fmtDate(m.date)} ${m.theme?`<span class="muted small">· ${esc(m.theme)}</span>`:''}</h3>
+      <div class="row"><h3 style="margin:0" class="grow">${fmtDate(m.date)} ${m.theme?`<span class="muted small">· ${esc(m.theme)}</span>`:''}
+        ${ttOn(m)?'':' <span class="chip gold">Speakathon</span>'}</h3>
       ${mineCount?`<span class="chip good">you have ${mineCount} role${mineCount>1?'s':''}</span>`:''}</div>
       <div class="bookgrid">
       ${slots.map(s=>{
@@ -509,17 +526,27 @@ function viewSchedule(){
   return html;
 }
 function meetingBookingCard(m){
-  const slots=slotList();
+  const slots=slotListFor(m);
   const counts={};
   for(const a of Object.values(m.assignments||{}))if(a&&a.memberId)counts[a.memberId]=(counts[a.memberId]||0)+1;
   const dupes=Object.entries(counts).filter(([,c])=>c>1).map(([id])=>memberById(id)?.name).filter(Boolean);
   const filled=Object.values(m.assignments||{}).filter(a=>a&&a.memberId).length;
+  const nSpk=speakersFor(m);
   return `<div class="card">
     <div class="row">
       <div class="grow"><h3 style="margin:0">${fmtDate(m.date)}</h3>
-        <span class="small muted">${filled}/${slots.length} roles filled</span></div>
+        <span class="small muted">${filled}/${slots.length} roles filled${ttOn(m)?'':' · <b>Speakathon (no Table Topics)</b>'}</span></div>
       <input type="text" style="max-width:220px" placeholder="Meeting theme (optional)" value="${esc(m.theme)}" onchange="setTheme('${m.id}',this.value)">
       <button class="btn ghost small" onclick="cancelMeeting('${m.id}')">Cancel meeting</button>
+    </div>
+    <div class="row small" style="margin-top:8px;padding:6px 10px;background:var(--surface2);border:1px solid var(--line);border-radius:8px">
+      <span class="muted">This meeting:</span>
+      <span>🎤 Speakers <button class="btn ghost small" onclick="spkDelta('${m.id}',-1)" ${nSpk<=1?'disabled':''}>−</button>
+        <b>&nbsp;${nSpk}&nbsp;</b><button class="btn ghost small" onclick="spkDelta('${m.id}',1)" ${nSpk>=8?'disabled':''}>＋</button>
+        <span class="muted">(evaluator slots follow)</span></span>
+      <label style="display:flex;gap:6px;align-items:center;margin-left:14px">
+        <input type="checkbox" ${ttOn(m)?'checked':''} onchange="setMeetingTT('${m.id}',this.checked)"> 🗣 Table Topics
+      </label>
     </div>
     <div class="grid-roles">
       ${slots.map(s=>{
@@ -600,6 +627,45 @@ function setActualRole(mid,key,v){
   a.actual_role=v.trim();
   sync(api.setAsg(mid,key,{actual_role:a.actual_role}));
   rebuild();
+}
+async function saveMeetingConfig(m){
+  const row=S.meetings.find(x=>x.id===m.id); if(row)row.config=m.config;
+  sync(api.updateMeeting(m.id,{config:m.config}));
+  rebuild(); render();
+}
+async function unbookSlots(m,keys){
+  for(const key of keys){
+    S.assignments=S.assignments.filter(a=>!(a.meeting_id===m.id&&a.slot_key===key));
+    sync(api.unbook(m.id,key));
+  }
+}
+async function spkDelta(mid,d){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  const cur=speakersFor(m), next=Math.min(8,Math.max(1,cur+d));
+  if(next===cur)return;
+  if(d<0){
+    const dropped=[`spk|${cur-1}`,`eval|${cur-1}`].filter(k=>m.assignments[k]&&m.assignments[k].memberId);
+    if(dropped.length){
+      const names=dropped.map(k=>memberById(m.assignments[k].memberId)?.name).filter(Boolean).join(', ');
+      if(!confirm(`Removing this slot also removes the booking${dropped.length>1?'s':''} of: ${names}. Continue?`))return;
+      await unbookSlots(m,dropped);
+    }
+  }
+  m.config={...(m.config||{}),speakers:next};
+  saveMeetingConfig(m);
+}
+async function setMeetingTT(mid,on){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  if(!on){
+    const booked=Object.keys(m.assignments).filter(k=>/^(ttm|tte)\|/.test(k)&&m.assignments[k].memberId);
+    if(booked.length){
+      const names=booked.map(k=>memberById(m.assignments[k].memberId)?.name).filter(Boolean).join(', ');
+      if(!confirm(`Turning Table Topics off removes the booking${booked.length>1?'s':''} of: ${names}. Continue?`)){ render(); return; }
+      await unbookSlots(m,booked);
+    }
+  }
+  m.config={...(m.config||{}),tt:on};
+  saveMeetingConfig(m);
 }
 function setReviewed(id,v){
   const row=S.meetings.find(x=>x.id===id); if(row)row.reviewed=v;
@@ -994,7 +1060,7 @@ const AgendaApp=(function(){
   function tmName(mem){ const n=mem.name.trim(); return /^(TM|DTM)\b/i.test(n)?n:'TM '+n; }
   function bookedNames(meeting,re){
     const out=[];
-    for(const s of slotList()){
+    for(const s of slotListFor(meeting)){
       if(!re.test(s.role.name.trim()))continue;
       const a=(meeting.assignments||{})[s.key];
       out.push(a&&a.memberId&&memberById(a.memberId)?tmName(memberById(a.memberId)):null);
@@ -1297,6 +1363,9 @@ const AgendaApp=(function(){
   }
   function applyBookings(){
     const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+    /* mirror the meeting's Table Topics setting onto the agenda */
+    g('agTT').checked=ttOn(m); showTT=ttOn(m);
+    g('agChipSpk').style.display=(!showTT&&g('agSp').checked)?'inline-block':'none';
     const map=roleMap(m);
     const spkSlots=Math.max(1,map.spk.length||speakerCount());
     const rows=speechBlock().rows;
@@ -1576,6 +1645,7 @@ function bindAuth(){
 /* ---------- boot ---------- */
 Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
+  spkDelta,setMeetingTT,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});

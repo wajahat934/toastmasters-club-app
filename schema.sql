@@ -30,7 +30,8 @@ create table meetings (
   date date not null unique,
   theme text not null default '',
   cancelled boolean not null default false,
-  reviewed boolean not null default false
+  reviewed boolean not null default false,
+  config jsonb not null default '{}'    -- per-meeting overrides: {"speakers": N, "tt": false}
 );
 
 create table assignments (
