@@ -190,7 +190,7 @@ details.mem .body{padding:12px 16px}
 #agSheet [contenteditable]:hover{outline:1px dashed #8fb3cc}
 #agSheet [contenteditable]:focus{outline:2px solid var(--blue);background:#eef6fc}
 @media print{
-  header.app,#agWrap .agctrl,#toast,.banner.demo{display:none !important}
+  header.app,#agWrap .agctrl,#toast,.banner.demo,.no-print{display:none !important}
   body{background:#fff}
   main.wrap{max-width:none;margin:0;padding:0}
   #agSheet{margin:0;box-shadow:none;min-height:0}

@@ -108,6 +108,12 @@ const SupabaseApi={
     if(error)throw error;
   },
   async insertProfile(fields){ const {data,error}=await sb.from('profiles').insert(fields).select().single(); if(error)throw error; return data; },
+  async reassignData(fromId,intoId){
+    for(const t of ['assignments','awards','goals']){
+      const {error}=await sb.from(t).update({profile_id:intoId}).eq('profile_id',fromId);
+      if(error)throw error;
+    }
+  },
   async updateProfile(id,fields){ const {error}=await sb.from('profiles').update(fields).eq('id',id); if(error)throw error; },
   async deleteProfile(id){ const {error}=await sb.from('profiles').delete().eq('id',id); if(error)throw error; },
   async addAward(fields){ const {data,error}=await sb.from('awards').insert(fields).select().single(); if(error)throw error; return data; },
@@ -185,6 +191,10 @@ const DemoApi=(function(){
     async unbook(mid,key){ const i=assignments.findIndex(a=>a.meeting_id===mid&&a.slot_key===key); if(i>=0)assignments.splice(i,1); },
     async setAsg(mid,key,f){ Object.assign(assignments.find(a=>a.meeting_id===mid&&a.slot_key===key)||{},f); },
     async insertProfile(f){ const row=P(f.name,f); profiles.push(row); return row; },
+    async reassignData(fromId,intoId){
+      for(const arr of [assignments,awards,goals])
+        for(const r of arr)if(r.profile_id===fromId)r.profile_id=intoId;
+    },
     async updateProfile(id,f){ Object.assign(profiles.find(p=>p.id===id)||{},f); },
     async deleteProfile(id){ const i=profiles.findIndex(p=>p.id===id); if(i>=0)profiles.splice(i,1); },
     async addAward(f){ const row={id:uid(),...f}; awards.push(row); return row; },
@@ -777,6 +787,10 @@ function viewMembers(){
         return `<div class="row" style="padding:4px 0">
         <span class="grow"><b>${esc(m.name)}</b> <span class="muted small">${esc(m.email)}</span></span>
         ${match?`<button class="btn good small" onclick="approveMerge('${m.id}','${match.id}')" title="Link this login to the existing roster entry so their booking history carries over">Approve &amp; merge with roster</button>`:''}
+        <select onchange="if(this.value){mergeProfiles('${m.id}',this.value);}" style="width:auto" title="Link this login to a roster entry even if the names differ">
+          <option value="">Merge into roster entry…</option>
+          ${state.members.filter(x=>!x.hasAccount&&!x.archived&&x.id!==m.id).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
+        </select>
         <button class="btn ${match?'ghost':'good'} small" onclick="approveMember('${m.id}',true)">Approve as new</button>
         <button class="btn danger small" onclick="delMember('${m.id}')">Reject</button>
       </div>`;}).join('')}</div>`;
@@ -858,6 +872,10 @@ function memberCard(mem,hist,absCount){
       </div>`}
       <div class="sect"><h3>Roles completed</h3>${roleChips}</div>
       <div class="sect row">
+        ${mem.external?'':`<select onchange="if(this.value){mergeProfiles('${mem.id}',this.value);}" style="width:auto" title="Combine this entry with another — bookings, history and awards merge">
+          <option value="">Merge into…</option>
+          ${state.members.filter(x=>x.id!==mem.id&&!x.external&&!x.archived&&!(x.hasAccount&&mem.hasAccount)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
+        </select>`}
         ${mem.hasAccount?(mem.role==='admin'
           ?`<button class="btn ghost small" onclick="setRole('${mem.id}','member')">Remove admin</button>`
           :`<button class="btn ghost small" onclick="setRole('${mem.id}','admin')">Make admin</button>`):''}
@@ -925,6 +943,27 @@ async function admGoalAdd(memId){
 }
 function admGoalToggle(id,done,memId){ const g=S.goals.find(g=>g.id===id); if(g)g.done=done; sync(api.updGoal(id,{done})); rebuild();render();keepOpen(memId); }
 function admGoalDel(id,memId){ S.goals=S.goals.filter(g=>g.id!==id); sync(api.delGoal(id)); rebuild();render();keepOpen(memId); }
+/* Merge one profile into another: bookings, history, awards and goals move
+   to the surviving entry; the login (if any) carries over; the duplicate goes. */
+async function mergeProfiles(fromId,intoId){
+  const from=S.profiles.find(p=>p.id===fromId), into=S.profiles.find(p=>p.id===intoId);
+  if(!from||!into||fromId===intoId)return;
+  if(from.auth_id&&into.auth_id){ toast('Both entries have logins — merge is for combining a login with a roster entry. Deactivate one instead.'); render(); return; }
+  if(!confirm(`Merge “${from.name}” into “${into.name}”?\nAll bookings, role history, awards and goals combine under “${into.name}”; the “${from.name}” entry disappears.`)){ render(); return; }
+  try{
+    await api.reassignData(fromId,intoId);
+    await api.deleteProfile(fromId);
+    const patch={approved:true,active:true};
+    if(from.auth_id){ patch.auth_id=from.auth_id; patch.email=from.email; }
+    await api.updateProfile(intoId,patch);
+    for(const a of S.assignments)if(a.profile_id===fromId)a.profile_id=intoId;
+    for(const a of S.awards)if(a.profile_id===fromId)a.profile_id=intoId;
+    for(const g2 of S.goals)if(g2.profile_id===fromId)g2.profile_id=intoId;
+    S.profiles=S.profiles.filter(p=>p.id!==fromId);
+    Object.assign(into,patch);
+    rebuild(); render(); toast('Merged ✓');
+  }catch(e){ toast('Merge failed: '+(e.message||e)); }
+}
 async function approveMerge(pendId,rosterId){
   const pend=S.profiles.find(p=>p.id===pendId); if(!pend)return;
   try{
@@ -1758,7 +1797,7 @@ function bindAuth(){
 /* ---------- boot ---------- */
 Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
-  spkDelta,setMeetingTT,setWod,addPastMeeting,pastEditToggle,
+  spkDelta,setMeetingTT,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});
