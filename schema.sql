@@ -31,7 +31,8 @@ create table meetings (
   theme text not null default '',
   cancelled boolean not null default false,
   reviewed boolean not null default false,
-  config jsonb not null default '{}'    -- per-meeting overrides: {"speakers": N, "tt": false}
+  config jsonb not null default '{}',   -- per-meeting overrides: {"speakers": N, "tt": false}
+  wod jsonb not null default '{}'       -- word of the day: {"word": "...", "def": "..."}
 );
 
 create table assignments (
@@ -133,9 +134,44 @@ create policy profiles_update on profiles for update
   with check (is_admin() or auth_id = auth.uid());
 create policy profiles_delete on profiles for delete using (is_admin());
 
--- meetings: read for approved; write admin only
+-- does the current user hold a given slot in a given meeting?
+create or replace function holds_slot(m_id uuid, slot text) returns boolean
+language sql stable security definer set search_path = public as
+$$ select exists(select 1 from assignments a
+                 where a.meeting_id = m_id and a.slot_key = slot
+                   and a.profile_id = my_profile_id()) $$;
+
+-- meetings: read for approved; write admin only, EXCEPT the meeting's
+-- TMOD may set the theme and its Grammarian may set the word of the day
 create policy meetings_read  on meetings for select using (is_approved());
 create policy meetings_write on meetings for all    using (is_admin()) with check (is_admin());
+create policy meetings_role_update on meetings for update
+  using (is_approved() and (holds_slot(id,'tmod|0') or holds_slot(id,'gram|0')))
+  with check (is_approved());
+
+create or replace function guard_meeting_update() returns trigger
+language plpgsql security definer set search_path = public as
+$$
+begin
+  if auth.uid() is not null and not is_admin() then
+    if new.date is distinct from old.date
+    or new.cancelled is distinct from old.cancelled
+    or new.reviewed  is distinct from old.reviewed
+    or new.config::text is distinct from old.config::text then
+      raise exception 'not allowed';
+    end if;
+    if new.theme is distinct from old.theme and not holds_slot(old.id,'tmod|0') then
+      raise exception 'only the TMOD can set the theme';
+    end if;
+    if new.wod::text is distinct from old.wod::text and not holds_slot(old.id,'gram|0') then
+      raise exception 'only the Grammarian can set the word of the day';
+    end if;
+  end if;
+  return new;
+end $$;
+
+create trigger meetings_guard before update on meetings
+for each row execute function guard_meeting_update();
 
 -- assignments: read for approved; members book/release ONLY themselves on future meetings
 create policy asg_read on assignments for select using (is_approved());

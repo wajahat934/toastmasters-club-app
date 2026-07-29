@@ -195,5 +195,9 @@ details.mem .body{padding:12px 16px}
   main.wrap{max-width:none;margin:0;padding:0}
   #agSheet{margin:0;box-shadow:none;min-height:0}
   #agSheet [contenteditable]:hover{outline:none}
+  #agWrap h2{display:none}
+  /* one-page clamp: while printing a fitted agenda, nothing may spill to page 2 */
+  html.agprint,html.agprint body{height:296mm;overflow:hidden;margin:0}
+  html.agprint #appWrap,html.agprint main.wrap,html.agprint #agWrap{height:296mm;overflow:hidden}
   @page{size:A4 portrait;margin:0}
 }

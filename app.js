@@ -219,7 +219,7 @@ function rebuild(){
       awards:(awardsBy[p.id]||[]).map(a=>({id:a.id,level:a.level,path:a.path||'',date:a.date})).sort((a,b)=>a.date<b.date?-1:1),
       goals:(goalsBy[p.id]||[]).map(g=>({id:g.id,text:g.text,done:g.done})),
       archived:!p.active,role:p.role,approved:p.approved,hasAccount:!!p.auth_id,email:p.email||''})),
-    meetings:S.meetings.map(m=>({id:m.id,date:m.date,theme:m.theme||'',cancelled:m.cancelled,reviewed:m.reviewed,config:m.config||{},assignments:asgBy[m.id]||{}}))
+    meetings:S.meetings.map(m=>({id:m.id,date:m.date,theme:m.theme||'',cancelled:m.cancelled,reviewed:m.reviewed,config:m.config||{},wod:m.wod||{},assignments:asgBy[m.id]||{}}))
       .sort((a,b)=>a.date<b.date?-1:1),
     dcp:S.dcp, agendas:S.agendas
   };
@@ -365,14 +365,17 @@ async function ensureMeetings(){
    RENDERING
    ============================================================ */
 let tab='schedule';
+let viewAsMember=false;
 function tabsFor(){
-  return isAdmin
+  return (isAdmin&&!viewAsMember)
     ? [['schedule','Roles & Meetings'],['agenda','Agenda'],['members','Members'],['dcp','DCP Goals'],['settings','Settings']]
     : [['book','Book a Role'],['me','My Profile']];
 }
 function render(){
   document.getElementById('hClub').textContent=state.settings.clubName||'Toastmasters Club';
-  document.getElementById('uName').textContent=(me?me.name:'')+(isAdmin?' (admin)':'');
+  document.getElementById('uName').textContent=(me?me.name:'')+(isAdmin?(viewAsMember?' (member view)':' (admin)'):'');
+  const va=document.getElementById('viewAs');
+  if(va){ va.style.display=isAdmin?'':'none'; va.textContent=viewAsMember?'← Back to admin':'👁 View as member'; }
   const TABS=tabsFor();
   if(!TABS.some(([id])=>id===tab))tab=TABS[0][0];
   document.getElementById('tabs').innerHTML=TABS.map(([id,label])=>
@@ -397,10 +400,22 @@ function viewBook(){
   for(const m of up){
     const slots=slotListFor(m);
     const mineCount=Object.values(m.assignments||{}).filter(a=>a&&a.memberId===me.profileId).length;
+    const isTmod=((m.assignments||{})['tmod|0']||{}).memberId===me.profileId;
+    const isGram=((m.assignments||{})['gram|0']||{}).memberId===me.profileId;
     html+=`<div class="card">
       <div class="row"><h3 style="margin:0" class="grow">${fmtDate(m.date)} ${m.theme?`<span class="muted small">· ${esc(m.theme)}</span>`:''}
-        ${ttOn(m)?'':' <span class="chip gold">Speakathon</span>'}</h3>
+        ${ttOn(m)?'':' <span class="chip gold">Speakathon</span>'}
+        ${(m.wod||{}).word?` <span class="chip">📖 WOD: ${esc(m.wod.word)}</span>`:''}</h3>
       ${mineCount?`<span class="chip good">you have ${mineCount} role${mineCount>1?'s':''}</span>`:''}</div>
+      ${isTmod?`<div class="row small" style="margin-top:6px;padding:6px 10px;background:var(--gold-soft);border-radius:8px">
+        <label><b>🎨 You're the TMOD</b> — set the theme:</label>
+        <input type="text" style="max-width:260px" class="grow" placeholder="Meeting theme" value="${esc(m.theme)}" onchange="setTheme('${m.id}',this.value)">
+      </div>`:''}
+      ${isGram?`<div class="row small" style="margin-top:6px;padding:6px 10px;background:var(--gold-soft);border-radius:8px">
+        <label><b>📖 You're the Grammarian</b> — Word of the Day:</label>
+        <input type="text" style="max-width:130px" placeholder="word" value="${esc((m.wod||{}).word||'')}" onchange="setWod('${m.id}','word',this.value)">
+        <input type="text" style="max-width:340px" class="grow" placeholder="meaning — example sentence" value="${esc((m.wod||{}).def||'')}" onchange="setWod('${m.id}','def',this.value)">
+      </div>`:''}
       <div class="bookgrid">
       ${slots.map(s=>{
         const a=(m.assignments||{})[s.key];
@@ -537,11 +552,16 @@ function viewSchedule(){
   const up=upcomingMeetings();
   let html=`<h2>Next ${up.length} meeting${up.length===1?'':'s'} — book roles</h2>`;
   for(const m of up)html+=meetingBookingCard(m);
-  const needReview=pastMeetings().filter(m=>!m.reviewed&&Object.values(m.assignments||{}).some(a=>a&&a.memberId));
+  const needReview=pastMeetings().filter(m=>!m.reviewed);
   html+=`<h2>Past meetings — confirm what happened</h2>
-  <p class="small muted">Booked roles count as <b>completed automatically</b> once the meeting date passes. Only step in when someone was absent or did a different role, then mark the meeting reviewed.</p>`;
+  <div class="row small" style="margin-bottom:8px">
+    <span class="muted">Backfill history:</span>
+    <input type="date" id="pastDate" style="width:auto" max="${todayStr()}">
+    <button class="btn ghost small" onclick="addPastMeeting()">＋ Add past meeting</button>
+  </div>
+  <p class="small muted">Booked roles count as <b>completed automatically</b> once the meeting date passes. Use “Edit / add role players” to fill or correct any past meeting, mark absences, then mark it reviewed.</p>`;
   if(!needReview.length)html+=`<div class="empty">Nothing waiting for review.</div>`;
-  for(const m of needReview.slice(0,6))html+=meetingReviewCard(m);
+  for(const m of needReview.slice(0,12))html+=meetingReviewCard(m);
   const reviewed=pastMeetings().filter(m=>m.reviewed);
   if(reviewed.length){
     html+=`<details class="card sub"><summary class="small" style="cursor:pointer">Reviewed meetings (${reviewed.length})</summary>`;
@@ -572,6 +592,12 @@ function meetingBookingCard(m){
       <label style="display:flex;gap:6px;align-items:center;margin-left:14px">
         <input type="checkbox" ${ttOn(m)?'checked':''} onchange="setMeetingTT('${m.id}',this.checked)"> 🗣 Table Topics
       </label>
+    </div>
+    <div class="row small" style="margin-top:6px">
+      <label class="muted">📖 Word of the Day</label>
+      <input type="text" style="max-width:140px" placeholder="word" value="${esc((m.wod||{}).word||'')}" onchange="setWod('${m.id}','word',this.value)">
+      <input type="text" style="max-width:360px" class="grow" placeholder="meaning — example sentence" value="${esc((m.wod||{}).def||'')}" onchange="setWod('${m.id}','def',this.value)">
+      <span class="muted">(the meeting's Grammarian can also set this; TMOD can set the theme)</span>
     </div>
     <div class="grid-roles">
       ${slots.map(s=>{
@@ -606,6 +632,24 @@ function meetingReviewCard(m,compact){
         </td></tr>`;
     }).join('')}
     </tbody></table></div>
+    <details ${pastEditOpen.has(m.id)?'open':''} ontoggle="pastEditToggle('${m.id}',this.open)" style="margin-top:8px">
+      <summary class="small" style="cursor:pointer;color:var(--accent)">✎ Edit / add role players</summary>
+      <div class="row small" style="margin-top:8px">
+        <input type="text" style="max-width:220px" placeholder="Meeting theme" value="${esc(m.theme)}" onchange="setTheme('${m.id}',this.value)">
+        <span>🎤 Speakers <button class="btn ghost small" onclick="spkDelta('${m.id}',-1)" ${speakersFor(m)<=1?'disabled':''}>−</button>
+          <b>&nbsp;${speakersFor(m)}&nbsp;</b><button class="btn ghost small" onclick="spkDelta('${m.id}',1)" ${speakersFor(m)>=8?'disabled':''}>＋</button></span>
+        <label style="display:flex;gap:6px;align-items:center">
+          <input type="checkbox" ${ttOn(m)?'checked':''} onchange="setMeetingTT('${m.id}',this.checked)"> 🗣 Table Topics
+        </label>
+      </div>
+      <div class="grid-roles">
+        ${slotListFor(m).map(s=>{
+          const a=(m.assignments||{})[s.key];
+          return `<div class="slot"><label>${esc(s.label)}</label>
+            <select onchange="assign('${m.id}','${s.key}',this)">${memberOptions(a&&a.memberId)}</select></div>`;
+        }).join('')}
+      </div>
+    </details>
   </div>`;
 }
 function setTheme(id,v){
@@ -614,6 +658,26 @@ function setTheme(id,v){
   const row=S.meetings.find(x=>x.id===id); if(row)row.theme=m.theme;
   sync(api.updateMeeting(id,{theme:m.theme}));
 }
+function setWod(id,k,v){
+  const m=state.meetings.find(x=>x.id===id); if(!m)return;
+  m.wod={...(m.wod||{}),[k]:v.trim()};
+  const row=S.meetings.find(x=>x.id===id); if(row)row.wod=m.wod;
+  sync(api.updateMeeting(id,{wod:m.wod}));
+}
+async function addPastMeeting(){
+  const inp=document.getElementById('pastDate');
+  const d=inp&&inp.value;
+  if(!d){toast('Pick a date first');return;}
+  if(d>=todayStr()){toast('Future dates appear automatically in the booking list');return;}
+  if(state.meetings.some(m=>m.date===d)){toast('A meeting on that date already exists');return;}
+  try{
+    const row=await api.insertMeeting({date:d});
+    S.meetings.push(row); rebuild(); render();
+    toast('Past meeting added — open “Edit / add role players” below to fill it');
+  }catch(e){ toast('Could not add: '+(e.message||e)); }
+}
+const pastEditOpen=new Set();
+function pastEditToggle(id,open){ if(open)pastEditOpen.add(id); else pastEditOpen.delete(id); }
 async function cancelMeeting(id){
   const m=state.meetings.find(x=>x.id===id); if(!m)return;
   if(Object.values(m.assignments||{}).some(a=>a&&a.memberId)&&!confirm('This meeting has bookings. Cancel it anyway?'))return;
@@ -1174,8 +1238,8 @@ const AgendaApp=(function(){
         </div>
         <div class="wod">
           <div class="kicker">Word of the Day</div>
-          <div class="big" contenteditable="true">“____”</div>
-          <div class="def" contenteditable="true">Definition — “example sentence.”</div>
+          <div class="big" id="agWodWord" contenteditable="true">“____”</div>
+          <div class="def" id="agWodDef" contenteditable="true">Definition — “example sentence.”</div>
         </div>
       </div>
       <table>
@@ -1417,6 +1481,8 @@ const AgendaApp=(function(){
     }
     document.querySelectorAll('#agSheet [data-sup]').forEach(el=>{ const v=map[el.dataset.sup]; if(v)el.innerText=v; });
     if(m.theme)g('agTheme').innerText=m.theme;
+    if(m.wod&&m.wod.word)g('agWodWord').innerText='“'+m.wod.word.replace(/^[\s"“”']+|[\s"“”']+$/g,'')+'”';
+    if(m.wod&&m.wod.def)g('agWodDef').innerText=m.wod.def;
     const nm=nextMeetingAfter(m.date);
     if(nm){
       const fmap=roleMap(nm);
@@ -1484,20 +1550,25 @@ const AgendaApp=(function(){
     if(v){ const [y,m,d]=v.split('-').map(Number); datePart=`${String(d).padStart(2,'0')}${MONTHS[m-1]}${y}`; }
     document.title=`RTC_Agenda_meeting no. ${g('agNo').value}_${datePart}`;
     if(!pxPerMm)measurePxPerMm();
-    sheet.style.zoom='';
+    sheet.style.transform='';
     let z=1;
     for(let i=0;i<8;i++){
       sheet.style.width=(PAGE_W/z)+'mm';
-      const hMm=sheet.offsetHeight/pxPerMm;
+      const hMm=sheet.offsetHeight/pxPerMm;   /* offsetHeight ignores transform — true layout height */
       const rendered=z*hMm;
       if(rendered<=PAGE_H)break;
       z=z*PAGE_H/rendered*0.99;
     }
-    sheet.style.zoom=z;
+    /* transform:scale prints deterministically (CSS zoom fragments unreliably
+       when the sheet is nested); the .agprint clamp caps output at one page */
+    sheet.style.transformOrigin='top left';
+    sheet.style.transform=`scale(${z})`;
+    document.documentElement.classList.add('agprint');
   }
   function unfit(){
     const sheet=g('agSheet'); if(!sheet)return;
-    sheet.style.zoom=''; sheet.style.width='';
+    sheet.style.transform=''; sheet.style.transformOrigin=''; sheet.style.width='';
+    document.documentElement.classList.remove('agprint');
     if(savedTitle)document.title=savedTitle;
   }
   window.addEventListener('beforeprint',fitToPage);
@@ -1672,6 +1743,11 @@ function bindAuth(){
   document.getElementById('pendingRefresh').addEventListener('click',route);
   document.getElementById('pendingOut').addEventListener('click',async()=>{ await api.signOut(); route(); });
   document.getElementById('signOut').addEventListener('click',async()=>{ await api.signOut(); entered=false; route(); });
+  document.getElementById('viewAs').addEventListener('click',()=>{
+    viewAsMember=!viewAsMember;
+    tab=viewAsMember?'book':'schedule';
+    render();
+  });
   if(DEMO){
     document.getElementById('demoBanner').style.display='';
     document.getElementById('demoAdmin').addEventListener('click',()=>DemoApi.demoEnter('admin'));
@@ -1682,7 +1758,7 @@ function bindAuth(){
 /* ---------- boot ---------- */
 Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
-  spkDelta,setMeetingTT,
+  spkDelta,setMeetingTT,setWod,addPastMeeting,pastEditToggle,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});
