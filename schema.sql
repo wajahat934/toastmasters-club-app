@@ -85,11 +85,13 @@ $$ select id from profiles
    where auth_id = auth.uid() and approved and active limit 1 $$;
 
 -- Members may edit their own row, but never the privileged columns.
+-- Applies only to signed-in non-admins; direct SQL in the dashboard
+-- (no auth context, auth.uid() is null) is always allowed.
 create or replace function guard_profile_update() returns trigger
 language plpgsql security definer set search_path = public as
 $$
 begin
-  if not is_admin() then
+  if auth.uid() is not null and not is_admin() then
     if new.role      is distinct from old.role
     or new.approved  is distinct from old.approved
     or new.active    is distinct from old.active
