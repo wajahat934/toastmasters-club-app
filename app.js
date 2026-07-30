@@ -53,14 +53,15 @@ const SupabaseApi={
     sb.auth.onAuthStateChange((_e,_s)=>{ route(); });
   },
   async session(){ return (await sb.auth.getSession()).data.session; },
-  async signUp(email,pass,name){
+  async signUp(email,pass,name,birthday){
     const {data,error}=await sb.auth.signUp({email,password:pass});
     if(error)throw error;
     if(data.session){
-      const {error:e2}=await sb.from('profiles').insert({auth_id:data.session.user.id,email,name});
+      const {error:e2}=await sb.from('profiles').insert({auth_id:data.session.user.id,email,name,birthday:birthday||null});
       if(e2&&e2.code!=='23505')throw e2;
     } else {
       localStorage.setItem('pendingName',name);
+      if(birthday)localStorage.setItem('pendingBday',birthday);
       throw {message:'Check your email to confirm the account, then sign in.'};
     }
   },
@@ -75,20 +76,23 @@ const SupabaseApi={
     if(error)throw error;
     if(!data){
       const name=localStorage.getItem('pendingName')||prompt('Your full name (for agendas):')||s.user.email;
-      const {data:row,error:e2}=await sb.from('profiles').insert({auth_id:s.user.id,email:s.user.email,name}).select().single();
+      const birthday=localStorage.getItem('pendingBday')||null;
+      const {data:row,error:e2}=await sb.from('profiles').insert({auth_id:s.user.id,email:s.user.email,name,birthday}).select().single();
       if(e2)throw e2;
-      localStorage.removeItem('pendingName');
+      localStorage.removeItem('pendingName'); localStorage.removeItem('pendingBday');
       return row;
     }
     return data;
   },
   async loadAll(){
     const q=async(t,optional)=>{ const {data,error}=await sb.from(t).select('*'); if(error){ if(optional)return []; throw error; } return data; };
-    const [settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes]=await Promise.all(
+    const [settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes,announcements]=await Promise.all(
       [...['settings','profiles','meetings','assignments','awards','goals','dcp','agendas'].map(t=>q(t)),
-       q('polls',true),q('votes',true)]);
-    return {settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes};
+       q('polls',true),q('votes',true),q('announcements',true)]);
+    return {settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes,announcements};
   },
+  async addAnnouncement(text){ const {data,error}=await sb.from('announcements').insert({text}).select().single(); if(error)throw error; return data; },
+  async delAnnouncement(id){ const {error}=await sb.from('announcements').delete().eq('id',id); if(error)throw error; },
   async createPoll(f){ const {data,error}=await sb.from('polls').insert(f).select().single(); if(error)throw error; return data; },
   async updatePoll(id,f){ const {error}=await sb.from('polls').update(f).eq('id',id); if(error)throw error; },
   async deletePoll(id){ const {error}=await sb.from('polls').delete().eq('id',id); if(error)throw error; },
@@ -137,6 +141,7 @@ const SupabaseApi={
       .on('postgres_changes',{event:'*',schema:'public',table:'meetings'},p=>onChange('meetings',p))
       .on('postgres_changes',{event:'*',schema:'public',table:'polls'},p=>onChange('polls',p))
       .on('postgres_changes',{event:'*',schema:'public',table:'votes'},p=>onChange('votes',p))
+      .on('postgres_changes',{event:'*',schema:'public',table:'announcements'},p=>onChange('announcements',p))
       .subscribe();
   }
 };
@@ -144,12 +149,13 @@ const SupabaseApi={
 /* ---------- demo backend: in-memory sample data ---------- */
 const DemoApi=(function(){
   let auth=null;
-  const P=(n,extra)=>({id:uid(),auth_id:null,email:'',name:n,home_club:null,role:'member',approved:true,active:true,path:'',base_level:0,projects_done:0,...extra});
+  const P=(n,extra)=>({id:uid(),auth_id:null,email:'',name:n,home_club:null,role:'member',approved:true,active:true,path:'',birthday:null,base_level:0,projects_done:0,...extra});
+  const mdOf=n=>{const d=new Date();d.setDate(d.getDate()+n);return dstr(d).slice(5);};
   const profiles=[
     P('Demo Admin (you)',{auth_id:'demo-admin',role:'admin',email:'admin@demo',path:'Presentation Mastery',base_level:2,projects_done:1}),
-    P('Demo Member (you)',{auth_id:'demo-member',email:'member@demo',path:'Dynamic Leadership',base_level:0,projects_done:3}),
+    P('Demo Member (you)',{auth_id:'demo-member',email:'member@demo',path:'Dynamic Leadership',base_level:0,projects_done:3,birthday:mdOf(0)}),
     P('Ayesha',{path:'Engaging Humor',base_level:1,projects_done:2}),
-    P('Bilal',{path:'Innovative Planning',base_level:1}),
+    P('Bilal',{path:'Innovative Planning',base_level:1,birthday:mdOf(2)}),
     P('Danish',{path:'Presentation Mastery',base_level:3,projects_done:1}),
     P('Fatima',{path:'Team Collaboration'}),
     P('Hassan',{path:'Motivational Strategies',base_level:2}),
@@ -177,6 +183,7 @@ const DemoApi=(function(){
     candidates:[{key:profiles[1].id,name:profiles[1].name,profileId:profiles[1].id},{key:profiles[2].id,name:'Ayesha',profileId:profiles[2].id}],
     adjust:{},winner_key:profiles[1].id}];
   const votes=[];
+  const announcements=[{id:'annDemo',text:'Our own TM Danish has been appointed Area Director — congratulations! 🎊',created_at:new Date().toISOString()}];
   const dcpRows=[],agendaRows=[];
   let settingsRows=[{id:1,data:defaultSettings()}];
   const T={profiles,meetings,assignments,awards,goals};
@@ -191,7 +198,9 @@ const DemoApi=(function(){
     async myProfile(){ return profiles.find(p=>p.auth_id===auth)||null; },
     /* return array COPIES — the app pushes new rows locally after api calls,
        and returning live references would double them up */
-    async loadAll(){ return {settingsRows:[...settingsRows],profiles:[...profiles],meetings:[...meetings],assignments:[...assignments],awards:[...awards],goals:[...goals],dcpRows:[...dcpRows],agendaRows:[...agendaRows],polls:[...polls],votes:[...votes]}; },
+    async loadAll(){ return {settingsRows:[...settingsRows],profiles:[...profiles],meetings:[...meetings],assignments:[...assignments],awards:[...awards],goals:[...goals],dcpRows:[...dcpRows],agendaRows:[...agendaRows],polls:[...polls],votes:[...votes],announcements:[...announcements]}; },
+    async addAnnouncement(text){ const row={id:uid(),text,created_at:new Date().toISOString()}; announcements.push(row); return row; },
+    async delAnnouncement(id){ const i=announcements.findIndex(a=>a.id===id); if(i>=0)announcements.splice(i,1); },
     async createPoll(f){ const row={id:uid(),status:'open',candidates:[],adjust:{},winner_key:null,...f}; polls.push(row); return row; },
     async updatePoll(id,f){ Object.assign(polls.find(p=>p.id===id)||{},f); },
     async deletePoll(id){ const i=polls.findIndex(p=>p.id===id); if(i>=0)polls.splice(i,1); },
@@ -236,7 +245,7 @@ const DemoApi=(function(){
    COMPAT STATE — same shape the single-user tracker used, so all
    read/render logic carries over. Mutations patch it AND call api.
    ============================================================ */
-let S={profiles:[],meetings:[],assignments:[],awards:[],goals:[],polls:[],votes:[],settings:defaultSettings(),dcp:{},agendas:{}};
+let S={profiles:[],meetings:[],assignments:[],awards:[],goals:[],polls:[],votes:[],announcements:[],settings:defaultSettings(),dcp:{},agendas:{}};
 let state=null, me=null, isAdmin=false;
 
 function rebuild(){
@@ -251,7 +260,7 @@ function rebuild(){
     members:S.profiles.map(p=>({id:p.id,name:p.name,external:!!p.home_club,homeClub:p.home_club||'',path:p.path||'',baseLevel:p.base_level||0,projectsDone:p.projects_done||0,
       awards:(awardsBy[p.id]||[]).map(a=>({id:a.id,level:a.level,path:a.path||'',date:a.date})).sort((a,b)=>a.date<b.date?-1:1),
       goals:(goalsBy[p.id]||[]).map(g=>({id:g.id,text:g.text,done:g.done})),
-      archived:!p.active,role:p.role,approved:p.approved,hasAccount:!!p.auth_id,email:p.email||''}))
+      archived:!p.active,role:p.role,approved:p.approved,hasAccount:!!p.auth_id,email:p.email||'',birthday:p.birthday||''}))
       .sort((a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:'base'})),
     meetings:S.meetings.map(m=>({id:m.id,date:m.date,theme:m.theme||'',cancelled:m.cancelled,reviewed:m.reviewed,config:m.config||{},wod:m.wod||{},assignments:asgBy[m.id]||{}}))
       .sort((a,b)=>a.date<b.date?-1:1),
@@ -420,16 +429,81 @@ function render(){
   document.getElementById('tabs').innerHTML=TABS.map(([id,label])=>
     `<button class="${tab===id?'on':''}" onclick="setTab('${id}')">${label}</button>`).join('');
   const main=document.getElementById('main');
-  if(tab==='schedule')main.innerHTML=winnersBoardHtml()+viewSchedule();
+  if(tab==='schedule')main.innerHTML=noticesHtml()+winnersBoardHtml()+annManagerHtml()+viewSchedule();
   else if(tab==='agenda'){ AgendaApp.mount(main); return; }
   else if(tab==='voting')main.innerHTML=viewVoting();
   else if(tab==='members')main.innerHTML=viewMembers();
   else if(tab==='dcp')main.innerHTML=viewDCP();
   else if(tab==='settings')main.innerHTML=viewSettings();
-  else if(tab==='book')main.innerHTML=congratsHtml()+openVoteCardsHtml()+winnersBoardHtml()+viewBook();
-  else if(tab==='me')main.innerHTML=congratsHtml()+viewMe();
+  else if(tab==='book')main.innerHTML=congratsHtml()+noticesHtml()+openVoteCardsHtml()+winnersBoardHtml()+viewBook();
+  else if(tab==='me')main.innerHTML=congratsHtml()+noticesHtml()+viewMe();
 }
 function setTab(t){ tab=t; render(); window.scrollTo(0,0); }
+
+/* ================= NOTICES: birthdays + announcements ================= */
+function noticesHtml(){
+  let html='';
+  /* announcements — admin-posted, shown to everyone until removed */
+  for(const a of [...S.announcements].sort((x,y)=>x.created_at<y.created_at?1:-1))
+    html+=`<div class="banner" style="background:var(--gold-soft);border-color:var(--gold)">
+      <strong>📣</strong> ${esc(a.text)}
+      ${isAdmin&&!viewAsMember?` <button class="btn ghost small" style="float:right" onclick="annDel('${a.id}')">✕ remove</button>`:''}
+    </div>`;
+  /* birthdays today */
+  const todayMD=todayStr().slice(5);
+  const bd=state.members.filter(x=>!x.archived&&x.birthday);
+  for(const x of bd.filter(x=>x.birthday===todayMD)){
+    if(x.id===me.profileId)
+      html+=`<div class="banner" style="background:var(--gold-soft);border-color:var(--gold)"><strong>🎂 Happy Birthday, ${esc(x.name)}!</strong> The whole club wishes you a fantastic year ahead. 🥳</div>`;
+    else
+      html+=`<div class="banner"><strong>🎂 It's ${esc(x.name)}'s birthday today!</strong> Send them your wishes. 🥳</div>`;
+  }
+  /* admin cake reminder: birthdays falling since the last meeting up to the
+     next one, shown from 4 days before that meeting through meeting day */
+  if(isAdmin&&!viewAsMember){
+    const t=todayStr();
+    const nm=state.meetings.filter(m=>!m.cancelled&&m.date>=t).sort((a,b)=>a.date<b.date?-1:1)[0];
+    if(nm){
+      const prev=state.meetings.filter(m=>!m.cancelled&&m.date<nm.date).sort((a,b)=>a.date<b.date?1:-1)[0];
+      const start=prev?parseD(prev.date):(()=>{const d=parseD(nm.date);d.setDate(d.getDate()-7);return d;})();
+      const end=parseD(nm.date);
+      const inWindow=md=>{
+        for(const y of [start.getFullYear(),end.getFullYear()]){
+          const d=parseD(y+'-'+md);
+          if(d>start&&d<=end)return true;
+        }
+        return false;
+      };
+      const celebrate=bd.filter(x=>inWindow(x.birthday));
+      const daysToMeeting=(end-parseD(t))/86400000;
+      if(celebrate.length&&daysToMeeting<=4)
+        html+=`<div class="banner" style="border-color:var(--maroon)"><strong>🍰 Cake alert for ${fmtDate(nm.date)}:</strong>
+          ${celebrate.map(x=>`<b>${esc(x.name)}</b> (${MD_MONTHS[Number(x.birthday.slice(0,2))-1]} ${Number(x.birthday.slice(3))})`).join(', ')}
+          — birthday${celebrate.length>1?'s':''} to celebrate at the meeting. Arrange the cake! 🎂</div>`;
+    }
+  }
+  return html;
+}
+function annManagerHtml(){
+  return `<div class="card sub no-print">
+    <div class="row">
+      <input type="text" id="annText" class="grow" placeholder="📣 Post an announcement to all members (e.g. TM Ali became Area Director! 🎊)" style="min-width:260px">
+      <button class="btn small" onclick="annAdd()">Post</button>
+    </div>
+    <p class="small muted" style="margin:6px 0 0">Announcements banner at the top of every member's app until you remove them (✕ on the banner).</p>
+  </div>`;
+}
+async function annAdd(){
+  const inp=document.getElementById('annText'); const text=inp.value.trim();
+  if(!text){toast('Write the announcement first');return;}
+  try{ const row=await api.addAnnouncement(text); S.announcements.push(row); render(); toast('Posted 📣'); }
+  catch(e){ toast('Could not post: '+(e.message||e)); }
+}
+function annDel(id){
+  S.announcements=S.announcements.filter(a=>a.id!==id);
+  sync(api.delAnnouncement(id));
+  render();
+}
 
 /* ================= VOTING (Vote Counter tool + winners) ================= */
 function isVCFor(m){ return ((m.assignments||{})['vc|0']||{}).memberId===me.profileId; }
@@ -765,6 +839,8 @@ function viewMe(){
         </select></div>
       <div><label class="small muted">Projects done in Level ${Math.min(currentLevel(mem)+1,5)}</label><br>
         <input type="number" min="0" max="9" value="${mem.projectsDone||0}" onchange="meSet('projectsDone',Number(this.value))"></div>
+      <div><label class="small muted">🎂 Birthday (optional — the club will wish you)</label><br>
+        ${bdaySelects(mem.id,mem.birthday)}</div>
     </div>
     <div class="sect"><h3>Level completions</h3>
       ${(mem.awards||[]).map(a=>`<span class="chip gold">Level ${esc(a.level)} · ${fmtDate(a.date)}</span>`).join('')||'<span class="muted small">none recorded yet — completions are recorded by the officers</span>'}
@@ -789,9 +865,25 @@ function viewMe(){
 function meSet(k,v){
   const mem=memberById(me.profileId); mem[k]=v;
   const p=S.profiles.find(p=>p.id===me.profileId);
-  if(k==='path')p.path=v; if(k==='projectsDone')p.projects_done=v;
-  sync(api.updateProfile(me.profileId,k==='path'?{path:v}:{projects_done:v}));
+  const col={path:'path',projectsDone:'projects_done',birthday:'birthday'}[k];
+  if(p&&col)p[col]=v;
+  sync(api.updateProfile(me.profileId,{[col]:v}));
   render();
+}
+/* birthday month/day selects, shared by My Profile and admin member cards */
+const MD_MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function bdaySelects(pid,val){
+  const [mm,dd]=(val||'').split('-');
+  return `<select id="bm-${pid}" style="width:auto" onchange="bdaySet('${pid}')"><option value="">— month —</option>
+      ${MD_MONTHS.map((n,i)=>{const v=String(i+1).padStart(2,'0');return `<option value="${v}" ${mm===v?'selected':''}>${n}</option>`;}).join('')}</select>
+    <select id="bd-${pid}" style="width:auto" onchange="bdaySet('${pid}')"><option value="">— day —</option>
+      ${Array.from({length:31},(_,i)=>{const v=String(i+1).padStart(2,'0');return `<option value="${v}" ${dd===v?'selected':''}>${i+1}</option>`;}).join('')}</select>`;
+}
+function bdaySet(pid){
+  const m=document.getElementById('bm-'+pid).value,d=document.getElementById('bd-'+pid).value;
+  const v=(m&&d)?m+'-'+d:null;
+  if(pid===me.profileId)meSet('birthday',v);
+  else setMem(pid,'birthday',v);
 }
 async function meGoalAdd(){
   const inp=document.getElementById('meGoal'); const text=inp.value.trim(); if(!text)return;
@@ -1131,7 +1223,8 @@ function memberCard(mem,hist,absCount){
         <div><label class="small muted">Name</label><br>
           <input type="text" value="${esc(mem.name)}" style="max-width:220px" onchange="setMem('${mem.id}','name',this.value)"></div>
         ${mem.external?`<div><label class="small muted">Home club</label><br>
-          <input type="text" value="${esc(mem.homeClub)}" style="max-width:180px" onchange="setMem('${mem.id}','homeClub',this.value)"></div>`:''}
+          <input type="text" value="${esc(mem.homeClub)}" style="max-width:180px" onchange="setMem('${mem.id}','homeClub',this.value)"></div>`
+        :`<div><label class="small muted">🎂 Birthday</label><br>${bdaySelects(mem.id,mem.birthday)}</div>`}
       </div>
       ${mem.external?'':`
       <div class="row">
@@ -1211,7 +1304,7 @@ function setMem(id,k,v){
   if(k==='name'){ v=String(v).trim(); if(!v){toast('Name cannot be empty');render();return;} }
   mem[k]=v;
   const p=S.profiles.find(p=>p.id===id);
-  const col={path:'path',baseLevel:'base_level',projectsDone:'projects_done',name:'name',homeClub:'home_club'}[k];
+  const col={path:'path',baseLevel:'base_level',projectsDone:'projects_done',name:'name',homeClub:'home_club',birthday:'birthday'}[k];
   if(p&&col)p[col]=v;
   sync(api.updateProfile(id,{[col]:v}));
   if(k!=='path'){render();keepOpen(id);}
@@ -2012,7 +2105,7 @@ async function reload(){
   const raw=await api.loadAll();
   S.profiles=raw.profiles; S.meetings=raw.meetings; S.assignments=raw.assignments;
   S.awards=raw.awards; S.goals=raw.goals;
-  S.polls=raw.polls||[]; S.votes=raw.votes||[];
+  S.polls=raw.polls||[]; S.votes=raw.votes||[]; S.announcements=raw.announcements||[];
   S._hadSettings=!!(raw.settingsRows[0]&&raw.settingsRows[0].data&&raw.settingsRows[0].data.roles);
   S.settings=S._hadSettings?raw.settingsRows[0].data:defaultSettings();
   S.dcp={}; for(const r of raw.dcpRows)S.dcp[r.year]=r.data;
@@ -2061,6 +2154,10 @@ let authMode='signin';
 function bindAuth(){
   const form=document.getElementById('authForm');
   const errEl=document.getElementById('authErr');
+  document.getElementById('authBm').innerHTML='<option value="">— month —</option>'+
+    MD_MONTHS.map((n,i)=>`<option value="${String(i+1).padStart(2,'0')}">${n}</option>`).join('');
+  document.getElementById('authBd').innerHTML='<option value="">— day —</option>'+
+    Array.from({length:31},(_,i)=>`<option value="${String(i+1).padStart(2,'0')}">${i+1}</option>`).join('');
   document.getElementById('authToggle').addEventListener('click',()=>{
     authMode=authMode==='signin'?'signup':'signin';
     document.getElementById('nameRow').style.display=authMode==='signup'?'':'none';
@@ -2077,7 +2174,8 @@ function bindAuth(){
       if(authMode==='signup'){
         const name=document.getElementById('authName').value.trim();
         if(!name){errEl.textContent='Please enter your name.';return;}
-        await api.signUp(email,pass,name);
+        const bm=document.getElementById('authBm').value,bd=document.getElementById('authBd').value;
+        await api.signUp(email,pass,name,(bm&&bd)?bm+'-'+bd:null);
       } else await api.signIn(email,pass);
       await route();
     }catch(err){ errEl.textContent=err.message||String(err); }
@@ -2102,6 +2200,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   spkDelta,setMeetingTT,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   vcPick,startPoll,addCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
+  bdaySet,annAdd,annDel,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});

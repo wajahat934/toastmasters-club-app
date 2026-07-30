@@ -20,6 +20,7 @@ create table profiles (
   approved boolean not null default false,
   active boolean not null default true,
   path text not null default '',
+  birthday text,                           -- optional 'MM-DD' (no year), for club wishes
   base_level int not null default 0,
   projects_done int not null default 0,
   created_at timestamptz not null default now()
@@ -202,6 +203,17 @@ create policy goals_admin on goals for all using (is_admin()) with check (is_adm
 create policy dcp_admin     on dcp     for all using (is_admin()) with check (is_admin());
 create policy agendas_admin on agendas for all using (is_admin()) with check (is_admin());
 
+-- ---------- announcements (admin messages shown to everyone) ----------
+
+create table announcements (
+  id uuid primary key default gen_random_uuid(),
+  text text not null,
+  created_at timestamptz not null default now()
+);
+alter table announcements enable row level security;
+create policy ann_read  on announcements for select using (is_approved());
+create policy ann_admin on announcements for all using (is_admin()) with check (is_admin());
+
 -- ---------- voting (Vote Counter tool) ----------
 
 create table polls (
@@ -252,6 +264,7 @@ alter publication supabase_realtime add table assignments;
 alter publication supabase_realtime add table meetings;
 alter publication supabase_realtime add table polls;
 alter publication supabase_realtime add table votes;
+alter publication supabase_realtime add table announcements;
 
 -- ============================================================
 -- AFTER you sign up in the app for the first time, make yourself
