@@ -620,6 +620,34 @@ async function castMyVote(pollId,key){
     render(); toast('Vote recorded ✓');
   }catch(e){ toast('Could not vote: '+(e.message||e)); }
 }
+/* Record a winner directly on a (past) meeting — stored as a closed poll so
+   the winners board, congratulations and records all use one mechanism. */
+async function setWinner(mid,cat,sel){
+  const v=sel.value;
+  const existing=pollsFor(mid).find(p=>p.category===cat);
+  let key=v,name=null,profileId=null;
+  if(v==='__custom'){
+    const n=prompt('Winner name:'); if(!n){render();return;}
+    key='c'+uid(); name=n.trim();
+  }else if(v){
+    const mem=memberById(v); if(!mem)return;
+    name=mem.name; profileId=v;
+  }
+  try{
+    if(!v){
+      if(existing){ S.polls=S.polls.filter(p=>p!==existing); sync(api.deletePoll(existing.id)); }
+    }else if(existing){
+      const cands=[...(existing.candidates||[])];
+      if(!cands.some(c=>c.key===key))cands.push({key,name,profileId});
+      existing.candidates=cands; existing.status='closed'; existing.winner_key=key;
+      sync(api.updatePoll(existing.id,{candidates:cands,status:'closed',winner_key:key}));
+    }else{
+      const row=await api.createPoll({meeting_id:mid,category:cat,status:'closed',candidates:[{key,name,profileId}],adjust:{},winner_key:key});
+      S.polls.push(row);
+    }
+    render();
+  }catch(e){ toast('Could not save winner: '+(e.message||e)); }
+}
 function openVoteCardsHtml(){
   let html='';
   for(const p of S.polls.filter(p=>p.status==='open')){
@@ -818,7 +846,11 @@ function viewSchedule(){
 function meetingBookingCard(m){
   const slots=slotListFor(m);
   const counts={};
-  for(const a of Object.values(m.assignments||{}))if(a&&a.memberId)counts[a.memberId]=(counts[a.memberId]||0)+1;
+  for(const [key,a] of Object.entries(m.assignments||{})){
+    if(!a||!a.memberId)continue;
+    if(UNTRACKED_ROLES.includes(key.split('|')[0]))continue;  /* SAA/PO alongside another role is normal */
+    counts[a.memberId]=(counts[a.memberId]||0)+1;
+  }
   const dupes=Object.entries(counts).filter(([,c])=>c>1).map(([id])=>memberById(id)?.name).filter(Boolean);
   const filled=Object.values(m.assignments||{}).filter(a=>a&&a.memberId).length;
   const nSpk=speakersFor(m);
@@ -877,6 +909,20 @@ function meetingReviewCard(m,compact){
         </td></tr>`;
     }).join('')}
     </tbody></table></div>
+    <div class="row small" style="margin-top:8px;padding:6px 10px;background:var(--gold-soft);border-radius:8px">
+      <span><b>🏆 Winners</b></span>
+      ${STANDARD_CATS.map(cat=>{
+        const p=pollsFor(m.id).find(p=>p.category===cat);
+        const cur=p&&p.status==='closed'?p.winner_key:null;
+        return `<label class="muted">${esc(cat.replace('Best ',''))}</label>
+        <select style="width:auto" onchange="setWinner('${m.id}','${esc(cat)}',this)">
+          <option value="">—</option>
+          ${state.members.filter(x=>!x.archived).map(x=>`<option value="${x.id}" ${cur===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}
+          ${cur&&!memberById(cur)?`<option value="${cur}" selected>${esc(winnerName(p))}</option>`:''}
+          <option value="__custom">Custom name…</option>
+        </select>`;
+      }).join('')}
+    </div>
     <details ${pastEditOpen.has(m.id)?'open':''} ontoggle="pastEditToggle('${m.id}',this.open)" style="margin-top:8px">
       <summary class="small" style="cursor:pointer;color:var(--accent)">✎ Edit / add role players</summary>
       <div class="row small" style="margin-top:8px">
@@ -2034,7 +2080,7 @@ function bindAuth(){
 Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   spkDelta,setMeetingTT,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
-  vcPick,startPoll,addCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,
+  vcPick,startPoll,addCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});
