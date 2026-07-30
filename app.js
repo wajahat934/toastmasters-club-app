@@ -485,15 +485,18 @@ function congratsHtml(){
   }
   return html;
 }
-const STANDARD_CATS=['Best Speaker','Best Table Topics','Best Evaluator'];
+const STANDARD_CATS=['Best Speaker','Best Table Topics','Best Evaluator','Best Big 3','Best Facilitator'];
 let vcSelMeeting=null, tieState={};
 function prefillCandidates(m,cat){
   const list=[];
   const add=pid=>{ const mem=memberById(pid); if(mem&&!list.some(c=>c.key===pid))list.push({key:pid,name:mem.name,profileId:pid}); };
-  if(/speaker/i.test(cat)&&!/table/i.test(cat))
-    for(const [k,a] of Object.entries(m.assignments))if(/^spk\|/.test(k)&&a.memberId)add(a.memberId);
-  if(/evaluator/i.test(cat))
-    for(const [k,a] of Object.entries(m.assignments))if(/^(eval|tte)\|/.test(k)&&a.memberId)add(a.memberId);
+  const addSlots=re=>{ for(const [k,a] of Object.entries(m.assignments))if(re.test(k)&&a.memberId)add(a.memberId); };
+  if(/big ?3/i.test(cat)) addSlots(/^(tmod|ttm|ge)\|/);
+  else if(/facilitator/i.test(cat)) addSlots(/^(timer|vc|gram|al|ah|jm)\|/);
+  else{
+    if(/speaker/i.test(cat)&&!/table/i.test(cat)) addSlots(/^spk\|/);
+    if(/evaluator/i.test(cat)) addSlots(/^(eval|tte)\|/);
+  }
   return list;
 }
 function viewVoting(){
