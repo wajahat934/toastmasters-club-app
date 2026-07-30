@@ -455,8 +455,13 @@ function winnerName(p){ const c=(p.candidates||[]).find(c=>c.key===p.winner_key)
 function latestWinners(){
   const byM={};
   for(const p of S.polls)if(p.status==='closed'&&p.winner_key)(byM[p.meeting_id]=byM[p.meeting_id]||[]).push(p);
-  const ms=state.meetings.filter(m=>byM[m.id]&&m.date<=todayStr()).sort((a,b)=>a.date<b.date?1:-1);
-  return ms.length?{meeting:ms[0],polls:byM[ms[0].id]}:null;
+  const withPolls=state.meetings.filter(m=>byM[m.id]&&!m.cancelled);
+  /* most recent past/today meeting with winners; else (votes closed early /
+     testing ahead of the date) the nearest upcoming one that has winners */
+  const past=withPolls.filter(m=>m.date<=todayStr()).sort((a,b)=>a.date<b.date?1:-1);
+  if(past.length)return {meeting:past[0],polls:byM[past[0].id]};
+  const fut=withPolls.filter(m=>m.date>todayStr()).sort((a,b)=>a.date<b.date?-1:1);
+  return fut.length?{meeting:fut[0],polls:byM[fut[0].id]}:null;
 }
 function winnersBoardHtml(){
   const lw=latestWinners(); if(!lw)return '';
@@ -473,7 +478,7 @@ function congratsHtml(){
     if(!c||c.profileId!==me.profileId)continue;
     const m=state.meetings.find(m=>m.id===p.meeting_id); if(!m)continue;
     const days=(today-parseD(m.date))/86400000;
-    if(days>=0&&days<=5)
+    if(days>=-7&&days<=5)   /* also covers votes closed before the meeting date */
       html+=`<div class="banner" style="background:var(--gold-soft);border-color:var(--gold)">
         <strong>🎉 Congratulations!</strong> You were <b>${esc(p.category)}</b> at the ${fmtDate(m.date)} meeting. Keep it up! 👏
       </div>`;
