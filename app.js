@@ -251,7 +251,8 @@ function rebuild(){
     members:S.profiles.map(p=>({id:p.id,name:p.name,external:!!p.home_club,homeClub:p.home_club||'',path:p.path||'',baseLevel:p.base_level||0,projectsDone:p.projects_done||0,
       awards:(awardsBy[p.id]||[]).map(a=>({id:a.id,level:a.level,path:a.path||'',date:a.date})).sort((a,b)=>a.date<b.date?-1:1),
       goals:(goalsBy[p.id]||[]).map(g=>({id:g.id,text:g.text,done:g.done})),
-      archived:!p.active,role:p.role,approved:p.approved,hasAccount:!!p.auth_id,email:p.email||''})),
+      archived:!p.active,role:p.role,approved:p.approved,hasAccount:!!p.auth_id,email:p.email||''}))
+      .sort((a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:'base'})),
     meetings:S.meetings.map(m=>({id:m.id,date:m.date,theme:m.theme||'',cancelled:m.cancelled,reviewed:m.reviewed,config:m.config||{},wod:m.wod||{},assignments:asgBy[m.id]||{}}))
       .sort((a,b)=>a.date<b.date?-1:1),
     dcp:S.dcp, agendas:S.agendas
