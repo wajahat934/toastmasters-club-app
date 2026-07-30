@@ -414,7 +414,7 @@ let tab='schedule';
 let viewAsMember=false;
 function tabsFor(){
   if(isAdmin&&!viewAsMember)
-    return [['schedule','Roles & Meetings'],['agenda','Agenda'],['voting','Voting'],['members','Members'],['dcp','DCP Goals'],['settings','Settings']];
+    return [['schedule','Roles & Meetings'],['agenda','Agenda'],['voting','Voting'],['members','Members'],['dcp','DCP Goals'],['me','My Profile'],['settings','Settings']];
   const t=[['book','Book a Role'],['me','My Profile']];
   if(state&&vcMeetings().length)t.push(['voting','Vote Counter']);
   return t;
