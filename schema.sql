@@ -203,6 +203,35 @@ create policy goals_admin on goals for all using (is_admin()) with check (is_adm
 create policy dcp_admin     on dcp     for all using (is_admin()) with check (is_admin());
 create policy agendas_admin on agendas for all using (is_admin()) with check (is_admin());
 
+-- ---------- birthday change log (admins are notified of member edits) ----------
+
+create table birthday_changes (
+  id uuid primary key default gen_random_uuid(),
+  profile_id uuid not null references profiles(id) on delete cascade,
+  old_value text,
+  new_value text,
+  by_admin boolean not null default false,
+  changed_at timestamptz not null default now(),
+  seen boolean not null default false
+);
+alter table birthday_changes enable row level security;
+create policy bc_admin on birthday_changes for all using (is_admin()) with check (is_admin());
+
+-- logged by the DB itself, so a member cannot change their birthday unnoticed
+create or replace function log_birthday_change() returns trigger
+language plpgsql security definer set search_path = public as
+$$
+begin
+  if new.birthday is distinct from old.birthday then
+    insert into birthday_changes(profile_id, old_value, new_value, by_admin)
+    values (old.id, old.birthday, new.birthday, (auth.uid() is null) or is_admin());
+  end if;
+  return new;
+end $$;
+
+create trigger profiles_birthday_log after update on profiles
+for each row execute function log_birthday_change();
+
 -- ---------- announcements (admin messages shown to everyone) ----------
 
 create table announcements (
@@ -270,6 +299,7 @@ alter publication supabase_realtime add table meetings;
 alter publication supabase_realtime add table polls;
 alter publication supabase_realtime add table votes;
 alter publication supabase_realtime add table announcements;
+alter publication supabase_realtime add table birthday_changes;
 
 -- ============================================================
 -- AFTER you sign up in the app for the first time, make yourself

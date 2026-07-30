@@ -88,11 +88,12 @@ const SupabaseApi={
   },
   async loadAll(){
     const q=async(t,optional)=>{ const {data,error}=await sb.from(t).select('*'); if(error){ if(optional)return []; throw error; } return data; };
-    const [settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes,announcements]=await Promise.all(
+    const [settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes,announcements,birthdayChanges]=await Promise.all(
       [...['settings','profiles','meetings','assignments','awards','goals','dcp','agendas'].map(t=>q(t)),
-       q('polls',true),q('votes',true),q('announcements',true)]);
-    return {settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes,announcements};
+       q('polls',true),q('votes',true),q('announcements',true),q('birthday_changes',true)]);
+    return {settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes,announcements,birthdayChanges};
   },
+  async markBcSeen(id){ const {error}=await sb.from('birthday_changes').update({seen:true}).eq('id',id); if(error)throw error; },
   async addAnnouncement(text){ const {data,error}=await sb.from('announcements').insert({text}).select().single(); if(error)throw error; return data; },
   async delAnnouncement(id){ const {error}=await sb.from('announcements').delete().eq('id',id); if(error)throw error; },
   async createPoll(f){ const {data,error}=await sb.from('polls').insert(f).select().single(); if(error)throw error; return data; },
@@ -148,6 +149,7 @@ const SupabaseApi={
       .on('postgres_changes',{event:'*',schema:'public',table:'polls'},p=>onChange('polls',p))
       .on('postgres_changes',{event:'*',schema:'public',table:'votes'},p=>onChange('votes',p))
       .on('postgres_changes',{event:'*',schema:'public',table:'announcements'},p=>onChange('announcements',p))
+      .on('postgres_changes',{event:'*',schema:'public',table:'birthday_changes'},p=>onChange('birthday_changes',p))
       .subscribe();
   }
 };
@@ -190,6 +192,7 @@ const DemoApi=(function(){
     adjust:{},winner_key:profiles[1].id}];
   const votes=[];
   const announcements=[{id:'annDemo',text:'Our own TM Danish has been appointed Area Director — congratulations! 🎊',created_at:new Date().toISOString()}];
+  const birthdayChanges=[];
   const dcpRows=[],agendaRows=[];
   let settingsRows=[{id:1,data:defaultSettings()}];
   const T={profiles,meetings,assignments,awards,goals};
@@ -202,9 +205,16 @@ const DemoApi=(function(){
     async signIn(email){ if(email==='admin@demo')auth='demo-admin'; else if(email==='member@demo')auth='demo-member'; else throw {message:'Demo mode: use the buttons above, or admin@demo / member@demo.'}; },
     async signOut(){ auth=null; },
     async myProfile(){ return profiles.find(p=>p.auth_id===auth)||null; },
-    /* return array COPIES — the app pushes new rows locally after api calls,
-       and returning live references would double them up */
-    async loadAll(){ return {settingsRows:[...settingsRows],profiles:[...profiles],meetings:[...meetings],assignments:[...assignments],awards:[...awards],goals:[...goals],dcpRows:[...dcpRows],agendaRows:[...agendaRows],polls:[...polls],votes:[...votes],announcements:[...announcements]}; },
+    /* return copies of rows AND of the arrays — the app mutates its own state
+       locally, and sharing references would both double rows up and hide
+       real changes from this fake backend (the server sees separate rows) */
+    async loadAll(){
+      const cp=a=>a.map(o=>({...o}));
+      return {settingsRows:cp(settingsRows),profiles:cp(profiles),meetings:cp(meetings),assignments:cp(assignments),
+        awards:cp(awards),goals:cp(goals),dcpRows:cp(dcpRows),agendaRows:cp(agendaRows),polls:cp(polls),
+        votes:cp(votes),announcements:cp(announcements),birthdayChanges:cp(birthdayChanges)};
+    },
+    async markBcSeen(id){ const r=birthdayChanges.find(b=>b.id===id); if(r)r.seen=true; },
     async addAnnouncement(text){ const row={id:uid(),text,created_at:new Date().toISOString()}; announcements.push(row); return row; },
     async delAnnouncement(id){ const i=announcements.findIndex(a=>a.id===id); if(i>=0)announcements.splice(i,1); },
     async createPoll(f){ const row={id:uid(),status:'open',candidates:[],adjust:{},paper_voters:[],winner_key:null,...f}; polls.push(row); return row; },
@@ -237,7 +247,14 @@ const DemoApi=(function(){
       for(const arr of [assignments,awards,goals])
         for(const r of arr)if(r.profile_id===fromId)r.profile_id=intoId;
     },
-    async updateProfile(id,f){ Object.assign(profiles.find(p=>p.id===id)||{},f); },
+    async updateProfile(id,f){
+      const p=profiles.find(p=>p.id===id);
+      if(p&&f.birthday!==undefined&&f.birthday!==p.birthday)
+        birthdayChanges.push({id:uid(),profile_id:id,old_value:p.birthday,new_value:f.birthday,
+          by_admin:auth==='demo-admin'&&id!==(profiles.find(x=>x.auth_id===auth)||{}).id,
+          changed_at:new Date().toISOString(),seen:false});
+      Object.assign(p||{},f);
+    },
     async deleteProfile(id){ const i=profiles.findIndex(p=>p.id===id); if(i>=0)profiles.splice(i,1); },
     async addAward(f){ const row={id:uid(),...f}; awards.push(row); return row; },
     async delAward(id){ const i=awards.findIndex(a=>a.id===id); if(i>=0)awards.splice(i,1); },
@@ -255,7 +272,7 @@ const DemoApi=(function(){
    COMPAT STATE — same shape the single-user tracker used, so all
    read/render logic carries over. Mutations patch it AND call api.
    ============================================================ */
-let S={profiles:[],meetings:[],assignments:[],awards:[],goals:[],polls:[],votes:[],announcements:[],settings:defaultSettings(),dcp:{},agendas:{}};
+let S={profiles:[],meetings:[],assignments:[],awards:[],goals:[],polls:[],votes:[],announcements:[],birthdayChanges:[],settings:defaultSettings(),dcp:{},agendas:{}};
 let state=null, me=null, isAdmin=false;
 
 function rebuild(){
@@ -451,8 +468,35 @@ function render(){
 function setTab(t){ tab=t; try{localStorage.setItem('lastTab',t);}catch(e){} render(); window.scrollTo(0,0); }
 
 /* ================= NOTICES: birthdays + announcements ================= */
+function fmtMD(v){ return v?`${MD_MONTHS[Number(v.slice(0,2))-1]} ${Number(v.slice(3))}`:'not set'; }
+function fmtWhen(ts){
+  try{
+    const d=new Date(ts),mins=Math.round((Date.now()-d)/60000);
+    if(mins<60)return mins<=1?'just now':mins+' min ago';
+    if(mins<1440)return Math.round(mins/60)+'h ago';
+    return d.toLocaleDateString(undefined,{day:'numeric',month:'short'});
+  }catch(e){ return ''; }
+}
+function bcSeen(id){
+  const r=S.birthdayChanges.find(b=>b.id===id); if(r)r.seen=true;
+  sync(api.markBcSeen(id));
+  render();
+}
 function noticesHtml(){
   let html='';
+  /* birthday edits by members — admins are told, so nobody can quietly
+     move their date to line up with the next meeting's cake */
+  if(isAdmin&&!viewAsMember){
+    for(const c of S.birthdayChanges.filter(c=>!c.seen&&!c.by_admin).sort((a,b)=>a.changed_at<b.changed_at?1:-1)){
+      const mem=memberById(c.profile_id);
+      html+=`<div class="banner" style="border-color:var(--maroon)">
+        <strong>🎂 Birthday changed:</strong> ${esc(mem?mem.name:'A member')} set their birthday
+        from <b>${fmtMD(c.old_value)}</b> to <b>${fmtMD(c.new_value)}</b>
+        <span class="muted small">· ${fmtWhen(c.changed_at)}</span>
+        <button class="btn ghost small" style="float:right" onclick="bcSeen('${c.id}')">✓ noted</button>
+      </div>`;
+    }
+  }
   /* announcements — admin-posted, shown to everyone until removed */
   for(const a of [...S.announcements].sort((x,y)=>x.created_at<y.created_at?1:-1))
     html+=`<div class="banner" style="background:var(--gold-soft);border-color:var(--gold)">
@@ -1261,7 +1305,7 @@ function memberCard(mem,hist,absCount){
           <input type="text" value="${esc(mem.name)}" style="max-width:220px" onchange="setMem('${mem.id}','name',this.value)"></div>
         ${mem.external?`<div><label class="small muted">Home club</label><br>
           <input type="text" value="${esc(mem.homeClub)}" style="max-width:180px" onchange="setMem('${mem.id}','homeClub',this.value)"></div>`
-        :`<div><label class="small muted">🎂 Birthday</label><br>${bdaySelects(mem.id,mem.birthday)}</div>`}
+        :`<div><label class="small muted">🎂 Birthday${(()=>{const n=S.birthdayChanges.filter(c=>c.profile_id===mem.id&&!c.by_admin).length;return n?` <span class="chip bad small">changed ${n}×</span>`:'';})()}</label><br>${bdaySelects(mem.id,mem.birthday)}</div>`}
       </div>
       ${mem.external?'':`
       <div class="row">
@@ -2162,6 +2206,7 @@ async function reload(){
   S.profiles=raw.profiles; S.meetings=raw.meetings; S.assignments=raw.assignments;
   S.awards=raw.awards; S.goals=raw.goals;
   S.polls=raw.polls||[]; S.votes=raw.votes||[]; S.announcements=raw.announcements||[];
+  S.birthdayChanges=raw.birthdayChanges||[];
   S._hadSettings=!!(raw.settingsRows[0]&&raw.settingsRows[0].data&&raw.settingsRows[0].data.roles);
   S.settings=S._hadSettings?raw.settingsRows[0].data:defaultSettings();
   S.dcp={}; for(const r of raw.dcpRows)S.dcp[r.year]=r.data;
@@ -2260,7 +2305,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   spkDelta,setMeetingTT,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   vcPick,startPoll,addCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
-  bdaySet,annAdd,annDel,paperVoter,
+  bdaySet,annAdd,annDel,paperVoter,bcSeen,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});
