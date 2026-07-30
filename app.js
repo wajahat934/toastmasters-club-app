@@ -1619,14 +1619,24 @@ function viewDCP(){
   let any=false;
   for(const s of sections){
     if(!s.list.length)continue; any=true;
-    html+=`<div class="card"><h3>${s.title} ${s.unmet?'':'<span class="pill done">goal met</span>'}</h3>
-      ${s.list.slice(0,5).map(c=>`<div class="cand">
+    html+=`<div class="card"><h3>${s.title} <span class="muted small">(${s.list.length})</span> ${s.unmet?'':'<span class="pill done">goal met</span>'}</h3>
+      ${s.list.map(c=>`<div class="cand">
         <span class="score">${c.score}</span>
         <span class="grow"><b>${esc(c.m.name)}</b> <span class="muted small">— ${esc(c.pe.name)}: Level ${c.cl} done, ${c.pe.projectsDone||0} project${(c.pe.projectsDone||0)===1?'':'s'} into Level ${Math.min(c.cl+1,5)}, ${c.speeches} speech${c.speeches===1?'':'es'} this year</span></span>
         <button class="btn ghost small" onclick="setTab('members');setTimeout(()=>{keepOpen('${c.m.id}');document.getElementById('mem-${c.m.id}')?.scrollIntoView()},50)">open</button>
       </div>`).join('')}</div>`;
   }
   if(!any)html+=`<div class="empty">Add members with paths and levels to see predictions.</div>`;
+  /* nobody should be invisible here: members without a pathway can't be
+     ranked, so list them so an officer can ask what path they're on */
+  const noPath=state.members.filter(m=>!m.external&&!m.archived&&!activePaths(m).length);
+  if(noPath.length)
+    html+=`<div class="card" style="border-color:var(--maroon)">
+      <h3>No active pathway set <span class="muted small">(${noPath.length})</span></h3>
+      <p class="small muted">These members can't be counted towards any education goal until their pathway is recorded — ask them which path they're on, then set it on their card.</p>
+      ${noPath.map(m=>`<div class="cand"><span class="grow"><b>${esc(m.name)}</b>${memPaths(m).length?' <span class="muted small">— all pathways marked completed</span>':''}</span>
+        <button class="btn ghost small" onclick="setTab('members');setTimeout(()=>{keepOpen('${m.id}');document.getElementById('mem-${m.id}')?.scrollIntoView()},50)">open</button></div>`).join('')}
+    </div>`;
   return html;
 }
 function goalControls(n,yr,d){
