@@ -700,7 +700,8 @@ function viewBook(){
       ${isGram?`<div class="row small" style="margin-top:6px;padding:6px 10px;background:var(--gold-soft);border-radius:8px">
         <label><b>📖 You're the Grammarian</b> — Word of the Day:</label>
         <input type="text" style="max-width:130px" placeholder="word" value="${esc((m.wod||{}).word||'')}" onchange="setWod('${m.id}','word',this.value)">
-        <input type="text" style="max-width:340px" class="grow" placeholder="meaning — example sentence" value="${esc((m.wod||{}).def||'')}" onchange="setWod('${m.id}','def',this.value)">
+        <input type="text" style="max-width:280px" class="grow" placeholder="meaning" value="${esc((m.wod||{}).def||'')}" onchange="setWod('${m.id}','def',this.value)">
+        <input type="text" style="max-width:320px" class="grow" placeholder="example sentence" value="${esc((m.wod||{}).sent||'')}" onchange="setWod('${m.id}','sent',this.value)">
       </div>`:''}
       <div class="bookgrid">
       ${slots.map(s=>{
@@ -885,8 +886,9 @@ function meetingBookingCard(m){
     </div>
     <div class="row small" style="margin-top:6px">
       <label class="muted">📖 Word of the Day</label>
-      <input type="text" style="max-width:140px" placeholder="word" value="${esc((m.wod||{}).word||'')}" onchange="setWod('${m.id}','word',this.value)">
-      <input type="text" style="max-width:360px" class="grow" placeholder="meaning — example sentence" value="${esc((m.wod||{}).def||'')}" onchange="setWod('${m.id}','def',this.value)">
+      <input type="text" style="max-width:130px" placeholder="word" value="${esc((m.wod||{}).word||'')}" onchange="setWod('${m.id}','word',this.value)">
+      <input type="text" style="max-width:280px" class="grow" placeholder="meaning" value="${esc((m.wod||{}).def||'')}" onchange="setWod('${m.id}','def',this.value)">
+      <input type="text" style="max-width:320px" class="grow" placeholder="example sentence" value="${esc((m.wod||{}).sent||'')}" onchange="setWod('${m.id}','sent',this.value)">
       <span class="muted">(the meeting's Grammarian can also set this; TMOD can set the theme)</span>
     </div>
     <div class="grid-roles">
@@ -1572,7 +1574,7 @@ const AgendaApp=(function(){
         <div class="wod">
           <div class="kicker">Word of the Day</div>
           <div class="big" id="agWodWord" contenteditable="true">“____”</div>
-          <div class="def" id="agWodDef" contenteditable="true">Definition — “example sentence.”</div>
+          <div class="def" id="agWodDef" contenteditable="true"><b>Meaning:</b> ____ &nbsp;·&nbsp; <i>e.g. “____.”</i></div>
         </div>
       </div>
       <table>
@@ -1815,7 +1817,12 @@ const AgendaApp=(function(){
     document.querySelectorAll('#agSheet [data-sup]').forEach(el=>{ const v=map[el.dataset.sup]; if(v)el.innerText=v; });
     if(m.theme)g('agTheme').innerText=m.theme;
     if(m.wod&&m.wod.word)g('agWodWord').innerText='“'+m.wod.word.replace(/^[\s"“”']+|[\s"“”']+$/g,'')+'”';
-    if(m.wod&&m.wod.def)g('agWodDef').innerText=m.wod.def;
+    if(m.wod&&(m.wod.def||m.wod.sent)){
+      const parts=[];
+      if(m.wod.def)parts.push('<b>Meaning:</b> '+esc(m.wod.def));
+      if(m.wod.sent)parts.push('<i>e.g. “'+esc(m.wod.sent.replace(/^[\s"“”']+|[\s"“”'.]+$/g,''))+'.”</i>');
+      g('agWodDef').innerHTML=parts.join(' &nbsp;·&nbsp; ');
+    }
     const nm=nextMeetingAfter(m.date);
     if(nm){
       const fmap=roleMap(nm);
