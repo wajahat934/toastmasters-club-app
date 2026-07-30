@@ -485,7 +485,7 @@ function congratsHtml(){
   }
   return html;
 }
-const STANDARD_CATS=['Best Speaker','Best Table Topics','Best Evaluator','Best Big 3','Best Facilitator'];
+const STANDARD_CATS=['Best Speaker','Best Table Topics','Best Evaluator','Best of Big 3','Best Facilitator'];
 let vcSelMeeting=null, tieState={};
 /* VC may open voting only on the meeting day, from 5:00 AM (admins any time) */
 function canOpenVoting(m){
@@ -927,7 +927,7 @@ function meetingReviewCard(m,compact){
       ${STANDARD_CATS.map(cat=>{
         const p=pollsFor(m.id).find(p=>p.category===cat);
         const cur=p&&p.status==='closed'?p.winner_key:null;
-        return `<label class="muted">${esc(cat.replace('Best ',''))}</label>
+        return `<label class="muted">${esc(cat.replace(/^Best (of )?/,''))}</label>
         <select style="width:auto" onchange="setWinner('${m.id}','${esc(cat)}',this)">
           <option value="">—</option>
           ${state.members.filter(x=>!x.archived).map(x=>`<option value="${x.id}" ${cur===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}
