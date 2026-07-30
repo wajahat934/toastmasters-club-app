@@ -522,15 +522,17 @@ function vcMeetings(){
   return state.meetings.filter(m=>!m.cancelled&&m.date>=loS&&m.date<=hiS&&(isAdmin||isVCFor(m)));
 }
 function pollsFor(mid){ return S.polls.filter(p=>p.meeting_id===mid); }
-function pollTally(p){
-  const t={};
-  for(const c of (p.candidates||[]))t[c.key]=Number((p.adjust||{})[c.key]||0);
-  for(const v of S.votes)if(v.poll_id===p.id&&t[v.candidate_key]!=null)t[v.candidate_key]++;
-  return t;
-}
+/* app votes exclude members currently marked as paper voters — their stored
+   vote is set aside, and counts again if they're unmarked */
 function appVotes(p){
   const t={}; for(const c of (p.candidates||[]))t[c.key]=0;
-  for(const v of S.votes)if(v.poll_id===p.id&&t[v.candidate_key]!=null)t[v.candidate_key]++;
+  const paper=new Set(p.paper_voters||[]);
+  for(const v of S.votes)if(v.poll_id===p.id&&!paper.has(v.voter)&&t[v.candidate_key]!=null)t[v.candidate_key]++;
+  return t;
+}
+function pollTally(p){
+  const app=appVotes(p); const t={};
+  for(const c of (p.candidates||[]))t[c.key]=Number((p.adjust||{})[c.key]||0)+app[c.key];
   return t;
 }
 function myVoteKey(p){ const v=S.votes.find(v=>v.poll_id===p.id&&v.voter===me.profileId); return v?v.candidate_key:null; }
@@ -568,7 +570,7 @@ function congratsHtml(){
   }
   return html;
 }
-const STANDARD_CATS=['Best Speaker','Best Table Topics','Best Evaluator','Best of Big 3','Best Facilitator'];
+const STANDARD_CATS=['Best Table Topics','Best Speaker','Best Evaluator','Best Facilitator','Best of Big 3'];
 let vcSelMeeting=null, tieState={};
 /* VC may open voting only on the meeting day, from 5:00 AM (admins any time) */
 function canOpenVoting(m){
@@ -716,14 +718,14 @@ function deletePoll(pollId){
 async function paperVoter(pollId,pid,add){
   const p=S.polls.find(p=>p.id===pollId); if(!p)return;
   const list=new Set(p.paper_voters||[]);
+  const hadVote=S.votes.some(v=>v.poll_id===pollId&&v.voter===pid);
   if(add){
     list.add(pid);
-    if(S.votes.some(v=>v.poll_id===pollId&&v.voter===pid)){
-      S.votes=S.votes.filter(v=>!(v.poll_id===pollId&&v.voter===pid));
-      sync(api.delVote(pollId,pid));
-      toast('Their app vote was removed — count their paper ballot instead');
-    }
-  } else list.delete(pid);
+    if(hadVote)toast('Their app vote is set aside — count their paper ballot. Unmarking brings the app vote back.');
+  } else {
+    list.delete(pid);
+    if(hadVote)toast('Unmarked — their app vote counts again.');
+  }
   p.paper_voters=[...list];
   sync(api.updatePoll(pollId,{paper_voters:p.paper_voters}));
   render();
