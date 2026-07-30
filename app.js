@@ -881,9 +881,11 @@ function bdaySelects(pid,val){
 }
 function bdaySet(pid){
   const m=document.getElementById('bm-'+pid).value,d=document.getElementById('bd-'+pid).value;
+  if((m&&!d)||(!m&&d))return;   /* half-chosen: wait for the other select — saving now would re-render and wipe it */
   const v=(m&&d)?m+'-'+d:null;
   if(pid===me.profileId)meSet('birthday',v);
   else setMem(pid,'birthday',v);
+  toast(v?'Birthday saved 🎂':'Birthday cleared');
 }
 async function meGoalAdd(){
   const inp=document.getElementById('meGoal'); const text=inp.value.trim(); if(!text)return;
