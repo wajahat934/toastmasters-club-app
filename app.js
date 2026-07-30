@@ -285,13 +285,15 @@ function slotListFor(m){
 }
 function roleNameById(id){ const r=state.settings.roles.find(r=>r.id===id); return r?r.name:'(removed role)'; }
 function memberById(id){ return state.members.find(m=>m.id===id); }
+const UNTRACKED_ROLES=['saa','po'];   // standing roles — booked and on agendas, but not counted as history
 function meetingOutcomes(m){
   const out=[];
   for(const [key,a] of Object.entries(m.assignments||{})){
     if(!a||!a.memberId||!memberById(a.memberId))continue;
-    const baseRole=roleNameById(key.split('|')[0]);
+    const rid=key.split('|')[0];
+    const baseRole=roleNameById(rid);
     const st=a.status||'done';
-    out.push({memberId:a.memberId,roleName:(st==='other'&&a.actualRole)?a.actualRole:baseRole,status:st});
+    out.push({memberId:a.memberId,rid,roleName:(st==='other'&&a.actualRole)?a.actualRole:baseRole,status:st});
   }
   return out;
 }
@@ -301,6 +303,7 @@ function roleHistory(){
   const h={},abs={};
   for(const m of pastMeetings()){
     for(const o of meetingOutcomes(m)){
+      if(UNTRACKED_ROLES.includes(o.rid))continue;
       if(o.status==='absent'){ abs[o.memberId]=(abs[o.memberId]||0)+1; continue; }
       (h[o.memberId]=h[o.memberId]||{})[o.roleName]=(h[o.memberId][o.roleName]||0)+1;
     }
@@ -1113,7 +1116,7 @@ function memberCard(mem,hist,absCount){
   </details>`;
 }
 function roleMatrix(h,abs){
-  const roles=state.settings.roles.map(r=>r.name);
+  const roles=state.settings.roles.filter(r=>!UNTRACKED_ROLES.includes(r.id)).map(r=>r.name);
   const extras=new Set();
   for(const per of Object.values(h))for(const r of Object.keys(per))if(!roles.includes(r))extras.add(r);
   const cols=[...roles,...extras];
