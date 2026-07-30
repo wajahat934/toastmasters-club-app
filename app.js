@@ -1620,8 +1620,9 @@ function viewDCP(){
   for(const s of sections){
     if(!s.list.length)continue; any=true;
     html+=`<div class="card"><h3>${s.title} <span class="muted small">(${s.list.length})</span> ${s.unmet?'':'<span class="pill done">goal met</span>'}</h3>
+      <div class="cand" style="border-bottom:1px solid var(--line)"><span class="score muted small" style="font-family:var(--sans);font-weight:600">momentum</span><span class="grow muted small">member — pathway and progress</span></div>
       ${s.list.map(c=>`<div class="cand">
-        <span class="score">${c.score}</span>
+        <span class="score" title="Momentum ${c.score} = ${c.pe.projectsDone||0} project${(c.pe.projectsDone||0)===1?'':'s'} ×2 + ${c.speeches} speech${c.speeches===1?'':'es'} this club year">${c.score}</span>
         <span class="grow"><b>${esc(c.m.name)}</b> <span class="muted small">— ${esc(c.pe.name)}: Level ${c.cl} done, ${c.pe.projectsDone||0} project${(c.pe.projectsDone||0)===1?'':'s'} into Level ${Math.min(c.cl+1,5)}, ${c.speeches} speech${c.speeches===1?'':'es'} this year</span></span>
         <button class="btn ghost small" onclick="setTab('members');setTimeout(()=>{keepOpen('${c.m.id}');document.getElementById('mem-${c.m.id}')?.scrollIntoView()},50)">open</button>
       </div>`).join('')}</div>`;
