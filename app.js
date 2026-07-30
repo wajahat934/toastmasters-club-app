@@ -100,6 +100,10 @@ const SupabaseApi={
     const {error}=await sb.from('votes').upsert({poll_id,voter,candidate_key},{onConflict:'poll_id,voter'});
     if(error)throw error;
   },
+  async delVote(poll_id,voter){
+    const {error}=await sb.from('votes').delete().eq('poll_id',poll_id).eq('voter',voter);
+    if(error)throw error;
+  },
   async saveSettings(data){ const {error}=await sb.from('settings').upsert({id:1,data}); if(error)throw error; },
   async insertMeeting(m){ const {data,error}=await sb.from('meetings').insert(m).select().single(); if(error)throw error; return data; },
   async updateMeeting(id,fields){ const {error}=await sb.from('meetings').update(fields).eq('id',id); if(error)throw error; },
@@ -201,12 +205,16 @@ const DemoApi=(function(){
     async loadAll(){ return {settingsRows:[...settingsRows],profiles:[...profiles],meetings:[...meetings],assignments:[...assignments],awards:[...awards],goals:[...goals],dcpRows:[...dcpRows],agendaRows:[...agendaRows],polls:[...polls],votes:[...votes],announcements:[...announcements]}; },
     async addAnnouncement(text){ const row={id:uid(),text,created_at:new Date().toISOString()}; announcements.push(row); return row; },
     async delAnnouncement(id){ const i=announcements.findIndex(a=>a.id===id); if(i>=0)announcements.splice(i,1); },
-    async createPoll(f){ const row={id:uid(),status:'open',candidates:[],adjust:{},winner_key:null,...f}; polls.push(row); return row; },
+    async createPoll(f){ const row={id:uid(),status:'open',candidates:[],adjust:{},paper_voters:[],winner_key:null,...f}; polls.push(row); return row; },
     async updatePoll(id,f){ Object.assign(polls.find(p=>p.id===id)||{},f); },
     async deletePoll(id){ const i=polls.findIndex(p=>p.id===id); if(i>=0)polls.splice(i,1); },
     async castVote(poll_id,voter,candidate_key){
       const ex=votes.find(v=>v.poll_id===poll_id&&v.voter===voter);
       if(ex)ex.candidate_key=candidate_key; else votes.push({poll_id,voter,candidate_key});
+    },
+    async delVote(poll_id,voter){
+      const i=votes.findIndex(v=>v.poll_id===poll_id&&v.voter===voter);
+      if(i>=0)votes.splice(i,1);
     },
     async saveSettings(data){ settingsRows=[{id:1,data}]; },
     async insertMeeting(m){ const row={id:uid(),theme:'',cancelled:false,reviewed:false,...m}; meetings.push(row); return row; },
@@ -637,6 +645,12 @@ function vcPollCard(p){
         <option value="">＋ Add candidate…</option>
         ${state.members.filter(x=>!x.archived&&!(p.candidates||[]).some(c=>c.profileId===x.id)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
         <option value="__custom">Custom name…</option>
+      </select>
+      <span class="muted" style="margin-left:10px">🧾 Voted on paper:</span>
+      ${(p.paper_voters||[]).map(pid=>{const mm=memberById(pid);return `<span class="chip bad">${esc(mm?mm.name:'?')} <a style="cursor:pointer" onclick="paperVoter('${p.id}','${pid}',false)">✕</a></span>`;}).join('')||'<span class="muted small">none</span>'}
+      <select style="width:auto" onchange="if(this.value){paperVoter('${p.id}',this.value,true);}" title="Marked members can't vote in the app for this poll (their app vote, if any, is removed)">
+        <option value="">＋ Mark member…</option>
+        ${state.members.filter(x=>!x.archived&&x.hasAccount&&!(p.paper_voters||[]).includes(x.id)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
       </select></div>`:''}
   </div>`;
 }
@@ -699,8 +713,24 @@ function deletePoll(pollId){
   sync(api.deletePoll(pollId));
   render();
 }
+async function paperVoter(pollId,pid,add){
+  const p=S.polls.find(p=>p.id===pollId); if(!p)return;
+  const list=new Set(p.paper_voters||[]);
+  if(add){
+    list.add(pid);
+    if(S.votes.some(v=>v.poll_id===pollId&&v.voter===pid)){
+      S.votes=S.votes.filter(v=>!(v.poll_id===pollId&&v.voter===pid));
+      sync(api.delVote(pollId,pid));
+      toast('Their app vote was removed — count their paper ballot instead');
+    }
+  } else list.delete(pid);
+  p.paper_voters=[...list];
+  sync(api.updatePoll(pollId,{paper_voters:p.paper_voters}));
+  render();
+}
 async function castMyVote(pollId,key){
   const p=S.polls.find(p=>p.id===pollId); if(!p||p.status!=='open')return;
+  if((p.paper_voters||[]).includes(me.profileId)){toast('You voted on paper for this one — thanks!');return;}
   try{
     await api.castVote(pollId,me.profileId,key);
     const ex=S.votes.find(v=>v.poll_id===pollId&&v.voter===me.profileId);
@@ -741,12 +771,13 @@ function openVoteCardsHtml(){
   for(const p of S.polls.filter(p=>p.status==='open')){
     const m=state.meetings.find(m=>m.id===p.meeting_id); if(!m||m.cancelled)continue;
     const mine=myVoteKey(p);
+    const onPaper=(p.paper_voters||[]).includes(me.profileId);
     html+=`<div class="card" style="border-color:var(--accent)">
       <h3 style="margin:0 0 6px">🗳 Vote: ${esc(p.category)} <span class="muted small">· ${fmtDate(m.date)}</span></h3>
       <div class="row">
-        ${(p.candidates||[]).map(c=>`<button class="btn ${mine===c.key?'good':'ghost'} small" onclick="castMyVote('${p.id}','${c.key}')">${mine===c.key?'✓ ':''}${esc(c.name)}</button>`).join('')}
+        ${(p.candidates||[]).map(c=>`<button class="btn ${mine===c.key?'good':'ghost'} small" ${onPaper?'disabled':''} onclick="castMyVote('${p.id}','${c.key}')">${mine===c.key?'✓ ':''}${esc(c.name)}</button>`).join('')}
       </div>
-      <div class="small muted" style="margin-top:6px">${mine?'You can change your vote until voting closes.':'Tap to vote — secret ballot.'}</div>
+      <div class="small muted" style="margin-top:6px">${onPaper?'🧾 You voted on paper for this one — thanks!':(mine?'You can change your vote until voting closes.':'Tap to vote — secret ballot.')}</div>
     </div>`;
   }
   return html;
@@ -2202,7 +2233,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   spkDelta,setMeetingTT,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   vcPick,startPoll,addCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
-  bdaySet,annAdd,annDel,
+  bdaySet,annAdd,annDel,paperVoter,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});

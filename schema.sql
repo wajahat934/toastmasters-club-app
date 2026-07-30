@@ -223,6 +223,7 @@ create table polls (
   status text not null default 'open' check (status in ('open','closed')),
   candidates jsonb not null default '[]',    -- [{key, name, profileId}]
   adjust jsonb not null default '{}',        -- manual paper votes per candidate key
+  paper_voters jsonb not null default '[]',  -- profile ids who voted on paper (blocked from app voting)
   winner_key text,
   created_at timestamptz not null default now()
 );
@@ -254,8 +255,12 @@ create policy polls_vc    on polls for all
 create policy votes_self on votes for all
   using (voter = my_profile_id())
   with check (voter = my_profile_id()
-              and exists(select 1 from polls p where p.id = poll_id and p.status = 'open'));
+              and exists(select 1 from polls p where p.id = poll_id and p.status = 'open'
+                         and not (p.paper_voters ? (my_profile_id())::text)));
 create policy votes_read_vc on votes for select
+  using (is_admin() or exists(select 1 from polls p
+                              where p.id = poll_id and holds_slot(p.meeting_id,'vc|0')));
+create policy votes_del_vc on votes for delete
   using (is_admin() or exists(select 1 from polls p
                               where p.id = poll_id and holds_slot(p.meeting_id,'vc|0')));
 
