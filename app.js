@@ -343,7 +343,7 @@ function currentLevel(mem){
   return lv;
 }
 function dcpYear(yr){
-  if(!state.dcp[yr])state.dcp[yr]={newMembers:0,officersR1:0,officersR2:0,dues:false,officerList:false,base:'',current:'',target:5};
+  if(!state.dcp[yr])state.dcp[yr]={newMembers:0,officersR1:0,officersR2:0,dues:false,officerList:false,base:'',current:'',csp:false};
   return state.dcp[yr];
 }
 function eduCounts(yr){
@@ -1440,28 +1440,47 @@ function viewDCP(){
   const d=dcpYear(yr);
   const goals=dcpGoals(yr);
   const met=goals.filter(g=>g.met).length;
-  const memReq=(Number(d.current)>=20)||(d.base!==''&&d.current!==''&&(Number(d.current)-Number(d.base))>=3);
-  const tier=met>=9?'President’s Distinguished':met>=7?'Select Distinguished':met>=5?'Distinguished':null;
-  const targetNames={5:'Distinguished (5 goals)',7:'Select Distinguished (7 goals)',9:'President’s Distinguished (9 goals)'};
+  const cur=d.current===''?null:Number(d.current);
+  const net=(d.base!==''&&d.current!=='')?Number(d.current)-Number(d.base):null;
+  const stdMem=(cur!=null&&cur>=20)||(net!=null&&net>=3);
+  const tiers=[
+    {name:'Distinguished',need:5,memOk:stdMem,memLabel:'20 members or +3 net'},
+    {name:'Select Distinguished',need:7,memOk:stdMem,memLabel:'20 members or +3 net'},
+    {name:'President’s Distinguished',need:9,memOk:stdMem,memLabel:'20 members or +3 net'},
+    {name:'Smedley Distinguished',need:10,memOk:cur!=null&&cur>=25,memLabel:'25 members'}
+  ];
   let html=`<h2>Distinguished Club Program</h2>
   <div class="row" style="margin-bottom:10px">
     <label class="small muted">Club year</label>
     <select style="width:auto" onchange="dcpSelYear=Number(this.value);render()">
       ${years.map(y=>`<option value="${y}" ${y===yr?'selected':''}>${y}–${String(y+1).slice(2)}</option>`).join('')}
     </select>
-    <label class="small muted" style="margin-left:12px">Club target</label>
-    <select style="width:auto" onchange="setDcp(${yr},'target',Number(this.value))">
-      ${[5,7,9].map(t=>`<option value="${t}" ${d.target===t?'selected':''}>${targetNames[t]}</option>`).join('')}
-    </select>
   </div>
   <div class="banner">
-    <strong>${met}/10 goals met</strong> — target: ${targetNames[d.target]||targetNames[5]}
-    ${met>=d.target?` · <span style="color:var(--good);font-weight:700">target reached${tier?': '+tier:''}</span>`:` · ${d.target-met} to go`}
-    <div class="small muted" style="margin-top:4px">Membership requirement (20 members, or +3 net growth):
-      ${memReq?'<b style="color:var(--good)">met</b>':'<b style="color:var(--maroon)">not yet met</b>'}
-      &nbsp; base (Jul 1) <input type="number" value="${esc(d.base)}" onchange="setDcp(${yr},'base',this.value)">
-      &nbsp; now <input type="number" value="${esc(d.current)}" onchange="setDcp(${yr},'current',this.value)">
+    <div class="row">
+      <strong>${met}/10 goals met</strong>
+      <span class="small muted">base (Jul 1) <input type="number" value="${esc(d.base)}" onchange="setDcp(${yr},'base',this.value)">
+        now <input type="number" value="${esc(d.current)}" onchange="setDcp(${yr},'current',this.value)">
+        ${net!=null?`· net ${net>=0?'+':''}${net}`:''}</span>
+      <label class="small" style="display:flex;gap:6px;align-items:center;margin-left:10px">
+        <input type="checkbox" ${d.csp?'checked':''} onchange="setDcp(${yr},'csp',this.checked)"> Club Success Plan submitted
+      </label>
     </div>
+    <div class="tblwrap" style="margin-top:8px"><table>
+      <thead><tr><th>Status</th><th>Goals</th><th>Membership</th><th>Standing</th></tr></thead><tbody>
+      ${tiers.map(t=>{
+        const goalsOk=met>=t.need;
+        const achieved=goalsOk&&t.memOk&&d.csp;
+        const needs=[];
+        if(!goalsOk)needs.push(`${t.need-met} more goal${t.need-met>1?'s':''}`);
+        if(!t.memOk)needs.push(t.name.startsWith('Smedley')&&cur!=null?`${25-cur} more members`:'membership');
+        if(!d.csp)needs.push('Club Success Plan');
+        return `<tr><td><b>${t.name}</b></td>
+          <td class="num">${Math.min(met,t.need)}/${t.need}</td>
+          <td>${t.memOk?'✓':'✗'} <span class="muted small">${t.memLabel}</span></td>
+          <td>${achieved?'<span class="pill done">Achieved 🏆</span>':`<span class="muted small">needs ${needs.join(' + ')}</span>`}</td></tr>`;
+      }).join('')}
+      </tbody></table></div>
   </div>
   <div class="goalgrid">
     ${goals.map(g=>`<div class="goal ${g.met?'met':''}">
