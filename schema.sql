@@ -19,10 +19,11 @@ create table profiles (
   role text not null default 'member' check (role in ('admin','member')),
   approved boolean not null default false,
   active boolean not null default true,
-  path text not null default '',
+  path text not null default '',           -- legacy single path (superseded by `paths`)
   birthday text,                           -- optional 'MM-DD' (no year), for club wishes
-  base_level int not null default 0,
-  projects_done int not null default 0,
+  base_level int not null default 0,       -- legacy
+  projects_done int not null default 0,    -- legacy
+  paths jsonb not null default '[]',       -- [{name, baseLevel, projectsDone, done}] — members may hold several
   created_at timestamptz not null default now()
 );
 

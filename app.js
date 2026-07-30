@@ -162,7 +162,8 @@ const DemoApi=(function(){
   const profiles=[
     P('Demo Admin (you)',{auth_id:'demo-admin',role:'admin',email:'admin@demo',path:'Presentation Mastery',base_level:2,projects_done:1}),
     P('Demo Member (you)',{auth_id:'demo-member',email:'member@demo',path:'Dynamic Leadership',base_level:0,projects_done:3,birthday:mdOf(0)}),
-    P('Ayesha',{path:'Engaging Humor',base_level:1,projects_done:2}),
+    P('Ayesha',{paths:[{name:'Engaging Humor',baseLevel:1,projectsDone:2,done:false},
+                       {name:'Presentation Mastery',baseLevel:5,projectsDone:0,done:true}]}),
     P('Bilal',{path:'Innovative Planning',base_level:1,birthday:mdOf(2)}),
     P('Danish',{path:'Presentation Mastery',base_level:3,projects_done:1}),
     P('Fatima',{path:'Team Collaboration'}),
@@ -285,6 +286,8 @@ function rebuild(){
   state={
     settings:S.settings,
     members:S.profiles.map(p=>({id:p.id,name:p.name,external:!!p.home_club,homeClub:p.home_club||'',path:p.path||'',baseLevel:p.base_level||0,projectsDone:p.projects_done||0,
+      /* multiple pathways; legacy single-path profiles are folded in on read */
+      paths:(p.paths&&p.paths.length)?p.paths:(p.path?[{name:p.path,baseLevel:p.base_level||0,projectsDone:p.projects_done||0,done:false}]:[]),
       awards:(awardsBy[p.id]||[]).map(a=>({id:a.id,level:a.level,path:a.path||'',date:a.date})).sort((a,b)=>a.date<b.date?-1:1),
       goals:(goalsBy[p.id]||[]).map(g=>({id:g.id,text:g.text,done:g.done})),
       archived:!p.active,role:p.role,approved:p.approved,hasAccount:!!p.auth_id,email:p.email||'',birthday:p.birthday||''}))
@@ -356,8 +359,24 @@ function speechesThisYear(){
   }
   return out;
 }
-function currentLevel(mem){
+/* A member may work several pathways at once (and finish some). Levels are
+   tracked per path; awards carry the path they belong to. */
+function memPaths(mem){ return mem.paths||[]; }
+function pathLevel(mem,pe){
+  const idx=memPaths(mem).indexOf(pe);
+  let lv=pe.baseLevel||0;
+  for(const a of (mem.awards||[])){
+    /* awards recorded before multi-path support carry no path: count them on the first one */
+    if(a.path?a.path!==pe.name:idx!==0)continue;
+    const l=a.level==='DTM'?5:Number(a.level);
+    if(l>lv)lv=l;
+  }
+  return lv;
+}
+function activePaths(mem){ return memPaths(mem).filter(p=>!p.done); }
+function currentLevel(mem){   /* highest level reached across all paths */
   let lv=mem.baseLevel||0;
+  for(const pe of memPaths(mem))lv=Math.max(lv,pathLevel(mem,pe));
   for(const a of (mem.awards||[])){ const l=a.level==='DTM'?5:Number(a.level); if(l>lv)lv=l; }
   return lv;
 }
@@ -392,17 +411,22 @@ function dcpGoals(yr){
     {n:10,t:'Dues on time + officer list submitted',cur:(d.dues?1:0)+(d.officerList?1:0),tgt:2}
   ].map(g=>({...g,met:g.cur>=g.tgt}));
 }
+/* Each ACTIVE path is its own candidacy — someone on their second path can
+   earn Level 1 again (which counts for the DCP) while finishing Level 4 on
+   the first, so a member can legitimately appear under two goals. */
 function candidatesByGoal(){
   const sp=speechesThisYear();
   const pool=state.members.filter(m=>!m.external&&!m.archived);
   const buckets={1:[],2:[],3:[],45:[]};
   for(const m of pool){
-    const cl=currentLevel(m);
-    const info={m,cl,score:(m.projectsDone||0)*2+(sp[m.id]||0),speeches:sp[m.id]||0};
-    if(cl===0)buckets[1].push(info);
-    else if(cl===1)buckets[2].push(info);
-    else if(cl===2)buckets[3].push(info);
-    else if(cl>=3&&cl<5)buckets[45].push(info);
+    for(const pe of activePaths(m)){
+      const cl=pathLevel(m,pe);
+      const info={m,pe,cl,score:(pe.projectsDone||0)*2+(sp[m.id]||0),speeches:sp[m.id]||0};
+      if(cl===0)buckets[1].push(info);
+      else if(cl===1)buckets[2].push(info);
+      else if(cl===2)buckets[3].push(info);
+      else if(cl>=3&&cl<5)buckets[45].push(info);
+    }
   }
   for(const k in buckets)buckets[k].sort((a,b)=>b.score-a.score);
   return buckets;
@@ -893,9 +917,63 @@ async function myUnbook(mid,key){
 }
 
 /* ================= MEMBER: own profile ================= */
-function lvlChips(mem){
-  const cl=currentLevel(mem);
+function lvlChipsFor(cl){
   return `<span class="lvl">${[1,2,3,4,5].map(l=>`<span class="${l<=cl?'done':''}">${l}</span>`).join('')}</span>`;
+}
+function lvlChips(mem){ return lvlChipsFor(currentLevel(mem)); }
+function pathSummary(mem){
+  const ps=memPaths(mem);
+  if(!ps.length)return '<span class="muted small">no path set</span>';
+  return ps.map(pe=>`<span class="chip ${pe.done?'good':''}">${esc(pe.name)} ${pe.done?'🎓':'L'+pathLevel(mem,pe)}</span>`).join('');
+}
+/* Pathways editor — used on the admin member card and on My Profile */
+function pathsBlock(mem){
+  const ps=memPaths(mem);
+  const rows=ps.map((pe,i)=>{
+    const lv=pathLevel(mem,pe);
+    return `<div class="row small" style="padding:5px 0;border-bottom:1px dashed var(--line)">
+      <b class="grow" style="min-width:150px">${esc(pe.name)}</b>
+      ${pe.done?'<span class="pill done">completed 🎓</span>':lvlChipsFor(lv)}
+      ${pe.done?'':`
+        <label class="muted">start level</label>
+        <input type="number" min="0" max="5" value="${pe.baseLevel||0}" onchange="pathField('${mem.id}',${i},'baseLevel',Number(this.value))">
+        <label class="muted">projects in L${Math.min(lv+1,5)}</label>
+        <input type="number" min="0" max="9" value="${pe.projectsDone||0}" onchange="pathField('${mem.id}',${i},'projectsDone',Number(this.value))">`}
+      <button class="btn ghost small" onclick="pathToggleDone('${mem.id}',${i})">${pe.done?'reopen':'mark completed 🎓'}</button>
+      <button class="btn ghost small" onclick="pathDel('${mem.id}',${i})">✕</button>
+    </div>`;
+  }).join('')||'<div class="muted small">no pathway yet</div>';
+  const avail=PATHS.filter(p=>!ps.some(x=>x.name===p));
+  return `<div class="sect"><h3>Pathways <span class="muted small">(a member can work more than one)</span></h3>
+    ${rows}
+    ${avail.length?`<div class="row" style="margin-top:8px">
+      <select id="np-${mem.id}" style="width:auto">${avail.map(p=>`<option>${p}</option>`).join('')}</select>
+      <button class="btn small" onclick="pathAdd('${mem.id}')">＋ Add pathway</button>
+    </div>`:''}
+  </div>`;
+}
+function pathsUpdate(memId,fn){
+  const mem=memberById(memId); if(!mem)return;
+  const paths=JSON.parse(JSON.stringify(memPaths(mem)));
+  fn(paths);
+  const p=S.profiles.find(p=>p.id===memId); if(p)p.paths=paths;
+  sync(api.updateProfile(memId,{paths}));
+  rebuild(); render(); keepOpen(memId);
+}
+function pathAdd(memId){
+  const sel=document.getElementById('np-'+memId); if(!sel||!sel.value)return;
+  pathsUpdate(memId,ps=>ps.push({name:sel.value,baseLevel:0,projectsDone:0,done:false}));
+  toast('Pathway added');
+}
+function pathDel(memId,i){
+  const mem=memberById(memId); const pe=memPaths(mem)[i]; if(!pe)return;
+  if(!confirm('Remove "'+pe.name+'" from '+mem.name+'? Recorded level completions stay in their history.'))return;
+  pathsUpdate(memId,ps=>ps.splice(i,1));
+}
+function pathField(memId,i,k,v){ pathsUpdate(memId,ps=>{ if(ps[i])ps[i][k]=v; }); }
+function pathToggleDone(memId,i){
+  pathsUpdate(memId,ps=>{ if(ps[i])ps[i].done=!ps[i].done; });
+  toast('Pathway status updated');
 }
 function viewMe(){
   const mem=memberById(me.profileId);
@@ -909,20 +987,14 @@ function viewMe(){
       if(a&&a.memberId===mem.id)myBookings.push(`${fmtDate(m.date)} — ${roleNameById(key.split('|')[0])}`);
   return `<h2>My profile</h2>
   <div class="card">
-    <div class="row"><span class="mname">${esc(mem.name)}</span> ${lvlChips(mem)}</div>
+    <div class="row"><span class="mname">${esc(mem.name)}</span> ${pathSummary(mem)}</div>
     <div class="row" style="margin-top:10px">
-      <div><label class="small muted">My path</label><br>
-        <select style="width:auto" onchange="meSet('path',this.value)">
-          <option value="">— choose path —</option>
-          ${PATHS.map(p=>`<option ${mem.path===p?'selected':''}>${p}</option>`).join('')}
-        </select></div>
-      <div><label class="small muted">Projects done in Level ${Math.min(currentLevel(mem)+1,5)}</label><br>
-        <input type="number" min="0" max="9" value="${mem.projectsDone||0}" onchange="meSet('projectsDone',Number(this.value))"></div>
       <div><label class="small muted">🎂 Birthday (optional — the club will wish you)</label><br>
         ${bdaySelects(mem.id,mem.birthday)}</div>
     </div>
+    ${pathsBlock(mem)}
     <div class="sect"><h3>Level completions</h3>
-      ${(mem.awards||[]).map(a=>`<span class="chip gold">Level ${esc(a.level)} · ${fmtDate(a.date)}</span>`).join('')||'<span class="muted small">none recorded yet — completions are recorded by the officers</span>'}
+      ${(mem.awards||[]).map(a=>`<span class="chip gold">${a.path?esc(a.path)+' · ':''}Level ${esc(a.level)} · ${fmtDate(a.date)}</span>`).join('')||'<span class="muted small">none recorded yet — completions are recorded by the officers</span>'}
     </div>
     <div class="sect"><h3>My goals</h3>
       ${(mem.goals||[]).map(g=>`<div class="row small" style="padding:2px 0">
@@ -1295,8 +1367,7 @@ function memberCard(mem,hist,absCount){
       <span class="mname">${esc(mem.name)}</span>
       ${mem.role==='admin'?'<span class="pill admin">admin</span>':''}
       ${mem.hasAccount?'':'<span class="pill guest">no login</span>'}
-      ${mem.external?`<span class="pill guest">guest · ${esc(mem.homeClub||'other club')}</span>`:lvlChips(mem)}
-      ${mem.path&&!mem.external?`<span class="muted small">${esc(mem.path)}</span>`:''}
+      ${mem.external?`<span class="pill guest">guest · ${esc(mem.homeClub||'other club')}</span>`:pathSummary(mem)}
       ${absCount?`<span class="chip bad small">absent ×${absCount}</span>`:''}
     </summary>
     <div class="body">
@@ -1308,23 +1379,16 @@ function memberCard(mem,hist,absCount){
         :`<div><label class="small muted">🎂 Birthday${(()=>{const n=S.birthdayChanges.filter(c=>c.profile_id===mem.id&&!c.by_admin).length;return n?` <span class="chip bad small">changed ${n}×</span>`:'';})()}</label><br>${bdaySelects(mem.id,mem.birthday)}</div>`}
       </div>
       ${mem.external?'':`
-      <div class="row">
-        <div><label class="small muted">Path</label><br>
-          <select onchange="setMem('${mem.id}','path',this.value)" style="width:auto">
-            <option value="">— choose path —</option>
-            ${PATHS.map(p=>`<option ${mem.path===p?'selected':''}>${p}</option>`).join('')}
-          </select></div>
-        <div><label class="small muted">Starting level (pre-tracker)</label><br>
-          <input type="number" min="0" max="5" value="${mem.baseLevel||0}" onchange="setMem('${mem.id}','baseLevel',Number(this.value))"></div>
-        <div><label class="small muted">Projects done in Level ${Math.min(cl+1,5)}</label><br>
-          <input type="number" min="0" max="9" value="${mem.projectsDone||0}" onchange="setMem('${mem.id}','projectsDone',Number(this.value))"></div>
-      </div>
+      ${pathsBlock(mem)}
       <div class="sect">
         <h3>Level completions <span class="muted small">(dated — these feed the DCP)</span></h3>
         ${(mem.awards||[]).map(a=>`<div class="row small" style="padding:2px 0">
           <span class="chip gold">Level ${esc(a.level)}${a.path?' · '+esc(a.path):''}</span><span class="muted">${fmtDate(a.date)}</span>
           <button class="btn ghost small" onclick="delAward('${mem.id}','${a.id}')">✕</button></div>`).join('')||'<div class="muted small">none recorded</div>'}
         <div class="row" style="margin-top:6px">
+          <select id="aw-p-${mem.id}" style="width:auto">
+            ${memPaths(mem).map(pe=>`<option ${pe.done?'':'selected'}>${esc(pe.name)}</option>`).join('')||'<option value="">(no pathway set)</option>'}
+          </select>
           <select id="aw-l-${mem.id}" style="width:auto">${['1','2','3','4','5','DTM'].map(l=>`<option ${String(cl+1)===l?'selected':''}>${l}</option>`).join('')}</select>
           <input type="date" id="aw-d-${mem.id}" value="${todayStr()}" style="width:auto">
           <button class="btn small" onclick="addAward('${mem.id}')">Record completion</button>
@@ -1393,12 +1457,18 @@ function setMem(id,k,v){
 async function addAward(id){
   const level=document.getElementById('aw-l-'+id).value;
   const date=document.getElementById('aw-d-'+id).value||todayStr();
+  const pathName=(document.getElementById('aw-p-'+id)||{}).value||'';
   const mem=memberById(id);
   try{
-    const row=await api.addAward({profile_id:id,level,path:mem.path||'',date});
+    const row=await api.addAward({profile_id:id,level,path:pathName||mem.path||'',date});
     S.awards.push(row);
-    const p=S.profiles.find(p=>p.id===id); if(p)p.projects_done=0;
-    sync(api.updateProfile(id,{projects_done:0}));
+    /* a completed level resets the project counter on THAT pathway
+       (falling back to the only pathway when none was picked) */
+    const paths=JSON.parse(JSON.stringify(memPaths(mem)));
+    const pe=paths.find(x=>x.name===pathName)||(paths.length===1?paths[0]:null);
+    if(pe)pe.projectsDone=0;
+    const p=S.profiles.find(p=>p.id===id); if(p)p.paths=paths;
+    sync(api.updateProfile(id,{paths}));
     rebuild();render();keepOpen(id);toast('Level '+level+' recorded 🎉');
   }catch(e){ toast('Could not record: '+(e.message||e)); }
 }
@@ -1545,14 +1615,14 @@ function viewDCP(){
     {title:'Goals 5 & 6 — Level 4 / 5 / DTM',list:b[45],unmet:!goals[4].met||!goals[5].met}
   ];
   html+=`<h2>Who is most likely to get us there</h2>
-  <p class="small muted">Ranked by momentum: projects finished in their current level (×2) plus speeches given this club year. Members update their own “projects done” — nudge them to keep it fresh.</p>`;
+  <p class="small muted">One entry per active pathway — a member on a second path can earn Level 1 again while finishing Level 4 on the first, and both count. Ranked by momentum: projects finished in that path's current level (×2) plus speeches this club year.</p>`;
   let any=false;
   for(const s of sections){
     if(!s.list.length)continue; any=true;
     html+=`<div class="card"><h3>${s.title} ${s.unmet?'':'<span class="pill done">goal met</span>'}</h3>
       ${s.list.slice(0,5).map(c=>`<div class="cand">
         <span class="score">${c.score}</span>
-        <span class="grow"><b>${esc(c.m.name)}</b> <span class="muted small">— Level ${c.cl} done, ${c.m.projectsDone||0} project${(c.m.projectsDone||0)===1?'':'s'} into Level ${Math.min(c.cl+1,5)}, ${c.speeches} speech${c.speeches===1?'':'es'} this year</span></span>
+        <span class="grow"><b>${esc(c.m.name)}</b> <span class="muted small">— ${esc(c.pe.name)}: Level ${c.cl} done, ${c.pe.projectsDone||0} project${(c.pe.projectsDone||0)===1?'':'s'} into Level ${Math.min(c.cl+1,5)}, ${c.speeches} speech${c.speeches===1?'':'es'} this year</span></span>
         <button class="btn ghost small" onclick="setTab('members');setTimeout(()=>{keepOpen('${c.m.id}');document.getElementById('mem-${c.m.id}')?.scrollIntoView()},50)">open</button>
       </div>`).join('')}</div>`;
   }
@@ -2305,7 +2375,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   spkDelta,setMeetingTT,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   vcPick,startPoll,addCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
-  bdaySet,annAdd,annDel,paperVoter,bcSeen,
+  bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});
