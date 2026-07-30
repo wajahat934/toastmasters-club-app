@@ -50,7 +50,9 @@ const SupabaseApi={
   async init(){
     const {createClient}=await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
     sb=createClient(window.CLUB_CONFIG.SUPABASE_URL,window.CLUB_CONFIG.SUPABASE_ANON_KEY);
-    sb.auth.onAuthStateChange((_e,_s)=>{ route(); });
+    /* re-route only on sign-out or the first sign-in; routine token
+       refreshes must NOT re-enter the app (it would reset the current tab) */
+    sb.auth.onAuthStateChange((ev,_s)=>{ if(ev==='SIGNED_OUT'||!entered)route(); });
   },
   async session(){ return (await sb.auth.getSession()).data.session; },
   async signUp(email,pass,name,birthday){
@@ -446,7 +448,7 @@ function render(){
   else if(tab==='book')main.innerHTML=congratsHtml()+noticesHtml()+openVoteCardsHtml()+winnersBoardHtml()+viewBook();
   else if(tab==='me')main.innerHTML=congratsHtml()+noticesHtml()+viewMe();
 }
-function setTab(t){ tab=t; render(); window.scrollTo(0,0); }
+function setTab(t){ tab=t; try{localStorage.setItem('lastTab',t);}catch(e){} render(); window.scrollTo(0,0); }
 
 /* ================= NOTICES: birthdays + announcements ================= */
 function noticesHtml(){
@@ -2176,7 +2178,11 @@ async function enterApp(profile){
     await ensureMeetings();
     autoFillStanding();
   }
-  tab=isAdmin?'schedule':'book';
+  if(!entered){
+    /* restore the last-used tab (survives page reloads / phone tab eviction) */
+    const saved=localStorage.getItem('lastTab');
+    tab=tabsFor().some(([id])=>id===saved)?saved:(isAdmin?'schedule':'book');
+  }
   show('appWrap'); render();
   if(!entered){
     entered=true;
