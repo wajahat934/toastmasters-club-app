@@ -141,11 +141,11 @@ details.mem .body{padding:12px 16px}
 #agSheet .mchip.spk{background:var(--yellow);color:var(--blue);font-weight:800;border-color:var(--yellow);display:none}
 #agSheet .themebar{display:flex;gap:8px;margin-top:7px}
 #agSheet .theme,#agSheet .wod{border:1.5px solid var(--pline);border-radius:8px;padding:6px 12px;flex:1}
-#agSheet .theme{border-left:5px solid var(--tmmaroon)}
+#agSheet .theme{border-left:5px solid var(--tmmaroon);display:flex;flex-direction:column}
 #agSheet .wod{border-left:5px solid var(--blue)}
 #agSheet .kicker{font-size:8px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--tmmaroon)}
 #agSheet .wod .kicker{color:var(--blue)}
-#agSheet .theme .big{font-size:14.5px;font-weight:800;color:var(--tmmaroon);margin-top:1px}
+#agSheet .theme .big{font-size:21px;line-height:1.15;font-weight:800;color:var(--tmmaroon);flex:1;display:flex;align-items:center}
 #agSheet .wod .big{font-size:14.5px;font-weight:800;color:var(--blue);margin-top:1px;display:inline}
 #agSheet .wod .def{font-size:9px;color:#4a5865;margin-top:1px;line-height:1.25}
 #agSheet table{width:100%;border-collapse:collapse;margin-top:7px;font-variant-numeric:normal}
