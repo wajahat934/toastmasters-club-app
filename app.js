@@ -83,10 +83,18 @@ const SupabaseApi={
     return data;
   },
   async loadAll(){
-    const q=async(t)=>{ const {data,error}=await sb.from(t).select('*'); if(error)throw error; return data; };
-    const [settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows]=await Promise.all(
-      ['settings','profiles','meetings','assignments','awards','goals','dcp','agendas'].map(q));
-    return {settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows};
+    const q=async(t,optional)=>{ const {data,error}=await sb.from(t).select('*'); if(error){ if(optional)return []; throw error; } return data; };
+    const [settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes]=await Promise.all(
+      [...['settings','profiles','meetings','assignments','awards','goals','dcp','agendas'].map(t=>q(t)),
+       q('polls',true),q('votes',true)]);
+    return {settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes};
+  },
+  async createPoll(f){ const {data,error}=await sb.from('polls').insert(f).select().single(); if(error)throw error; return data; },
+  async updatePoll(id,f){ const {error}=await sb.from('polls').update(f).eq('id',id); if(error)throw error; },
+  async deletePoll(id){ const {error}=await sb.from('polls').delete().eq('id',id); if(error)throw error; },
+  async castVote(poll_id,voter,candidate_key){
+    const {error}=await sb.from('votes').upsert({poll_id,voter,candidate_key},{onConflict:'poll_id,voter'});
+    if(error)throw error;
   },
   async saveSettings(data){ const {error}=await sb.from('settings').upsert({id:1,data}); if(error)throw error; },
   async insertMeeting(m){ const {data,error}=await sb.from('meetings').insert(m).select().single(); if(error)throw error; return data; },
@@ -127,6 +135,8 @@ const SupabaseApi={
     sb.channel('live')
       .on('postgres_changes',{event:'*',schema:'public',table:'assignments'},p=>onChange('assignments',p))
       .on('postgres_changes',{event:'*',schema:'public',table:'meetings'},p=>onChange('meetings',p))
+      .on('postgres_changes',{event:'*',schema:'public',table:'polls'},p=>onChange('polls',p))
+      .on('postgres_changes',{event:'*',schema:'public',table:'votes'},p=>onChange('votes',p))
       .subscribe();
   }
 };
@@ -163,6 +173,10 @@ const DemoApi=(function(){
   ];
   const awards=[{id:uid(),profile_id:profiles[2].id,level:'1',path:'Engaging Humor',date:day(-20)}];
   const goals=[{id:uid(),profile_id:profiles[1].id,text:'Give my Ice Breaker before September',done:false}];
+  const polls=[{id:'pollPast',meeting_id:'mtPast',category:'Best Speaker',status:'closed',
+    candidates:[{key:profiles[1].id,name:profiles[1].name,profileId:profiles[1].id},{key:profiles[2].id,name:'Ayesha',profileId:profiles[2].id}],
+    adjust:{},winner_key:profiles[1].id}];
+  const votes=[];
   const dcpRows=[],agendaRows=[];
   let settingsRows=[{id:1,data:defaultSettings()}];
   const T={profiles,meetings,assignments,awards,goals};
@@ -175,7 +189,16 @@ const DemoApi=(function(){
     async signIn(email){ if(email==='admin@demo')auth='demo-admin'; else if(email==='member@demo')auth='demo-member'; else throw {message:'Demo mode: use the buttons above, or admin@demo / member@demo.'}; },
     async signOut(){ auth=null; },
     async myProfile(){ return profiles.find(p=>p.auth_id===auth)||null; },
-    async loadAll(){ return {settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows}; },
+    /* return array COPIES — the app pushes new rows locally after api calls,
+       and returning live references would double them up */
+    async loadAll(){ return {settingsRows:[...settingsRows],profiles:[...profiles],meetings:[...meetings],assignments:[...assignments],awards:[...awards],goals:[...goals],dcpRows:[...dcpRows],agendaRows:[...agendaRows],polls:[...polls],votes:[...votes]}; },
+    async createPoll(f){ const row={id:uid(),status:'open',candidates:[],adjust:{},winner_key:null,...f}; polls.push(row); return row; },
+    async updatePoll(id,f){ Object.assign(polls.find(p=>p.id===id)||{},f); },
+    async deletePoll(id){ const i=polls.findIndex(p=>p.id===id); if(i>=0)polls.splice(i,1); },
+    async castVote(poll_id,voter,candidate_key){
+      const ex=votes.find(v=>v.poll_id===poll_id&&v.voter===voter);
+      if(ex)ex.candidate_key=candidate_key; else votes.push({poll_id,voter,candidate_key});
+    },
     async saveSettings(data){ settingsRows=[{id:1,data}]; },
     async insertMeeting(m){ const row={id:uid(),theme:'',cancelled:false,reviewed:false,...m}; meetings.push(row); return row; },
     async updateMeeting(id,f){ Object.assign(meetings.find(m=>m.id===id)||{},f); },
@@ -213,7 +236,7 @@ const DemoApi=(function(){
    COMPAT STATE — same shape the single-user tracker used, so all
    read/render logic carries over. Mutations patch it AND call api.
    ============================================================ */
-let S={profiles:[],meetings:[],assignments:[],awards:[],goals:[],settings:defaultSettings(),dcp:{},agendas:{}};
+let S={profiles:[],meetings:[],assignments:[],awards:[],goals:[],polls:[],votes:[],settings:defaultSettings(),dcp:{},agendas:{}};
 let state=null, me=null, isAdmin=false;
 
 function rebuild(){
@@ -377,9 +400,11 @@ async function ensureMeetings(){
 let tab='schedule';
 let viewAsMember=false;
 function tabsFor(){
-  return (isAdmin&&!viewAsMember)
-    ? [['schedule','Roles & Meetings'],['agenda','Agenda'],['members','Members'],['dcp','DCP Goals'],['settings','Settings']]
-    : [['book','Book a Role'],['me','My Profile']];
+  if(isAdmin&&!viewAsMember)
+    return [['schedule','Roles & Meetings'],['agenda','Agenda'],['voting','Voting'],['members','Members'],['dcp','DCP Goals'],['settings','Settings']];
+  const t=[['book','Book a Role'],['me','My Profile']];
+  if(state&&vcMeetings().length)t.push(['voting','Vote Counter']);
+  return t;
 }
 function render(){
   document.getElementById('hClub').textContent=state.settings.clubName||'Toastmasters Club';
@@ -391,15 +416,217 @@ function render(){
   document.getElementById('tabs').innerHTML=TABS.map(([id,label])=>
     `<button class="${tab===id?'on':''}" onclick="setTab('${id}')">${label}</button>`).join('');
   const main=document.getElementById('main');
-  if(tab==='schedule')main.innerHTML=viewSchedule();
+  if(tab==='schedule')main.innerHTML=winnersBoardHtml()+viewSchedule();
   else if(tab==='agenda'){ AgendaApp.mount(main); return; }
+  else if(tab==='voting')main.innerHTML=viewVoting();
   else if(tab==='members')main.innerHTML=viewMembers();
   else if(tab==='dcp')main.innerHTML=viewDCP();
   else if(tab==='settings')main.innerHTML=viewSettings();
-  else if(tab==='book')main.innerHTML=viewBook();
-  else if(tab==='me')main.innerHTML=viewMe();
+  else if(tab==='book')main.innerHTML=congratsHtml()+openVoteCardsHtml()+winnersBoardHtml()+viewBook();
+  else if(tab==='me')main.innerHTML=congratsHtml()+viewMe();
 }
 function setTab(t){ tab=t; render(); window.scrollTo(0,0); }
+
+/* ================= VOTING (Vote Counter tool + winners) ================= */
+function isVCFor(m){ return ((m.assignments||{})['vc|0']||{}).memberId===me.profileId; }
+function vcMeetings(){
+  const lo=new Date(); lo.setDate(lo.getDate()-2);
+  const hi=new Date(); hi.setDate(hi.getDate()+14);
+  const loS=dstr(lo),hiS=dstr(hi);
+  return state.meetings.filter(m=>!m.cancelled&&m.date>=loS&&m.date<=hiS&&(isAdmin||isVCFor(m)));
+}
+function pollsFor(mid){ return S.polls.filter(p=>p.meeting_id===mid); }
+function pollTally(p){
+  const t={};
+  for(const c of (p.candidates||[]))t[c.key]=Number((p.adjust||{})[c.key]||0);
+  for(const v of S.votes)if(v.poll_id===p.id&&t[v.candidate_key]!=null)t[v.candidate_key]++;
+  return t;
+}
+function appVotes(p){
+  const t={}; for(const c of (p.candidates||[]))t[c.key]=0;
+  for(const v of S.votes)if(v.poll_id===p.id&&t[v.candidate_key]!=null)t[v.candidate_key]++;
+  return t;
+}
+function myVoteKey(p){ const v=S.votes.find(v=>v.poll_id===p.id&&v.voter===me.profileId); return v?v.candidate_key:null; }
+function winnerName(p){ const c=(p.candidates||[]).find(c=>c.key===p.winner_key); return c?c.name:'—'; }
+function latestWinners(){
+  const byM={};
+  for(const p of S.polls)if(p.status==='closed'&&p.winner_key)(byM[p.meeting_id]=byM[p.meeting_id]||[]).push(p);
+  const ms=state.meetings.filter(m=>byM[m.id]&&m.date<=todayStr()).sort((a,b)=>a.date<b.date?1:-1);
+  return ms.length?{meeting:ms[0],polls:byM[ms[0].id]}:null;
+}
+function winnersBoardHtml(){
+  const lw=latestWinners(); if(!lw)return '';
+  return `<div class="card" style="border-color:var(--gold)">
+    <h3 style="margin:0 0 6px">🏆 Winners — ${fmtDate(lw.meeting.date)}</h3>
+    ${lw.polls.map(p=>`<span class="chip gold">${esc(p.category)}: <b>${esc(winnerName(p))}</b></span>`).join(' ')}
+  </div>`;
+}
+function congratsHtml(){
+  const today=parseD(todayStr()); let html='';
+  for(const p of S.polls){
+    if(p.status!=='closed'||!p.winner_key)continue;
+    const c=(p.candidates||[]).find(c=>c.key===p.winner_key);
+    if(!c||c.profileId!==me.profileId)continue;
+    const m=state.meetings.find(m=>m.id===p.meeting_id); if(!m)continue;
+    const days=(today-parseD(m.date))/86400000;
+    if(days>=0&&days<=5)
+      html+=`<div class="banner" style="background:var(--gold-soft);border-color:var(--gold)">
+        <strong>🎉 Congratulations!</strong> You were <b>${esc(p.category)}</b> at the ${fmtDate(m.date)} meeting. Keep it up! 👏
+      </div>`;
+  }
+  return html;
+}
+const STANDARD_CATS=['Best Speaker','Best Table Topics','Best Evaluator'];
+let vcSelMeeting=null, tieState={};
+function prefillCandidates(m,cat){
+  const list=[];
+  const add=pid=>{ const mem=memberById(pid); if(mem&&!list.some(c=>c.key===pid))list.push({key:pid,name:mem.name,profileId:pid}); };
+  if(/speaker/i.test(cat)&&!/table/i.test(cat))
+    for(const [k,a] of Object.entries(m.assignments))if(/^spk\|/.test(k)&&a.memberId)add(a.memberId);
+  if(/evaluator/i.test(cat))
+    for(const [k,a] of Object.entries(m.assignments))if(/^(eval|tte)\|/.test(k)&&a.memberId)add(a.memberId);
+  return list;
+}
+function viewVoting(){
+  const ms=vcMeetings();
+  if(!ms.length)return `<h2>Voting</h2><div class="empty">No meeting in range where you're the Vote Counter.</div>`;
+  if(!vcSelMeeting||!ms.some(m=>m.id===vcSelMeeting))vcSelMeeting=(ms.find(m=>m.date===todayStr())||ms[0]).id;
+  const m=ms.find(x=>x.id===vcSelMeeting);
+  const polls=pollsFor(m.id);
+  let html=`<h2>🗳 Vote Counter</h2>
+  <div class="row" style="margin-bottom:10px">
+    <label class="small muted">Meeting</label>
+    <select style="width:auto" onchange="vcPick(this.value)">
+      ${ms.map(x=>`<option value="${x.id}" ${x.id===vcSelMeeting?'selected':''}>${fmtDate(x.date)}</option>`).join('')}
+    </select>
+  </div>
+  <p class="small muted">Open a category, members vote from their phones, and the count is live. “Paper” adds the manual votes from the room — the app and paper ballots combine. Closing announces the winner (you break any tie).</p>`;
+  for(const p of polls)html+=vcPollCard(p);
+  const open=new Set(polls.map(p=>p.category));
+  const starters=STANDARD_CATS.filter(c=>!open.has(c));
+  html+=`<div class="card sub"><div class="row">
+    ${starters.map(c=>`<button class="btn small" onclick="startPoll('${m.id}','${esc(c)}')">＋ ${esc(c)} vote</button>`).join('')}
+    <input type="text" id="customCat" placeholder="Custom category" style="max-width:180px">
+    <button class="btn ghost small" onclick="startPoll('${m.id}',document.getElementById('customCat').value.trim())">＋ Start</button>
+  </div></div>`;
+  return html;
+}
+function vcPollCard(p){
+  const app=appVotes(p),total=pollTally(p);
+  const tie=tieState[p.id];
+  return `<div class="card" ${p.status==='closed'?'style="border-color:var(--good)"':''}>
+    <div class="row"><h3 class="grow" style="margin:0">${esc(p.category)}
+      ${p.status==='closed'?`<span class="pill done">closed</span> <span class="chip gold">🏆 ${esc(winnerName(p))}</span>`:'<span class="pill other">voting open</span>'}</h3>
+      ${p.status==='open'?`<button class="btn small" onclick="closePoll('${p.id}')">Close voting</button>`
+        :`<button class="btn ghost small" onclick="reopenPoll('${p.id}')">Reopen</button>`}
+      <button class="btn danger small" onclick="deletePoll('${p.id}')">✕</button>
+    </div>
+    <div class="tblwrap"><table><thead><tr><th>Candidate</th><th class="num">App votes</th><th class="num">Paper</th><th class="num">Total</th></tr></thead><tbody>
+      ${(p.candidates||[]).map(c=>`<tr>
+        <td>${esc(c.name)} ${p.winner_key===c.key?'🏆':''}</td>
+        <td class="num">${app[c.key]}</td>
+        <td class="num">
+          <button class="btn ghost small" onclick="adjustPoll('${p.id}','${c.key}',-1)">−</button>
+          ${Number((p.adjust||{})[c.key]||0)}
+          <button class="btn ghost small" onclick="adjustPoll('${p.id}','${c.key}',1)">＋</button>
+        </td>
+        <td class="num"><b>${total[c.key]}</b></td>
+      </tr>`).join('')}
+    </tbody></table></div>
+    ${tie?`<div class="warnline">⚖ It's a tie — pick the winner:
+      ${tie.map(k=>{const c=p.candidates.find(c=>c.key===k);return `<button class="btn small" onclick="finalizePoll('${p.id}','${k}')">${esc(c?c.name:k)}</button>`;}).join(' ')}
+    </div>`:''}
+    ${p.status==='open'?`<div class="row small" style="margin-top:8px">
+      <select style="width:auto" onchange="if(this.value){addCandidate('${p.id}',this.value);}">
+        <option value="">＋ Add candidate…</option>
+        ${state.members.filter(x=>!x.archived&&!(p.candidates||[]).some(c=>c.profileId===x.id)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
+        <option value="__custom">Custom name…</option>
+      </select></div>`:''}
+  </div>`;
+}
+function vcPick(v){ vcSelMeeting=v; render(); }
+async function startPoll(mid,cat){
+  if(!cat){toast('Give the category a name');return;}
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  try{
+    const row=await api.createPoll({meeting_id:mid,category:cat,candidates:prefillCandidates(m,cat),adjust:{}});
+    S.polls.push(row); render();
+  }catch(e){ toast('Could not start: '+(e.message||e)); }
+}
+async function addCandidate(pollId,v){
+  const p=S.polls.find(p=>p.id===pollId); if(!p)return;
+  let cand;
+  if(v==='__custom'){
+    const name=prompt('Candidate name (e.g. a Table Topics guest):'); if(!name){render();return;}
+    cand={key:'c'+uid(),name:name.trim(),profileId:null};
+  }else{
+    const mem=memberById(v); if(!mem)return;
+    cand={key:v,name:mem.name,profileId:v};
+  }
+  p.candidates=[...(p.candidates||[]),cand];
+  sync(api.updatePoll(pollId,{candidates:p.candidates}));
+  render();
+}
+function adjustPoll(pollId,key,d){
+  const p=S.polls.find(p=>p.id===pollId); if(!p)return;
+  p.adjust={...(p.adjust||{}),[key]:Number((p.adjust||{})[key]||0)+d};
+  sync(api.updatePoll(pollId,{adjust:p.adjust}));
+  render();
+}
+function closePoll(pollId){
+  const p=S.polls.find(p=>p.id===pollId); if(!p)return;
+  const t=pollTally(p);
+  const max=Math.max(...Object.values(t));
+  const top=Object.keys(t).filter(k=>t[k]===max);
+  if(top.length===1)finalizePoll(pollId,top[0]);
+  else{ tieState[pollId]=top; render(); }
+}
+function finalizePoll(pollId,key){
+  const p=S.polls.find(p=>p.id===pollId); if(!p)return;
+  p.status='closed'; p.winner_key=key;
+  delete tieState[pollId];
+  sync(api.updatePoll(pollId,{status:'closed',winner_key:key}));
+  render(); toast('🏆 '+winnerName(p)+' wins '+p.category);
+}
+function reopenPoll(pollId){
+  const p=S.polls.find(p=>p.id===pollId); if(!p)return;
+  p.status='open'; p.winner_key=null;
+  sync(api.updatePoll(pollId,{status:'open',winner_key:null}));
+  render();
+}
+function deletePoll(pollId){
+  const p=S.polls.find(p=>p.id===pollId); if(!p)return;
+  if(!confirm('Delete the '+p.category+' vote entirely?'))return;
+  S.polls=S.polls.filter(x=>x.id!==pollId);
+  S.votes=S.votes.filter(v=>v.poll_id!==pollId);
+  sync(api.deletePoll(pollId));
+  render();
+}
+async function castMyVote(pollId,key){
+  const p=S.polls.find(p=>p.id===pollId); if(!p||p.status!=='open')return;
+  try{
+    await api.castVote(pollId,me.profileId,key);
+    const ex=S.votes.find(v=>v.poll_id===pollId&&v.voter===me.profileId);
+    if(ex)ex.candidate_key=key; else S.votes.push({poll_id:pollId,voter:me.profileId,candidate_key:key});
+    render(); toast('Vote recorded ✓');
+  }catch(e){ toast('Could not vote: '+(e.message||e)); }
+}
+function openVoteCardsHtml(){
+  let html='';
+  for(const p of S.polls.filter(p=>p.status==='open')){
+    const m=state.meetings.find(m=>m.id===p.meeting_id); if(!m||m.cancelled)continue;
+    const mine=myVoteKey(p);
+    html+=`<div class="card" style="border-color:var(--accent)">
+      <h3 style="margin:0 0 6px">🗳 Vote: ${esc(p.category)} <span class="muted small">· ${fmtDate(m.date)}</span></h3>
+      <div class="row">
+        ${(p.candidates||[]).map(c=>`<button class="btn ${mine===c.key?'good':'ghost'} small" onclick="castMyVote('${p.id}','${c.key}')">${mine===c.key?'✓ ':''}${esc(c.name)}</button>`).join('')}
+      </div>
+      <div class="small muted" style="margin-top:6px">${mine?'You can change your vote until voting closes.':'Tap to vote — secret ballot.'}</div>
+    </div>`;
+  }
+  return html;
+}
 
 /* ================= MEMBER: booking ================= */
 function viewBook(){
@@ -1710,6 +1937,7 @@ async function reload(){
   const raw=await api.loadAll();
   S.profiles=raw.profiles; S.meetings=raw.meetings; S.assignments=raw.assignments;
   S.awards=raw.awards; S.goals=raw.goals;
+  S.polls=raw.polls||[]; S.votes=raw.votes||[];
   S._hadSettings=!!(raw.settingsRows[0]&&raw.settingsRows[0].data&&raw.settingsRows[0].data.roles);
   S.settings=S._hadSettings?raw.settingsRows[0].data:defaultSettings();
   S.dcp={}; for(const r of raw.dcpRows)S.dcp[r.year]=r.data;
@@ -1730,7 +1958,7 @@ async function enterApp(profile){
   show('appWrap'); render();
   if(!entered){
     entered=true;
-    api.subscribe(async(table,p)=>{ await reload(); if(['book','schedule'].includes(tab))render(); });
+    api.subscribe(async(table,p)=>{ await reload(); if(['book','schedule','voting'].includes(tab))render(); });
     setInterval(dateRollCheck,60000);
     document.addEventListener('visibilitychange',()=>{ if(!document.hidden)dateRollCheck(); });
   }
@@ -1798,6 +2026,7 @@ function bindAuth(){
 Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   spkDelta,setMeetingTT,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
+  vcPick,startPoll,addCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});

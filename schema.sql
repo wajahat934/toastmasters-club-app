@@ -202,9 +202,51 @@ create policy goals_admin on goals for all using (is_admin()) with check (is_adm
 create policy dcp_admin     on dcp     for all using (is_admin()) with check (is_admin());
 create policy agendas_admin on agendas for all using (is_admin()) with check (is_admin());
 
+-- ---------- voting (Vote Counter tool) ----------
+
+create table polls (
+  id uuid primary key default gen_random_uuid(),
+  meeting_id uuid not null references meetings(id) on delete cascade,
+  category text not null,                    -- 'Best Speaker', 'Best Evaluator', ...
+  status text not null default 'open' check (status in ('open','closed')),
+  candidates jsonb not null default '[]',    -- [{key, name, profileId}]
+  adjust jsonb not null default '{}',        -- manual paper votes per candidate key
+  winner_key text,
+  created_at timestamptz not null default now()
+);
+create table votes (
+  poll_id uuid not null references polls(id) on delete cascade,
+  voter uuid not null references profiles(id) on delete cascade,
+  candidate_key text not null,
+  primary key (poll_id, voter)               -- one vote per member per poll
+);
+
+alter table polls enable row level security;
+alter table votes enable row level security;
+
+-- everyone approved sees polls (they need candidates + winners); only the
+-- meeting's Vote Counter or an admin manages them
+create policy polls_read  on polls for select using (is_approved());
+create policy polls_admin on polls for all using (is_admin()) with check (is_admin());
+create policy polls_vc    on polls for all
+  using (is_approved() and holds_slot(meeting_id,'vc|0'))
+  with check (is_approved() and holds_slot(meeting_id,'vc|0'));
+
+-- secret ballot: members see/change only their OWN vote (while the poll is
+-- open); the Vote Counter and admins can read all votes to tally them
+create policy votes_self on votes for all
+  using (voter = my_profile_id())
+  with check (voter = my_profile_id()
+              and exists(select 1 from polls p where p.id = poll_id and p.status = 'open'));
+create policy votes_read_vc on votes for select
+  using (is_admin() or exists(select 1 from polls p
+                              where p.id = poll_id and holds_slot(p.meeting_id,'vc|0')));
+
 -- ---------- realtime (live booking updates) ----------
 alter publication supabase_realtime add table assignments;
 alter publication supabase_realtime add table meetings;
+alter publication supabase_realtime add table polls;
+alter publication supabase_realtime add table votes;
 
 -- ============================================================
 -- AFTER you sign up in the app for the first time, make yourself
