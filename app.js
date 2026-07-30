@@ -487,6 +487,11 @@ function congratsHtml(){
 }
 const STANDARD_CATS=['Best Speaker','Best Table Topics','Best Evaluator','Best Big 3','Best Facilitator'];
 let vcSelMeeting=null, tieState={};
+/* VC may open voting only on the meeting day, from 5:00 AM (admins any time) */
+function canOpenVoting(m){
+  if(isAdmin&&!viewAsMember)return true;
+  return m.date===todayStr()&&new Date().getHours()>=5;
+}
 function prefillCandidates(m,cat){
   const list=[];
   const add=pid=>{ const mem=memberById(pid); if(mem&&!list.some(c=>c.key===pid))list.push({key:pid,name:mem.name,profileId:pid}); };
@@ -516,11 +521,15 @@ function viewVoting(){
   for(const p of polls)html+=vcPollCard(p);
   const open=new Set(polls.map(p=>p.category));
   const starters=STANDARD_CATS.filter(c=>!open.has(c));
-  html+=`<div class="card sub"><div class="row">
-    ${starters.map(c=>`<button class="btn small" onclick="startPoll('${m.id}','${esc(c)}')">＋ ${esc(c)} vote</button>`).join('')}
-    <input type="text" id="customCat" placeholder="Custom category" style="max-width:180px">
-    <button class="btn ghost small" onclick="startPoll('${m.id}',document.getElementById('customCat').value.trim())">＋ Start</button>
-  </div></div>`;
+  if(canOpenVoting(m)){
+    html+=`<div class="card sub"><div class="row">
+      ${starters.map(c=>`<button class="btn small" onclick="startPoll('${m.id}','${esc(c)}')">＋ ${esc(c)} vote</button>`).join('')}
+      <input type="text" id="customCat" placeholder="Custom category" style="max-width:180px">
+      <button class="btn ghost small" onclick="startPoll('${m.id}',document.getElementById('customCat').value.trim())">＋ Start</button>
+    </div>${isAdmin&&!viewAsMember&&m.date!==todayStr()?'<p class="small muted" style="margin:6px 0 0">Admins can open voting any time; the Vote Counter can only open it on the meeting day, from 5:00 am.</p>':''}</div>`;
+  }else{
+    html+=`<div class="card sub"><span class="muted">🕔 Voting can be opened on the meeting day (${fmtDate(m.date)}), starting 5:00 am. Come back then!</span></div>`;
+  }
   return html;
 }
 function vcPollCard(p){
@@ -560,6 +569,7 @@ function vcPick(v){ vcSelMeeting=v; render(); }
 async function startPoll(mid,cat){
   if(!cat){toast('Give the category a name');return;}
   const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  if(!canOpenVoting(m)){toast('Voting opens on the meeting day at 5:00 am');return;}
   try{
     const row=await api.createPoll({meeting_id:mid,category:cat,candidates:prefillCandidates(m,cat),adjust:{}});
     S.polls.push(row); render();

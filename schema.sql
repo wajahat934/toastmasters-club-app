@@ -228,9 +228,14 @@ alter table votes enable row level security;
 -- meeting's Vote Counter or an admin manages them
 create policy polls_read  on polls for select using (is_approved());
 create policy polls_admin on polls for all using (is_admin()) with check (is_admin());
+-- The Vote Counter can create/manage polls ONLY on the meeting day itself.
+-- current_date is UTC; for Pakistan (UTC+5) that window is exactly
+-- 5:00 AM on meeting day -> 5:00 AM the next day. Admins are unrestricted.
 create policy polls_vc    on polls for all
   using (is_approved() and holds_slot(meeting_id,'vc|0'))
-  with check (is_approved() and holds_slot(meeting_id,'vc|0'));
+  with check (is_approved() and holds_slot(meeting_id,'vc|0')
+              and exists(select 1 from meetings m
+                         where m.id = meeting_id and m.date = current_date));
 
 -- secret ballot: members see/change only their OWN vote (while the poll is
 -- open); the Vote Counter and admins can read all votes to tally them
