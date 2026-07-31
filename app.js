@@ -470,6 +470,8 @@ async function ensureMeetings(){
    ============================================================ */
 let tab='schedule';
 let viewAsMember=false;
+/* "am I acting as an admin right now?" — false while previewing as a member */
+function actingAdmin(){ return isAdmin&&!viewAsMember; }
 function tabsFor(){
   if(isAdmin&&!viewAsMember)
     return [['schedule','Roles & Meetings'],['agenda','Agenda'],['voting','Voting'],['members','Members'],['dcp','DCP Goals'],['me','My Profile'],['settings','Settings']];
@@ -596,7 +598,9 @@ function vcMeetings(){
   const lo=new Date(); lo.setDate(lo.getDate()-2);
   const hi=new Date(); hi.setDate(hi.getDate()+14);
   const loS=dstr(lo),hiS=dstr(hi);
-  return state.meetings.filter(m=>!m.cancelled&&m.date>=loS&&m.date<=hiS&&(isAdmin||isVCFor(m)));
+  /* actingAdmin(), not isAdmin — while previewing as a member the tab must
+     appear only if you actually hold the Vote Counter role */
+  return state.meetings.filter(m=>!m.cancelled&&m.date>=loS&&m.date<=hiS&&(actingAdmin()||isVCFor(m)));
 }
 function pollsFor(mid){ return S.polls.filter(p=>p.meeting_id===mid); }
 /* app votes exclude members currently marked as paper voters — their stored
@@ -651,7 +655,7 @@ const STANDARD_CATS=['Best Table Topics','Best Speaker','Best Evaluator','Best F
 let vcSelMeeting=null, tieState={};
 /* VC may open voting only on the meeting day, from 5:00 AM (admins any time) */
 function canOpenVoting(m){
-  if(isAdmin&&!viewAsMember)return true;
+  if(actingAdmin())return true;
   return m.date===todayStr()&&new Date().getHours()>=5;
 }
 function prefillCandidates(m,cat){
