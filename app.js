@@ -88,7 +88,7 @@ const SupabaseApi={
   },
   async loadAll(){
     const q=async(t,optional)=>{ const {data,error}=await sb.from(t).select('*'); if(error){ if(optional)return []; throw error; } return data; };
-    const [settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes,announcements,birthdayChanges]=await Promise.all(
+    const [settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes,announcements,birthdayChanges,suggestions]=await Promise.all(
       [...['settings','profiles','meetings','assignments','awards','goals','dcp','agendas'].map(t=>q(t)),
        q('polls',true),q('votes',true),q('announcements',true),q('birthday_changes',true),q('suggestions',true)]);
     return {settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes,announcements,birthdayChanges,suggestions};
