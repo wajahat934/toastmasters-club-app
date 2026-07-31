@@ -1000,6 +1000,8 @@ function viewMe(){
   <div class="card">
     <div class="row"><span class="mname">${esc(mem.name)}</span> ${pathSummary(mem)}</div>
     <div class="row" style="margin-top:10px">
+      <div><label class="small muted">My name (as it appears on agendas)</label><br>
+        <input type="text" value="${esc(mem.name)}" style="max-width:240px" onchange="meSet('name',this.value)"></div>
       <div><label class="small muted">🎂 Birthday (optional — the club will wish you)</label><br>
         ${bdaySelects(mem.id,mem.birthday)}</div>
     </div>
@@ -1034,11 +1036,14 @@ function viewMe(){
   </div>`;
 }
 function meSet(k,v){
-  const mem=memberById(me.profileId); mem[k]=v;
+  const mem=memberById(me.profileId); if(!mem)return;
+  if(k==='name'){ v=String(v).trim(); if(!v){toast('Name cannot be empty');render();return;} }
+  mem[k]=v;
   const p=S.profiles.find(p=>p.id===me.profileId);
-  const col={path:'path',projectsDone:'projects_done',birthday:'birthday'}[k];
+  const col={path:'path',projectsDone:'projects_done',birthday:'birthday',name:'name'}[k];
   if(p&&col)p[col]=v;
   sync(api.updateProfile(me.profileId,{[col]:v}));
+  if(k==='name'){ me.name=v; toast('Name updated'); }
   render();
 }
 /* birthday month/day selects, shared by My Profile and admin member cards */
@@ -1616,11 +1621,14 @@ async function mergeProfiles(fromId,intoId){
   const from=S.profiles.find(p=>p.id===fromId), into=S.profiles.find(p=>p.id===intoId);
   if(!from||!into||fromId===intoId)return;
   if(from.auth_id&&into.auth_id){ toast('Both entries have logins — merge is for combining a login with a roster entry. Deactivate one instead.'); render(); return; }
-  if(!confirm(`Merge “${from.name}” into “${into.name}”?\nAll bookings, role history, awards and goals combine under “${into.name}”; the “${from.name}” entry disappears.`)){ render(); return; }
+  /* whoever brings the login brings their own name — that's the spelling the
+     member chose for themselves, so it must survive the merge */
+  const keepName=from.auth_id?from.name:into.name;
+  if(!confirm(`Merge “${from.name}” into “${into.name}”?\n\nAll bookings, role history, awards and goals combine into one record, kept under the name “${keepName}”.`)){ render(); return; }
   try{
     await api.reassignData(fromId,intoId);
     await api.deleteProfile(fromId);
-    const patch={approved:true,active:true};
+    const patch={approved:true,active:true,name:keepName};
     if(from.auth_id){ patch.auth_id=from.auth_id; patch.email=from.email; }
     await api.updateProfile(intoId,patch);
     for(const a of S.assignments)if(a.profile_id===fromId)a.profile_id=intoId;
@@ -1634,11 +1642,13 @@ async function mergeProfiles(fromId,intoId){
 async function approveMerge(pendId,rosterId){
   const pend=S.profiles.find(p=>p.id===pendId); if(!pend)return;
   try{
+    /* the signed-up member's own spelling of their name wins */
+    const patch={auth_id:pend.auth_id,email:pend.email,name:pend.name,approved:true,active:true};
     await api.deleteProfile(pendId);                      // free the unique auth_id first
-    await api.updateProfile(rosterId,{auth_id:pend.auth_id,email:pend.email,approved:true,active:true});
+    await api.updateProfile(rosterId,patch);
     S.profiles=S.profiles.filter(p=>p.id!==pendId);
     const r=S.profiles.find(p=>p.id===rosterId);
-    if(r){ r.auth_id=pend.auth_id; r.email=pend.email; r.approved=true; r.active=true; }
+    if(r)Object.assign(r,patch);
     rebuild();render();toast('Merged & approved ✓');
   }catch(e){ toast('Merge failed: '+(e.message||e)); }
 }
