@@ -244,6 +244,22 @@ alter table announcements enable row level security;
 create policy ann_read  on announcements for select using (is_approved());
 create policy ann_admin on announcements for all using (is_admin()) with check (is_admin());
 
+-- ---------- suggestions (members propose, officers act, club hears back) ----------
+
+create table suggestions (
+  id uuid primary key default gen_random_uuid(),
+  profile_id uuid references profiles(id) on delete set null,
+  text text not null,
+  hide_name boolean not null default false,   -- name hidden in the list (officers can still see it)
+  status text not null default 'new' check (status in ('new','planned','done','declined')),
+  admin_note text,
+  created_at timestamptz not null default now()
+);
+alter table suggestions enable row level security;
+create policy sug_own    on suggestions for select using (profile_id = my_profile_id());
+create policy sug_insert on suggestions for insert with check (is_approved() and profile_id = my_profile_id());
+create policy sug_admin  on suggestions for all    using (is_admin()) with check (is_admin());
+
 -- ---------- voting (Vote Counter tool) ----------
 
 create table polls (
@@ -301,6 +317,7 @@ alter publication supabase_realtime add table polls;
 alter publication supabase_realtime add table votes;
 alter publication supabase_realtime add table announcements;
 alter publication supabase_realtime add table birthday_changes;
+alter publication supabase_realtime add table suggestions;
 
 -- ============================================================
 -- AFTER you sign up in the app for the first time, make yourself

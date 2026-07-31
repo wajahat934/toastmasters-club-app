@@ -38,7 +38,7 @@ h3{font-size:.98rem;margin:0 0 8px}
 .grow{flex:1}
 .grid-roles{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px 14px;margin-top:10px}
 .slot label{display:block;font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:2px}
-select,input[type=text],input[type=date],input[type=number],input[type=email],input[type=password],input[type=time]{
+select,textarea,input[type=text],input[type=date],input[type=number],input[type=email],input[type=password],input[type=time]{
   background:var(--surface2);color:var(--ink);border:1px solid var(--line);border-radius:6px;
   padding:6px 8px;font:inherit;width:100%;
 }

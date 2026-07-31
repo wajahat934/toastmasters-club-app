@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RTC Club App — Getting Started</title>
+<style>
+  :root{ --blue:#004165; --maroon:#772432; --yellow:#F2DF74; --ink:#1c2733; --line:#d8dee4; }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html{background:#e9ecef;}
+  body{font-family:"Segoe UI",Arial,sans-serif; color:var(--ink); -webkit-print-color-adjust:exact; print-color-adjust:exact;}
+  .sheet{width:210mm; min-height:296mm; margin:10px auto; padding:12mm; background:#fff; box-shadow:0 2px 14px rgba(0,0,0,.18); display:flex; flex-direction:column;}
+  .masthead{background:linear-gradient(120deg,var(--blue) 0%,#01598a 100%); color:#fff; border-radius:8px; padding:14px 18px; display:flex; align-items:center; gap:16px;}
+  .masthead h1{font-size:22px; letter-spacing:.5px; font-weight:800; text-transform:uppercase;}
+  .masthead .sub{font-size:11px; opacity:.9; margin-top:3px;}
+  .qr{background:#fff; padding:6px; border-radius:8px; margin-left:auto; width:112px; height:112px; flex-shrink:0;}
+  .qr svg{width:100%; height:100%; display:block;}
+  .lead{margin-top:12px; font-size:13px; line-height:1.5; border-left:5px solid var(--maroon); padding-left:12px;}
+  .lead b{color:var(--maroon);}
+  h2{font-size:12px; text-transform:uppercase; letter-spacing:1.2px; color:var(--blue); margin:16px 0 8px; border-bottom:2px solid var(--line); padding-bottom:4px;}
+  .steps{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .step{border:1.5px solid var(--line); border-radius:8px; padding:10px 12px; display:flex; gap:10px;}
+  .num{background:var(--blue); color:#fff; width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; flex-shrink:0;}
+  .step h3{font-size:13px; margin-bottom:2px;}
+  .step p{font-size:11.5px; line-height:1.45; color:#3d4c59;}
+  .step p code{background:#eef3f7; padding:1px 4px; border-radius:3px; font-size:11px;}
+  .cols{display:flex; gap:12px; margin-top:4px;}
+  .panel{flex:1; border:1.5px solid var(--line); border-radius:8px; overflow:hidden;}
+  .panel h3{background:var(--maroon); color:#fff; font-size:11px; letter-spacing:1px; text-transform:uppercase; padding:5px 10px;}
+  .panel.blue h3{background:var(--blue);}
+  .panel ul{padding:8px 10px 10px 26px; font-size:11.5px; line-height:1.6;}
+  .panel li{margin-bottom:3px;}
+  .tips{background:#fdf8e6; border:1.5px solid var(--yellow); border-radius:8px; padding:10px 14px; margin-top:12px; font-size:11.5px; line-height:1.6;}
+  .tips b{color:var(--maroon);}
+  .foot{margin-top:auto; padding-top:10px; text-align:center; font-size:11px; color:var(--blue); font-weight:600; border-top:2px solid var(--line);}
+  .url{font-family:Consolas,monospace; background:var(--blue); color:#fff; padding:3px 10px; border-radius:5px; font-size:12px; display:inline-block;}
+  .noprint{text-align:center; margin:14px;}
+  .noprint button{background:var(--maroon); color:#fff; border:none; padding:10px 22px; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer;}
+  @media print{ html{background:#fff;} .sheet{margin:0; box-shadow:none; width:auto; min-height:0;} .noprint{display:none;} @page{size:A4 portrait; margin:0;} }
+</style>
+</head>
+<body>
+<div class="noprint"><button onclick="window.print()">⬇ Print / Save as PDF</button></div>
+
+<div class="sheet">
+  <div class="masthead">
+    <div>
+      <h1>Our Club App</h1>
+      <div class="sub">Rawalpindi Toastmasters Club &nbsp;•&nbsp; Book roles · Meeting agenda · Your Pathways progress</div>
+    </div>
+    <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 37 37"><path stroke="#004165" d="M2 2.5h7m1 0h3m1 0h3m1 0h2m1 0h3m1 0h1m2 0h7m-33 1h1m5 0h1m1 0h2m1 0h3m2 0h1m1 0h1m3 0h2m2 0h1m5 0h1m-33 1h1m1 0h3m1 0h1m2 0h1m1 0h2m2 0h1m1 0h1m1 0h1m6 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m1 0h1m2 0h2m1 0h1m1 0h1m2 0h1m2 0h2m2 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m3 0h1m1 0h1m1 0h1m2 0h1m2 0h1m3 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m5 0h3m3 0h2m2 0h1m3 0h1m5 0h1m-33 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-25 1h2m1 0h2m1 0h1m2 0h1m2 0h1m1 0h3m-25 1h1m1 0h2m1 0h3m1 0h4m1 0h1m1 0h4m1 0h1m1 0h1m2 0h1m2 0h1m1 0h2m-28 1h1m5 0h2m5 0h6m2 0h2m1 0h4m-33 1h2m2 0h5m5 0h1m1 0h2m3 0h1m1 0h7m1 0h2m-33 1h1m2 0h2m2 0h2m1 0h6m2 0h1m1 0h1m1 0h1m4 0h1m1 0h1m2 0h1m-33 1h1m1 0h2m1 0h5m2 0h1m5 0h1m5 0h2m1 0h3m-27 1h3m5 0h3m2 0h1m1 0h1m1 0h1m3 0h2m1 0h1m3 0h1m-32 1h1m1 0h1m1 0h1m1 0h1m1 0h2m2 0h1m1 0h3m2 0h2m3 0h1m1 0h1m1 0h1m-27 1h2m3 0h1m2 0h5m1 0h1m1 0h4m1 0h4m2 0h2m-31 1h3m1 0h3m1 0h1m6 0h1m2 0h4m1 0h1m1 0h2m1 0h3m-29 1h3m3 0h1m4 0h1m1 0h1m1 0h2m1 0h2m1 0h2m1 0h1m1 0h2m2 0h1m-33 1h1m4 0h3m1 0h2m1 0h1m2 0h3m3 0h2m1 0h1m2 0h2m1 0h2m-31 1h4m2 0h1m1 0h1m1 0h3m5 0h1m2 0h1m5 0h1m2 0h2m-31 1h1m2 0h2m1 0h1m2 0h3m1 0h1m2 0h1m2 0h1m1 0h1m3 0h1m1 0h3m-32 1h1m10 0h3m1 0h1m2 0h2m3 0h1m1 0h2m2 0h1m2 0h1m-31 1h2m1 0h5m1 0h1m4 0h3m1 0h1m2 0h6m2 0h2m-32 1h1m2 0h1m3 0h1m1 0h1m1 0h2m2 0h1m1 0h2m4 0h1m1 0h1m1 0h2m2 0h1m-33 1h1m1 0h2m1 0h2m3 0h1m3 0h2m1 0h1m5 0h6m-21 1h2m2 0h1m1 0h4m1 0h2m1 0h3m3 0h2m-30 1h7m1 0h1m2 0h1m4 0h1m2 0h1m2 0h3m1 0h1m1 0h1m-29 1h1m5 0h1m1 0h1m1 0h1m1 0h3m1 0h1m3 0h5m3 0h5m-33 1h1m1 0h3m1 0h1m2 0h1m2 0h1m2 0h1m1 0h1m3 0h8m1 0h2m-32 1h1m1 0h3m1 0h1m1 0h3m2 0h2m3 0h1m1 0h1m2 0h1m3 0h1m4 0h1m-33 1h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1m2 0h2m5 0h1m1 0h2m1 0h2m-31 1h1m5 0h1m6 0h5m2 0h1m1 0h3m1 0h3m3 0h1m-33 1h7m1 0h4m2 0h4m1 0h4m3 0h1m1 0h3"/></svg></div>
+  </div>
+
+  <div class="lead">
+    <b>Everything you've already done in this club is waiting inside.</b> Your past roles, your speeches and your
+    Pathways progress are loaded — sign up once and it's all there. Scan the code above, or open
+    <span class="url">wajahat934.github.io/toastmasters-club-app</span>
+  </div>
+
+  <h2>Four steps — about two minutes</h2>
+  <div class="steps">
+    <div class="step"><div class="num">1</div><div>
+      <h3>Open the link</h3>
+      <p>Scan the QR code with your phone camera, or tap the link in our WhatsApp group.</p>
+    </div></div>
+    <div class="step"><div class="num">2</div><div>
+      <h3>Create your account</h3>
+      <p>Tap <code>Create an account</code>. Enter your name exactly as it should appear on agendas, your email
+         and a password. Birthday is optional — the club wishes you on the day 🎂</p>
+    </div></div>
+    <div class="step"><div class="num">3</div><div>
+      <h3>Wait for approval</h3>
+      <p>An officer approves you (usually within minutes). Then everything unlocks.</p>
+    </div></div>
+    <div class="step"><div class="num">4</div><div>
+      <h3>Add it to your home screen</h3>
+      <p><b>Android:</b> menu <code>⋮</code> → <code>Add to Home screen</code>.<br>
+         <b>iPhone:</b> Share <code>↑</code> → <code>Add to Home Screen</code>. It then opens like a normal app and
+         keeps you signed in.</p>
+    </div></div>
+  </div>
+
+  <h2>What you can do</h2>
+  <div class="cols">
+    <div class="panel blue">
+      <h3>Book a Role</h3>
+      <ul>
+        <li>See the next 3 meetings and every open slot</li>
+        <li>Tap <b>Book</b> to claim a role — no messaging anyone</li>
+        <li><b>Release</b> it yourself if plans change</li>
+        <li>Vote for the winners during the meeting 🗳</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>My Profile</h3>
+      <ul>
+        <li>Your Pathways — level by level</li>
+        <li>Projects done, speeches given, roles completed</li>
+        <li>Set personal goals and tick them off</li>
+        <li>Send suggestions straight to the officers 💡</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="tips">
+    <b>Have a role at the next meeting?</b> If you're Toastmaster of the Day you set the meeting <b>theme</b> in the app;
+    if you're Grammarian you set the <b>Word of the Day</b> — both appear automatically on the printed agenda.<br>
+    <b>Forgot your password?</b> Message any officer — we reset it in under a minute.<br>
+    <b>Rather not do it alone?</b> Grab an officer before or after any meeting and we'll set it up with you on the spot.
+  </div>
+
+  <div class="foot">
+    “For better listening, for better thinking, for better speaking — we learn by doing.”
+  </div>
+</div>
+</body>
+</html>

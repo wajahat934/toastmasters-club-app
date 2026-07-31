@@ -90,9 +90,12 @@ const SupabaseApi={
     const q=async(t,optional)=>{ const {data,error}=await sb.from(t).select('*'); if(error){ if(optional)return []; throw error; } return data; };
     const [settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes,announcements,birthdayChanges]=await Promise.all(
       [...['settings','profiles','meetings','assignments','awards','goals','dcp','agendas'].map(t=>q(t)),
-       q('polls',true),q('votes',true),q('announcements',true),q('birthday_changes',true)]);
-    return {settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes,announcements,birthdayChanges};
+       q('polls',true),q('votes',true),q('announcements',true),q('birthday_changes',true),q('suggestions',true)]);
+    return {settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes,announcements,birthdayChanges,suggestions};
   },
+  async addSuggestion(f){ const {data,error}=await sb.from('suggestions').insert(f).select().single(); if(error)throw error; return data; },
+  async updSuggestion(id,f){ const {error}=await sb.from('suggestions').update(f).eq('id',id); if(error)throw error; },
+  async delSuggestion(id){ const {error}=await sb.from('suggestions').delete().eq('id',id); if(error)throw error; },
   async markBcSeen(id){ const {error}=await sb.from('birthday_changes').update({seen:true}).eq('id',id); if(error)throw error; },
   async addAnnouncement(text){ const {data,error}=await sb.from('announcements').insert({text}).select().single(); if(error)throw error; return data; },
   async delAnnouncement(id){ const {error}=await sb.from('announcements').delete().eq('id',id); if(error)throw error; },
@@ -194,6 +197,7 @@ const DemoApi=(function(){
   const votes=[];
   const announcements=[{id:'annDemo',text:'Our own TM Danish has been appointed Area Director — congratulations! 🎊',created_at:new Date().toISOString()}];
   const birthdayChanges=[];
+  const suggestions=[{id:'sug1',profile_id:profiles[2].id,text:'Can we start meetings 10 minutes earlier?',hide_name:false,status:'new',admin_note:null,created_at:new Date().toISOString()}];
   const dcpRows=[],agendaRows=[];
   let settingsRows=[{id:1,data:defaultSettings()}];
   const T={profiles,meetings,assignments,awards,goals};
@@ -213,8 +217,11 @@ const DemoApi=(function(){
       const cp=a=>a.map(o=>({...o}));
       return {settingsRows:cp(settingsRows),profiles:cp(profiles),meetings:cp(meetings),assignments:cp(assignments),
         awards:cp(awards),goals:cp(goals),dcpRows:cp(dcpRows),agendaRows:cp(agendaRows),polls:cp(polls),
-        votes:cp(votes),announcements:cp(announcements),birthdayChanges:cp(birthdayChanges)};
+        votes:cp(votes),announcements:cp(announcements),birthdayChanges:cp(birthdayChanges),suggestions:cp(suggestions)};
     },
+    async addSuggestion(f){ const row={id:uid(),status:'new',admin_note:null,created_at:new Date().toISOString(),...f}; suggestions.push(row); return row; },
+    async updSuggestion(id,f){ Object.assign(suggestions.find(s=>s.id===id)||{},f); },
+    async delSuggestion(id){ const i=suggestions.findIndex(s=>s.id===id); if(i>=0)suggestions.splice(i,1); },
     async markBcSeen(id){ const r=birthdayChanges.find(b=>b.id===id); if(r)r.seen=true; },
     async addAnnouncement(text){ const row={id:uid(),text,created_at:new Date().toISOString()}; announcements.push(row); return row; },
     async delAnnouncement(id){ const i=announcements.findIndex(a=>a.id===id); if(i>=0)announcements.splice(i,1); },
@@ -273,7 +280,7 @@ const DemoApi=(function(){
    COMPAT STATE — same shape the single-user tracker used, so all
    read/render logic carries over. Mutations patch it AND call api.
    ============================================================ */
-let S={profiles:[],meetings:[],assignments:[],awards:[],goals:[],polls:[],votes:[],announcements:[],birthdayChanges:[],settings:defaultSettings(),dcp:{},agendas:{}};
+let S={profiles:[],meetings:[],assignments:[],awards:[],goals:[],polls:[],votes:[],announcements:[],birthdayChanges:[],suggestions:[],settings:defaultSettings(),dcp:{},agendas:{}};
 let state=null, me=null, isAdmin=false;
 
 function rebuild(){
@@ -1009,6 +1016,15 @@ function viewMe(){
     <div class="sect"><h3>My upcoming bookings</h3>
       ${myBookings.map(b=>`<div class="small">${b}</div>`).join('')||'<div class="muted small">nothing booked — grab a slot on the Book a Role tab!</div>'}
     </div>
+    <div class="sect"><h3>💡 Suggestions for the club</h3>
+      <p class="small muted">Anything that would make club life better — an idea, a gripe, a request. Officers read every one and you'll see what happened to it here.</p>
+      <textarea id="sugText" rows="2" placeholder="e.g. Could we start Table Topics a bit earlier?" style="width:100%;max-width:520px"></textarea>
+      <div class="row" style="margin-top:6px">
+        <label class="small"><input type="checkbox" id="sugAnon"> Hide my name in the officers' list</label>
+        <button class="btn small" onclick="sugAdd()">Send to officers</button>
+      </div>
+      ${mySuggestionsHtml(mem.id)}
+    </div>
     <div class="sect"><h3>Roles I've completed</h3>${roleChips}
       ${abs[mem.id]?`<div class="small muted" style="margin-top:4px">absences: ${abs[mem.id]}</div>`:''}</div>
   </div>`;
@@ -1316,6 +1332,108 @@ function setReviewed(id,v){
   rebuild(); render();
 }
 
+/* ================= SUGGESTIONS ================= */
+const SUG_PILL={new:'other',planned:'other',done:'done',declined:'absent'};
+const SUG_LABEL={new:'new',planned:'planned 👍',done:'done ✓',declined:'not now'};
+function mySuggestionsHtml(pid){
+  const mine=S.suggestions.filter(s=>s.profile_id===pid).sort((a,b)=>a.created_at<b.created_at?1:-1);
+  if(!mine.length)return '';
+  return `<div style="margin-top:10px">${mine.map(s=>`<div class="small" style="padding:4px 0;border-bottom:1px dashed var(--line)">
+    <span class="pill ${SUG_PILL[s.status]}">${SUG_LABEL[s.status]}</span>
+    ${esc(s.text)}
+    ${s.admin_note?`<div class="muted" style="margin-top:2px">↳ ${esc(s.admin_note)}</div>`:''}
+  </div>`).join('')}</div>`;
+}
+async function sugAdd(){
+  const t=document.getElementById('sugText'); const text=t.value.trim();
+  if(!text){toast('Write your suggestion first');return;}
+  try{
+    const row=await api.addSuggestion({profile_id:me.profileId,text,hide_name:document.getElementById('sugAnon').checked});
+    S.suggestions.push(row); render(); toast('Sent to the officers — thank you! 💡');
+  }catch(e){ toast('Could not send: '+(e.message||e)); }
+}
+function sugAdminHtml(){
+  const list=[...S.suggestions].sort((a,b)=>a.created_at<b.created_at?1:-1);
+  const fresh=list.filter(s=>s.status==='new').length;
+  if(!list.length)return `<div class="card"><h3>💡 Suggestions</h3><div class="empty">Nothing yet — ask for ideas at the next meeting; members send them from their profile.</div></div>`;
+  return `<div class="card"><h3>💡 Suggestions <span class="muted small">(${list.length}${fresh?`, ${fresh} new`:''})</span></h3>
+    ${list.map(s=>{
+      const who=s.hide_name?'<i>name hidden</i>':esc((memberById(s.profile_id)||{}).name||'former member');
+      return `<div style="padding:8px 0;border-bottom:1px dashed var(--line)">
+        <div><b>${esc(s.text)}</b></div>
+        <div class="small muted">${who} · ${fmtWhen(s.created_at)}</div>
+        <div class="row small" style="margin-top:6px">
+          <select style="width:auto" onchange="sugStatus('${s.id}',this.value)">
+            ${Object.keys(SUG_LABEL).map(k=>`<option value="${k}" ${s.status===k?'selected':''}>${SUG_LABEL[k]}</option>`).join('')}
+          </select>
+          <input type="text" class="grow" style="max-width:320px" placeholder="reply to the member (optional)" value="${esc(s.admin_note||'')}" onchange="sugNote('${s.id}',this.value)">
+          <button class="btn small" onclick="sugAnnounce('${s.id}')" title="Post this to everyone as a 'you said → we did' announcement">📣 You said → we did</button>
+          <button class="btn danger small" onclick="sugDel('${s.id}')">✕</button>
+        </div>
+      </div>`;
+    }).join('')}
+    <p class="small muted" style="margin-top:8px">“Hide my name” hides it from this list; as an officer you can still identify a suggestion if you must — so don't promise members full anonymity.</p>
+  </div>`;
+}
+function sugStatus(id,v){ const s=S.suggestions.find(s=>s.id===id); if(s)s.status=v; sync(api.updSuggestion(id,{status:v})); render(); }
+function sugNote(id,v){ const s=S.suggestions.find(s=>s.id===id); if(s)s.admin_note=v.trim(); sync(api.updSuggestion(id,{admin_note:v.trim()})); }
+async function sugAnnounce(id){
+  const s=S.suggestions.find(s=>s.id===id); if(!s)return;
+  const text=`💡 You said: “${s.text}” → ${s.admin_note||'Done!'}`;
+  try{
+    const row=await api.addAnnouncement(text); S.announcements.push(row);
+    if(s.status!=='done'){ s.status='done'; sync(api.updSuggestion(id,{status:'done'})); }
+    render(); toast('Posted to the whole club 📣');
+  }catch(e){ toast('Could not post: '+(e.message||e)); }
+}
+function sugDel(id){
+  if(!confirm('Delete this suggestion?'))return;
+  S.suggestions=S.suggestions.filter(s=>s.id!==id);
+  sync(api.delSuggestion(id)); render();
+}
+
+/* ================= SIGNUP DRIVE ================= */
+function copyText(t,msg){
+  const done=()=>toast(msg||'Copied ✓');
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(done,()=>fallback());
+  else fallback();
+  function fallback(){
+    const ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    try{ document.execCommand('copy'); done(); }catch(e){ prompt('Copy this message:',t); }
+    ta.remove();
+  }
+}
+const APP_URL='https://wajahat934.github.io/toastmasters-club-app/';
+function signupDriveHtml(){
+  const mems=state.members.filter(m=>!m.external&&!m.archived);
+  const withLogin=mems.filter(m=>m.hasAccount);
+  const without=mems.filter(m=>!m.hasAccount);
+  const pct=mems.length?Math.round(withLogin.length/mems.length*100):0;
+  const invite=`🎤 *Rawalpindi Toastmasters — club app*\n\nBook your roles, see the agenda, track your Pathways progress and DCP goals, all in one place.\n\n👉 ${APP_URL}\n\nTap the link, choose *Create an account*, and an officer will approve you. On your phone use *Add to Home Screen* so it opens like an app.\n\nStuck? Message me and I'll set it up for you in 30 seconds.`;
+  return `<div class="card">
+    <h3>Signup drive <span class="muted small">(${withLogin.length} of ${mems.length} members — ${pct}%)</span></h3>
+    <div class="bar ${pct>=80?'met':''}"><div style="width:${pct}%"></div></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn small" onclick="copyInvite()">📋 Copy WhatsApp invite</button>
+      <span class="small muted">Paste it in the group, or send it to one person at a time — personal messages convert far better.</span>
+    </div>
+    <textarea id="inviteText" rows="7" style="width:100%;margin-top:8px;font-size:.85rem">${esc(invite)}</textarea>
+    <h3 style="margin-top:14px">Not signed up yet (${without.length})</h3>
+    ${without.length?without.map(m=>`<div class="row small" style="padding:4px 0;border-bottom:1px dashed var(--line)">
+        <span class="grow">${esc(m.name)}</span>
+        <button class="btn ghost small" onclick="copyNudge('${esc(m.name).replace(/'/g,'')}')">📋 personal nudge</button>
+      </div>`).join('')
+      :'<div class="empty">Everyone on the roster has an account 🎉</div>'}
+    <p class="small muted" style="margin-top:8px">Tip: split this list between 3–4 members who already signed up — peer-to-peer beats a group broadcast.</p>
+  </div>`;
+}
+function copyInvite(){ copyText(document.getElementById('inviteText').value,'Invite copied — paste it in WhatsApp'); }
+function copyNudge(name){
+  const first=String(name).split(' ')[0];
+  copyText(`Hi ${first}! 👋 We've moved role booking to the club app — your past roles and Pathways progress are already in there waiting for you.\n\n👉 ${APP_URL}\n\nTap *Create an account* (takes 30 seconds) and I'll approve you right away. Want me to do it with you before the next meeting?`,'Personal nudge copied');
+}
+
 /* ================= ADMIN: members & accounts ================= */
 let memView='roster';
 function viewMembers(){
@@ -1347,8 +1465,12 @@ function viewMembers(){
   <div class="row" style="margin-bottom:12px">
     <button class="btn ${memView==='roster'?'':'ghost'} small" onclick="memView='roster';render()">Roster</button>
     <button class="btn ${memView==='matrix'?'':'ghost'} small" onclick="memView='matrix';render()">Role history matrix</button>
+    <button class="btn ${memView==='signup'?'':'ghost'} small" onclick="memView='signup';render()">Signup drive</button>
+    <button class="btn ${memView==='sug'?'':'ghost'} small" onclick="memView='sug';render()">💡 Suggestions${S.suggestions.filter(s=>s.status==='new').length?' ('+S.suggestions.filter(s=>s.status==='new').length+')':''}</button>
   </div>`;
   if(memView==='matrix')return html+roleMatrix(h,abs);
+  if(memView==='signup')return html+signupDriveHtml();
+  if(memView==='sug')return html+sugAdminHtml();
   const active=state.members.filter(m=>!m.archived&&(m.approved||!m.hasAccount));
   if(!active.length)html+=`<div class="empty">No members yet.</div>`;
   for(const mem of active)html+=memberCard(mem,h[mem.id]||{},abs[mem.id]||0);
@@ -1688,6 +1810,14 @@ function viewSettings(){
       <button class="btn small" onclick="roleAdd()">Add role</button>
     </div>
     <p class="small muted">Changing roles applies to all meetings and to what members can book.</p>
+  </div>
+  <h2>Getting members on board</h2>
+  <div class="card">
+    <div class="row">
+      <a class="btn" href="guide.html" target="_blank" style="text-decoration:none">🖨 Member guide (printable, with QR)</a>
+      <button class="btn ghost" onclick="setTab('members');memView='signup';render()">Signup drive tracker</button>
+    </div>
+    <p class="small muted" style="margin:8px 0 0">Print the guide for the table at your signup session — the QR code goes straight to this app.</p>
   </div>
   <h2>Backup</h2>
   <div class="card">
@@ -2287,7 +2417,7 @@ async function reload(){
   S.profiles=raw.profiles; S.meetings=raw.meetings; S.assignments=raw.assignments;
   S.awards=raw.awards; S.goals=raw.goals;
   S.polls=raw.polls||[]; S.votes=raw.votes||[]; S.announcements=raw.announcements||[];
-  S.birthdayChanges=raw.birthdayChanges||[];
+  S.birthdayChanges=raw.birthdayChanges||[]; S.suggestions=raw.suggestions||[];
   S._hadSettings=!!(raw.settingsRows[0]&&raw.settingsRows[0].data&&raw.settingsRows[0].data.roles);
   S.settings=S._hadSettings?raw.settingsRows[0].data:defaultSettings();
   S.dcp={}; for(const r of raw.dcpRows)S.dcp[r.year]=r.data;
@@ -2387,6 +2517,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   spkDelta,setMeetingTT,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   vcPick,startPoll,addCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
   bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
+  sugAdd,sugStatus,sugNote,sugAnnounce,sugDel,copyInvite,copyNudge,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});
