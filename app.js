@@ -2115,8 +2115,17 @@ const AgendaApp=(function(){
         const actTd=document.createElement('td');
         if(row.kind==='speaker'){
           spkN++;
+          const lbl=document.createElement('span');
+          lbl.title='Click to rename (clear it to go back to "Prepared Speaker N")';
+          lbl.innerHTML=row.label||`Prepared Speaker ${spkN}`;
+          /* blank it out and the row falls back to the auto-numbered label */
+          makeEditable(lbl,()=>{ row.label=lbl.innerText.trim()?lbl.innerHTML:undefined; });
+          actTd.appendChild(lbl);
           const note=AG_PRESETS[row.preset].label;
-          actTd.innerHTML=`Prepared Speaker ${spkN}`+(note?` <span class="role-note">${note}</span>`:'');
+          if(note){
+            const n=document.createElement('span'); n.className='role-note';
+            n.textContent=' '+note; actTd.appendChild(n);
+          }
           const sel=document.createElement('select'); sel.className='preset no-print';
           for(const k in AG_PRESETS){
             const o=document.createElement('option'); o.value=k; o.textContent=AG_PRESETS[k].name;
@@ -2257,7 +2266,7 @@ const AgendaApp=(function(){
     return {
       blocks:blocks.map(b=>b.type==='break'?{type:'break',dur:b.dur}
         :{type:b.type,id:b.id,title:b.title,removable:b.removable,
-          rows:b.rows.map(r=>({kind:r.kind,fill:r.fill,act:r.act,who:r.who,dur:r.dur,preset:r.preset,autoMode:r.autoMode,lights:[...(r.lights||['','',''])]}))}),
+          rows:b.rows.map(r=>({kind:r.kind,fill:r.fill,act:r.act,label:r.label,who:r.who,dur:r.dur,preset:r.preset,autoMode:r.autoMode,lights:[...(r.lights||['','',''])]}))}),
       inputs:{date:g('agDate').value,start:g('agStart').value,no:g('agNo').value,
               buf:g('agBuf').value,bufE:g('agBufE').value,tt:g('agTT').checked,sp:g('agSp').checked},
       texts:staticEditables().map(el=>el.innerHTML),
