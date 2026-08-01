@@ -28,6 +28,20 @@ nav.tabs{display:flex;gap:4px;margin-top:16px;flex-wrap:wrap}
 nav.tabs button{background:transparent;border:none;color:var(--accent-ink);opacity:.7;padding:8px 14px;font:inherit;font-weight:600;cursor:pointer;border-radius:6px 6px 0 0;border-bottom:3px solid transparent}
 nav.tabs button:hover{opacity:1}
 nav.tabs button.on{opacity:1;border-bottom-color:var(--gold);background:rgba(255,255,255,.08)}
+/* the rehearsal tab: set apart, dimmer and smaller, so a thumb reaching for a
+   real tab mid-meeting doesn't land on it */
+/* forced onto a line of its own: when the bar wraps on a phone it would
+   otherwise end up a few px from a real tab, which is the misfire we're
+   avoiding. The margin then keeps it clear of the left edge too. */
+nav.tabs button.practice{flex:0 0 auto;margin-left:auto;margin-top:8px}
+nav.tabs button.practice::before{content:"";display:block}
+nav.tabs .tabbreak{flex-basis:100%;height:0;margin:0}
+nav.tabs button.practice{opacity:.45;font-size:.82rem;font-weight:500;padding:6px 10px;
+  border:1px dashed rgba(255,255,255,.45);border-radius:6px;border-bottom-width:1px}
+nav.tabs button.practice:hover{opacity:.85}
+nav.tabs button.practice.on{opacity:1;border-style:dashed;border-color:var(--gold);
+  border-bottom-color:var(--gold);background:rgba(255,255,255,.10)}
+.banner.practice-banner{background:var(--gold-soft);border:1.5px dashed var(--gold);font-size:.88rem}
 h2{font-family:var(--serif);font-size:1.25rem;margin:28px 0 12px}
 h3{font-size:.98rem;margin:0 0 8px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}

@@ -489,9 +489,9 @@ let viewAsMember=false;
 function actingAdmin(){ return isAdmin&&!viewAsMember; }
 function tabsFor(){
   if(isAdmin&&!viewAsMember)
-    return [['schedule','Roles & Meetings'],['agenda','Agenda'],['voting','Voting'],['members','Members'],['dcp','DCP Goals'],['me','My Profile'],['settings','Settings']];
+    return [['schedule','Roles & Meetings'],['agenda','Agenda'],['voting','Voting'],['members','Members'],['dcp','DCP Goals'],['me','My Profile'],['settings','Settings'],['practice','🧪 Practice']];
   const t=[['book','Book a Role'],['me','My Profile']];
-  if(state&&vcMeetings().length)t.push(['voting','Vote Counter']);
+  if(state&&vcMeetings().length){ t.push(['voting','Vote Counter']); t.push(['practice','🧪 Practice']); }
   return t;
 }
 /* A live update (someone votes, a candidate is added) rebuilds the whole tab,
@@ -534,7 +534,8 @@ function render(){
   const TABS=tabsFor();
   if(!TABS.some(([id])=>id===tab))tab=TABS[0][0];
   document.getElementById('tabs').innerHTML=TABS.map(([id,label])=>
-    `<button class="${tab===id?'on':''}" onclick="setTab('${id}')">${label}</button>`).join('');
+    (id==='practice'?'<span class="tabbreak"></span>':'')+
+    `<button class="${tab===id?'on':''}${id==='practice'?' practice':''}" onclick="setTab('${id}')">${label}</button>`).join('');
   const main=document.getElementById('main');
   if(tab==='schedule')main.innerHTML=noticesHtml()+winnersBoardHtml()+annManagerHtml()+viewSchedule();
   else if(tab==='agenda'){ AgendaApp.mount(main); return; }
@@ -544,6 +545,7 @@ function render(){
   else if(tab==='settings')main.innerHTML=viewSettings();
   else if(tab==='book')main.innerHTML=congratsHtml()+noticesHtml()+openVoteCardsHtml()+winnersBoardHtml()+viewBook();
   else if(tab==='me')main.innerHTML=congratsHtml()+noticesHtml()+viewMe();
+  else if(tab==='practice')main.innerHTML=viewPractice();
   putScroll(keepScroll);
 }
 function setTab(t){ tab=t; try{localStorage.setItem('lastTab',t);}catch(e){} render(); window.scrollTo(0,0); }
@@ -935,6 +937,178 @@ function openVoteCardsHtml(){
     </div>`;
   }
   return html;
+}
+
+/* ================= PRACTICE: Vote Counter rehearsal =================
+   A sandbox so the Vote Counter can rehearse a live count before standing up
+   in front of the club. Deliberately a parallel implementation rather than a
+   flag threaded through the real one: it holds its own polls, its own made-up
+   roster and its own votes, and calls no api.* method at all, so there is no
+   code path by which a rehearsal can touch club data. Nothing here is saved
+   or shared — a refresh wipes it. */
+const PRACTICE_NAMES=['John Carter','David Mills','Sarah Bennett','Emily Hayes','Michael Doyle',
+  'Olivia Grant','James Whitfield','Sophia Reynolds','Daniel Foster','Grace Sullivan',
+  'Christopher Anderson','Ruth Bell'];
+let pMembers=null,pPolls=[],pVotes=[],pTie={},pTrickle=null;
+function pRoster(){
+  if(!pMembers)pMembers=PRACTICE_NAMES.map((n,i)=>({id:'pm'+i,name:n}));
+  return pMembers;
+}
+function pMemberById(id){ return pRoster().find(m=>m.id===id)||null; }
+function pAppVotes(p){
+  const t={}; for(const c of p.candidates)t[c.key]=0;
+  const paper=new Set(p.paper_voters||[]);
+  for(const v of pVotes)if(v.poll_id===p.id&&!paper.has(v.voter)&&t[v.key]!=null)t[v.key]++;
+  return t;
+}
+function pTally(p){
+  const app=pAppVotes(p),t={};
+  for(const c of p.candidates)t[c.key]=Number((p.adjust||{})[c.key]||0)+app[c.key];
+  return t;
+}
+function pStart(cat){
+  cat=(cat||'').trim(); if(!cat){toast('Give the category a name');return;}
+  /* three random practice members so there is something to count straight away */
+  const pool=[...pRoster()].sort(()=>Math.random()-0.5).slice(0,3);
+  pPolls.push({id:'pp'+uid(),category:cat,status:'open',winner_key:null,adjust:{},paper_voters:[],
+    candidates:pool.map(m=>({key:m.id,name:m.name}))});
+  render();
+}
+function pAdd(pollId,v){
+  const p=pPolls.find(x=>x.id===pollId); if(!p)return;
+  if(v==='__custom'){
+    const name=prompt('Practice candidate name:'); if(!name){render();return;}
+    p.candidates.push({key:'pc'+uid(),name:name.trim()});
+  } else {
+    const m=pMemberById(v); if(!m||p.candidates.some(c=>c.key===m.id)){render();return;}
+    p.candidates.push({key:m.id,name:m.name});
+  }
+  render();
+}
+function pAdjust(pollId,key,d){
+  const p=pPolls.find(x=>x.id===pollId); if(!p)return;
+  p.adjust=p.adjust||{};
+  p.adjust[key]=Math.max(0,Number(p.adjust[key]||0)+d);
+  render();
+}
+function pPaper(pollId,pid,add){
+  const p=pPolls.find(x=>x.id===pollId); if(!p)return;
+  const list=new Set(p.paper_voters||[]);
+  add?list.add(pid):list.delete(pid);
+  p.paper_voters=[...list];
+  render();
+}
+/* one made-up member votes for a random candidate; re-voting replaces their
+   earlier choice, exactly like the real thing */
+function pCastOne(pollId){
+  const p=pPolls.find(x=>x.id===pollId);
+  if(!p||p.status!=='open'||!p.candidates.length)return false;
+  const voter=pRoster()[Math.floor(Math.random()*pRoster().length)];
+  const cand=p.candidates[Math.floor(Math.random()*p.candidates.length)];
+  const ex=pVotes.find(v=>v.poll_id===p.id&&v.voter===voter.id);
+  if(ex)ex.key=cand.key; else pVotes.push({poll_id:p.id,voter:voter.id,key:cand.key});
+  return true;
+}
+function pVote(pollId){ if(pCastOne(pollId))render(); }
+function pTrickleToggle(pollId){
+  if(pTrickle){ clearInterval(pTrickle); pTrickle=null; render(); return; }
+  pTrickle=setInterval(()=>{
+    const p=pPolls.find(x=>x.id===pollId);
+    if(!p||p.status!=='open'){ clearInterval(pTrickle); pTrickle=null; render(); return; }
+    pCastOne(pollId); renderLive();     /* same deferred-redraw path as a real vote */
+  },1400);
+  render();
+}
+function pClose(pollId){
+  const p=pPolls.find(x=>x.id===pollId); if(!p)return;
+  const t=pTally(p);
+  const best=Math.max(0,...Object.values(t));
+  const top=Object.keys(t).filter(k=>t[k]===best);
+  if(!best){ toast('No votes yet — cast a few first'); return; }
+  if(top.length>1){ pTie[p.id]=top; toast('Tie — pick the winner'); render(); return; }
+  delete pTie[p.id]; p.status='closed'; p.winner_key=top[0]; render();
+}
+function pFinalize(pollId,key){
+  const p=pPolls.find(x=>x.id===pollId); if(!p)return;
+  delete pTie[p.id]; p.status='closed'; p.winner_key=key; render();
+}
+function pReopen(pollId){
+  const p=pPolls.find(x=>x.id===pollId); if(!p)return;
+  p.status='open'; p.winner_key=null; render();
+}
+function pDelete(pollId){
+  pPolls=pPolls.filter(x=>x.id!==pollId);
+  pVotes=pVotes.filter(v=>v.poll_id!==pollId);
+  render();
+}
+function pReset(){
+  if(pPolls.length&&!confirm('Clear the whole practice run and start fresh?'))return;
+  if(pTrickle){ clearInterval(pTrickle); pTrickle=null; }
+  pPolls=[]; pVotes=[]; pTie={}; render();
+}
+function pPollCard(p){
+  const app=pAppVotes(p),total=pTally(p),tie=pTie[p.id];
+  const wname=(p.candidates.find(c=>c.key===p.winner_key)||{}).name||'—';
+  return `<div class="card" ${p.status==='closed'?'style="border-color:var(--good)"':''}>
+    <div class="row"><h3 class="grow" style="margin:0">${esc(p.category)}
+      ${p.status==='closed'?`<span class="pill done">closed</span> <span class="chip gold" title="${esc(wname)}">🏆 ${esc(vcShortName(wname))}</span>`:'<span class="pill other">voting open</span>'}</h3>
+      ${p.status==='open'?`<button class="btn small" onclick="pClose('${p.id}')">Close voting</button>`
+        :`<button class="btn ghost small" onclick="pReopen('${p.id}')">Reopen</button>`}
+      <button class="btn danger small" onclick="pDelete('${p.id}')">✕</button>
+    </div>
+    <div class="tblwrap" data-scroll="prac-${p.id}"><table><thead><tr><th>Candidate</th><th class="num">App votes</th><th class="num">Paper</th><th class="num">Total</th></tr></thead><tbody>
+      ${p.candidates.map(c=>`<tr>
+        <td title="${esc(c.name)}">${esc(vcShortName(c.name))} ${p.winner_key===c.key?'🏆':''}</td>
+        <td class="num">${app[c.key]}</td>
+        <td class="num">
+          <button class="btn ghost small" onclick="pAdjust('${p.id}','${c.key}',-1)">−</button>
+          ${Number((p.adjust||{})[c.key]||0)}
+          <button class="btn ghost small" onclick="pAdjust('${p.id}','${c.key}',1)">＋</button>
+        </td>
+        <td class="num"><b>${total[c.key]}</b></td>
+      </tr>`).join('')}
+    </tbody></table></div>
+    ${tie?`<div class="warnline">⚖ It's a tie — pick the winner:
+      ${tie.map(k=>{const c=p.candidates.find(c=>c.key===k);return `<button class="btn small" title="${esc(c?c.name:k)}" onclick="pFinalize('${p.id}','${k}')">${esc(vcShortName(c?c.name:k))}</button>`;}).join(' ')}
+    </div>`:''}
+    ${p.status==='open'?`<div class="row small" style="margin-top:8px">
+      <button class="btn ghost small" onclick="pVote('${p.id}')">🗳 Cast a vote</button>
+      <button class="btn ${pTrickle?'good':'ghost'} small" onclick="pTrickleToggle('${p.id}')">${pTrickle?'⏸ Stop live votes':'▶ Votes rolling in'}</button>
+      <select style="width:auto" onchange="if(this.value){pAdd('${p.id}',this.value);}">
+        <option value="">＋ Add candidate…</option>
+        ${pRoster().filter(m=>!p.candidates.some(c=>c.key===m.id)).map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}
+        <option value="__custom">Custom name…</option>
+      </select>
+      <span class="muted" style="margin-left:10px">🧾 Voted on paper:</span>
+      ${(p.paper_voters||[]).map(pid=>{const mm=pMemberById(pid);return `<span class="chip bad" title="${esc(mm?mm.name:'?')}">${esc(vcShortName(mm?mm.name:'?'))} <a style="cursor:pointer" onclick="pPaper('${p.id}','${pid}',false)">✕</a></span>`;}).join('')||'<span class="muted small">none</span>'}
+      <select style="width:auto" onchange="if(this.value){pPaper('${p.id}',this.value,true);}">
+        <option value="">＋ Mark member…</option>
+        ${pRoster().filter(m=>!(p.paper_voters||[]).includes(m.id)).map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}
+      </select></div>`:''}
+  </div>`;
+}
+function viewPractice(){
+  return `<h2>🧪 Practice — Vote Counter</h2>
+  <div class="banner practice-banner">
+    <strong>Practice mode.</strong> Made-up names, made-up votes. Nothing here is saved, nothing
+    is shared with the club, and no real vote is affected. Rehearse as often as you like —
+    a refresh clears it.
+  </div>
+  <div class="card sub">
+    <p class="small muted" style="margin:0 0 8px">Open a category, then either tap <b>Cast a vote</b> yourself or
+    let <b>Votes rolling in</b> trickle them in the way phones do on the night. Close the voting to see
+    the winner — force a tie by keeping the totals level and you'll get the tie-break too.</p>
+    <div class="row">
+      ${STANDARD_CATS.map(c=>`<button class="btn small" onclick="pStart('${c}')">＋ ${c}</button>`).join('')}
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input type="text" id="pCat" class="grow" placeholder="Custom category" style="max-width:260px">
+      <button class="btn small" onclick="pStart(document.getElementById('pCat').value)">＋ Start</button>
+      <span class="grow"></span>
+      <button class="btn ghost small" onclick="pReset()">↺ Clear practice run</button>
+    </div>
+  </div>
+  ${pPolls.map(pPollCard).join('')||'<div class="empty">No practice votes yet — start a category above.</div>'}`;
 }
 
 /* ================= MEMBER: booking ================= */
@@ -2673,6 +2847,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   spkDelta,setMeetingTT,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   vcPick,startPoll,addCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
+  pStart,pAdd,pAdjust,pPaper,pVote,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
   bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
   sugAdd,sugStatus,sugNote,sugAnnounce,sugDel,copyInvite,copyNudge,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
