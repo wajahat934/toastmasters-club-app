@@ -815,6 +815,11 @@ async function startPoll(mid,cat){
   if(!cat){toast('Give the category a name');return;}
   const m=state.meetings.find(x=>x.id===mid); if(!m)return;
   if(!canOpenVoting(m)){toast('Voting opens on the meeting day at 5:00 am');return;}
+  /* the starter buttons already hide a used category, but the custom box can
+     still retype one — two polls for the same award would split the vote */
+  if(pollsFor(mid).some(p=>p.category.trim().toLowerCase()===cat.trim().toLowerCase())){
+    toast('There is already a “'+cat+'” vote for this meeting'); return;
+  }
   try{
     const row=await api.createPoll({meeting_id:mid,category:cat,candidates:prefillCandidates(m,cat),adjust:{}});
     S.polls.push(row); render();
@@ -968,6 +973,9 @@ function pTally(p){
 }
 function pStart(cat){
   cat=(cat||'').trim(); if(!cat){toast('Give the category a name');return;}
+  if(pPolls.some(p=>p.category.trim().toLowerCase()===cat.toLowerCase())){
+    toast('There is already a “'+cat+'” vote in this practice run'); return;
+  }
   /* three random practice members so there is something to count straight away */
   const pool=[...pRoster()].sort(()=>Math.random()-0.5).slice(0,3);
   pPolls.push({id:'pp'+uid(),category:cat,status:'open',winner_key:null,adjust:{},paper_voters:[],
@@ -1099,7 +1107,9 @@ function viewPractice(){
     let <b>Votes rolling in</b> trickle them in the way phones do on the night. Close the voting to see
     the winner — force a tie by keeping the totals level and you'll get the tie-break too.</p>
     <div class="row">
-      ${STANDARD_CATS.map(c=>`<button class="btn small" onclick="pStart('${c}')">＋ ${c}</button>`).join('')}
+      ${STANDARD_CATS.filter(c=>!pPolls.some(p=>p.category===c))
+        .map(c=>`<button class="btn small" onclick="pStart('${c}')">＋ ${c}</button>`).join('')
+        ||'<span class="muted small">All five categories are running — close or clear one to start it again.</span>'}
     </div>
     <div class="row" style="margin-top:8px">
       <input type="text" id="pCat" class="grow" placeholder="Custom category" style="max-width:260px">
