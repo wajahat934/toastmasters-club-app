@@ -107,6 +107,23 @@ details.mem .body{padding:12px 16px}
 #authWrap .authswitch{text-align:center;margin-top:14px;font-size:.85rem}
 #authWrap .authswitch a{color:var(--accent);cursor:pointer;text-decoration:underline}
 #authWrap .err{color:var(--maroon);font-size:.85rem;margin-top:10px;min-height:1.2em}
+#resetWrap{max-width:420px;margin:60px auto;padding:0 20px}
+#resetWrap .card{padding:24px}
+#resetWrap h1{font-family:var(--serif);font-size:1.5rem;margin:0 0 4px;text-align:center}
+#resetWrap .sub{text-align:center;color:var(--muted);font-size:.82rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:18px}
+#resetWrap label{display:block;font-size:.8rem;color:var(--muted);margin:10px 0 3px}
+#resetWrap .authswitch{text-align:center;margin-top:14px;font-size:.85rem}
+#resetWrap .authswitch a{color:var(--accent);cursor:pointer;text-decoration:underline}
+#resetWrap .err{color:var(--maroon);font-size:.85rem;margin-top:10px;min-height:1.2em}
+#authWrap #forgotRow{margin-top:6px}
+/* reveal toggle sits inside the field so the input keeps its full width */
+.pwwrap{position:relative}
+.pwwrap input{padding-right:38px}
+.pwwrap .pweye{position:absolute;top:0;right:0;height:100%;width:34px;display:flex;align-items:center;
+  justify-content:center;background:none;border:0;padding:0;cursor:pointer;font-size:.95rem;
+  line-height:1;opacity:.5;color:var(--ink)}
+.pwwrap .pweye:hover{opacity:1}
+.pwwrap .pweye[aria-pressed="true"]{opacity:1;color:var(--accent)}
 
 /* ---- member booking ---- */
 .bookslot{display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:var(--surface2)}

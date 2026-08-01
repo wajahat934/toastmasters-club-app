@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#004165">
 <link rel="icon" type="image/png" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=31">
+<link rel="stylesheet" href="styles.css?v=32">
 </head>
 <body>
 
@@ -37,13 +37,38 @@
       <label for="authEmail">Email</label>
       <input type="email" id="authEmail" autocomplete="email" required>
       <label for="authPass">Password</label>
-      <input type="password" id="authPass" autocomplete="current-password" required minlength="6">
+      <div class="pwwrap">
+        <input type="password" id="authPass" autocomplete="current-password" required minlength="6">
+        <button type="button" class="pweye" id="authPassEye" aria-label="Show password" aria-pressed="false" title="Show password">👁</button>
+      </div>
       <div class="err" id="authErr"></div>
       <button class="btn" id="authGo" style="width:100%;margin-top:6px">Sign in</button>
     </form>
     <div class="authswitch" id="authSwitch">
       New here? <a id="authToggle">Create an account</a>
     </div>
+    <div class="authswitch" id="forgotRow">
+      <a id="authForgot">Forgot your password?</a>
+    </div>
+  </div>
+</div>
+
+<!-- set a new password (arrived from the emailed reset link) -->
+<div id="resetWrap" style="display:none">
+  <div class="card">
+    <h1>Choose a new password</h1>
+    <div class="sub">Rawalpindi Toastmasters Club</div>
+    <form id="resetForm">
+      <label for="resetPass">New password</label>
+      <div class="pwwrap">
+        <input type="password" id="resetPass" autocomplete="new-password" required minlength="6">
+        <button type="button" class="pweye" id="resetPassEye" aria-label="Show password" aria-pressed="false" title="Show password">👁</button>
+      </div>
+      <p class="small muted" style="margin:6px 0 0">At least 6 characters. Tap the eye to check what you typed.</p>
+      <div class="err" id="resetErr"></div>
+      <button class="btn" id="resetGo" style="width:100%;margin-top:6px">Save new password</button>
+    </form>
+    <div class="authswitch"><a id="resetCancel">Cancel</a></div>
   </div>
 </div>
 
@@ -71,8 +96,8 @@
 
 <div id="toast" role="status"></div>
 
-<script src="config.js?v=31"></script>
-<script src="assets.js?v=31"></script>
-<script type="module" src="app.js?v=31"></script>
+<script src="config.js?v=32"></script>
+<script src="assets.js?v=32"></script>
+<script type="module" src="app.js?v=32"></script>
 </body>
 </html>

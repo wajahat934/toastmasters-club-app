@@ -52,7 +52,10 @@ const SupabaseApi={
     sb=createClient(window.CLUB_CONFIG.SUPABASE_URL,window.CLUB_CONFIG.SUPABASE_ANON_KEY);
     /* re-route only on sign-out or the first sign-in; routine token
        refreshes must NOT re-enter the app (it would reset the current tab) */
-    sb.auth.onAuthStateChange((ev,_s)=>{ if(ev==='SIGNED_OUT'||!entered)route(); });
+    sb.auth.onAuthStateChange((ev,_s)=>{
+      if(ev==='PASSWORD_RECOVERY')recoveryMode=true;   /* belt-and-braces: the hash sniff already caught it */
+      if(ev==='SIGNED_OUT'||ev==='PASSWORD_RECOVERY'||!entered)route();
+    });
   },
   async session(){ return (await sb.auth.getSession()).data.session; },
   async signUp(email,pass,name,birthday){
@@ -66,6 +69,16 @@ const SupabaseApi={
       if(birthday)localStorage.setItem('pendingBday',birthday);
       throw {message:'Check your email to confirm the account, then sign in.'};
     }
+  },
+  async resetPassword(email){
+    /* redirectTo must be listed under Auth -> URL Configuration in Supabase,
+       otherwise the emailed link silently bounces to the Site URL instead */
+    const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:APP_URL});
+    if(error)throw error;
+  },
+  async updatePassword(pass){
+    const {error}=await sb.auth.updateUser({password:pass});
+    if(error)throw error;
   },
   async signIn(email,pass){
     const {error}=await sb.auth.signInWithPassword({email,password:pass});
@@ -208,6 +221,8 @@ const DemoApi=(function(){
     demoEnter(kind){ auth=kind==='admin'?'demo-admin':'demo-member'; route(); },
     async signUp(email,pass,name){ profiles.push(P(name,{auth_id:'demo-'+uid(),email,approved:false})); throw {message:'Demo: account created as pending — sign in as admin to see the approval flow.'}; },
     async signIn(email){ if(email==='admin@demo')auth='demo-admin'; else if(email==='member@demo')auth='demo-member'; else throw {message:'Demo mode: use the buttons above, or admin@demo / member@demo.'}; },
+    async resetPassword(email){ throw {message:'Demo: a reset link would be emailed to '+email+'.'}; },
+    async updatePassword(){ /* demo: nothing to store */ },
     async signOut(){ auth=null; },
     async myProfile(){ return profiles.find(p=>p.auth_id===auth)||null; },
     /* return copies of rows AND of the arrays — the app mutates its own state
@@ -1031,9 +1046,25 @@ function viewMe(){
       </div>
       ${mySuggestionsHtml(mem.id)}
     </div>
+    <div class="sect"><h3>🔑 Password</h3>
+      <div class="row">
+        <div class="pwwrap" style="max-width:240px;flex:1">
+          <input type="password" id="meNewPw" autocomplete="new-password" minlength="6" placeholder="New password (min 6)">
+          <button type="button" class="pweye" id="meNewPwEye" aria-label="Show password" aria-pressed="false" title="Show password">👁</button>
+        </div>
+        <button class="btn small" onclick="meChangePw()">Change password</button>
+      </div>
+    </div>
     <div class="sect"><h3>Roles I've completed</h3>${roleChips}
       ${abs[mem.id]?`<div class="small muted" style="margin-top:4px">absences: ${abs[mem.id]}</div>`:''}</div>
   </div>`;
+}
+async function meChangePw(){
+  const inp=document.getElementById('meNewPw'); if(!inp)return;
+  const pw=inp.value;
+  if(pw.length<6){ toast('Please use at least 6 characters'); return; }
+  try{ await api.updatePassword(pw); inp.value=''; toast('Password changed'); }
+  catch(e){ toast('Could not change it: '+(e.message||e)); }
 }
 function meSet(k,v){
   const mem=memberById(me.profileId); if(!mem)return;
@@ -2432,7 +2463,7 @@ const AgendaApp=(function(){
    SESSION FLOW
    ============================================================ */
 function show(id){
-  for(const x of ['authWrap','pendingWrap','appWrap'])
+  for(const x of ['authWrap','pendingWrap','appWrap','resetWrap'])
     document.getElementById(x).style.display=(x===id)?'':'none';
 }
 async function reload(){
@@ -2480,6 +2511,10 @@ async function dateRollCheck(){
 async function route(){
   try{
     const session=await api.session();
+    /* the emailed link signs them in for real, so this check must come before
+       the session check — otherwise they land straight in the app and the
+       wrong password is never replaced */
+    if(recoveryMode&&session){ show('resetWrap'); document.getElementById('resetPass').focus(); return; }
     if(!session){ show('authWrap'); return; }
     const profile=await api.myProfile();
     if(!profile){ show('authWrap'); return; }
@@ -2490,6 +2525,22 @@ async function route(){
 
 /* ---------- auth UI ---------- */
 let authMode='signin';
+/* supabase-js consumes and clears the URL hash while it builds the session, so
+   the recovery marker has to be read before init() ever runs */
+let recoveryMode=/[#&?]type=recovery/.test(location.hash)||/[?&]type=recovery/.test(location.search);
+/* delegated so it also covers the field on the profile tab, which is re-rendered */
+function bindPwEyes(){
+  document.addEventListener('click',e=>{
+    const eye=e.target.closest('.pweye'); if(!eye)return;
+    const inp=eye.parentElement.querySelector('input'); if(!inp)return;
+    const reveal=inp.type==='password';
+    inp.type=reveal?'text':'password';
+    eye.setAttribute('aria-pressed',String(reveal));
+    eye.title=reveal?'Hide password':'Show password';
+    eye.setAttribute('aria-label',eye.title);
+    inp.focus();
+  });
+}
 function bindAuth(){
   const form=document.getElementById('authForm');
   const errEl=document.getElementById('authErr');
@@ -2503,10 +2554,11 @@ function bindAuth(){
     document.getElementById('authGo').textContent=authMode==='signup'?'Create account':'Sign in';
     document.getElementById('authSwitch').firstChild.textContent=authMode==='signup'?'Already a member? ':'New here? ';
     document.getElementById('authToggle').textContent=authMode==='signup'?'Sign in instead':'Create an account';
-    errEl.textContent='';
+    document.getElementById('forgotRow').style.display=authMode==='signup'?'none':'';
+    errEl.style.color=''; errEl.textContent='';
   });
   form.addEventListener('submit',async e=>{
-    e.preventDefault(); errEl.textContent='';
+    e.preventDefault(); errEl.style.color=''; errEl.textContent='';
     const email=document.getElementById('authEmail').value.trim();
     const pass=document.getElementById('authPass').value;
     try{
@@ -2518,6 +2570,32 @@ function bindAuth(){
       } else await api.signIn(email,pass);
       await route();
     }catch(err){ errEl.textContent=err.message||String(err); }
+  });
+  bindPwEyes();
+  document.getElementById('authForgot').addEventListener('click',async()=>{
+    const email=document.getElementById('authEmail').value.trim();
+    if(!email){ errEl.textContent='Type your email address above first, then tap this again.'; return; }
+    errEl.textContent='';
+    try{
+      await api.resetPassword(email);
+      errEl.style.color='var(--accent)';
+      errEl.textContent='Reset link sent to '+email+'. Check your inbox (and spam), then tap the link.';
+    }catch(err){ errEl.style.color=''; errEl.textContent=err.message||String(err); }
+  });
+  const resetForm=document.getElementById('resetForm'),resetErr=document.getElementById('resetErr');
+  resetForm.addEventListener('submit',async e=>{
+    e.preventDefault(); resetErr.textContent='';
+    const pw=document.getElementById('resetPass').value;
+    if(pw.length<6){ resetErr.textContent='Please use at least 6 characters.'; return; }
+    try{
+      await api.updatePassword(pw);
+      recoveryMode=false;
+      toast('Password updated — you are signed in.');
+      await route();
+    }catch(err){ resetErr.textContent=err.message||String(err); }
+  });
+  document.getElementById('resetCancel').addEventListener('click',async()=>{
+    recoveryMode=false; await api.signOut(); route();
   });
   document.getElementById('pendingRefresh').addEventListener('click',route);
   document.getElementById('pendingOut').addEventListener('click',async()=>{ await api.signOut(); route(); });
@@ -2542,7 +2620,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
   sugAdd,sugStatus,sugNote,sugAnnounce,sugDel,copyInvite,copyNudge,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
-  myBook,myUnbook,meSet,meGoalAdd,meGoalToggle,meGoalDel,route});
+  myBook,myUnbook,meSet,meChangePw,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});
 Object.defineProperty(window,'dcpSelYear',{get:()=>dcpSelYear,set:v=>{dcpSelYear=v;}});
 
