@@ -494,7 +494,39 @@ function tabsFor(){
   if(state&&vcMeetings().length)t.push(['voting','Vote Counter']);
   return t;
 }
+/* A live update (someone votes, a candidate is added) rebuilds the whole tab,
+   which throws away the sideways scroll on the vote table. Carry it over. */
+function grabScroll(){
+  const m={};
+  document.querySelectorAll('#main .tblwrap[data-scroll]').forEach(el=>{
+    if(el.scrollLeft)m[el.dataset.scroll]=el.scrollLeft;
+  });
+  return m;
+}
+function putScroll(m){
+  document.querySelectorAll('#main .tblwrap[data-scroll]').forEach(el=>{
+    const v=m[el.dataset.scroll]; if(v)el.scrollLeft=v;
+  });
+}
+/* Rebuilding #main while a native <select> picker is open snaps it shut, so a
+   vote landing mid-scroll would close the Vote Counter's candidate list under
+   the officer's thumb. Hold the redraw until they're done with it. */
+let liveTimer=null;
+function pickerOpen(){
+  const ae=document.activeElement;
+  return !!(ae&&ae.tagName==='SELECT'&&ae.closest('#main'));
+}
+/* Polled rather than hung off blur/focusout: dismissing a native picker without
+   choosing doesn't reliably fire either one, and a redraw that never arrives is
+   worse than one that arrives a moment late. */
+function renderLive(){
+  if(!pickerOpen()){ render(); return; }
+  clearInterval(liveTimer);
+  liveTimer=setInterval(()=>{ if(!pickerOpen())render(); },300);
+}
 function render(){
+  clearInterval(liveTimer);
+  const keepScroll=grabScroll();
   document.getElementById('hClub').textContent=state.settings.clubName||'Toastmasters Club';
   document.getElementById('uName').textContent=(me?me.name:'')+(isAdmin?(viewAsMember?' (member view)':' (admin)'):'');
   const va=document.getElementById('viewAs');
@@ -512,6 +544,7 @@ function render(){
   else if(tab==='settings')main.innerHTML=viewSettings();
   else if(tab==='book')main.innerHTML=congratsHtml()+noticesHtml()+openVoteCardsHtml()+winnersBoardHtml()+viewBook();
   else if(tab==='me')main.innerHTML=congratsHtml()+noticesHtml()+viewMe();
+  putScroll(keepScroll);
 }
 function setTab(t){ tab=t; try{localStorage.setItem('lastTab',t);}catch(e){} render(); window.scrollTo(0,0); }
 
@@ -713,19 +746,42 @@ function viewVoting(){
   }
   return html;
 }
+/* Long roster names overflow the Vote Counter's table on a phone. This shortens
+   them for DISPLAY ONLY — the stored candidate name, the winner record and the
+   pick-a-candidate dropdowns all keep the full spelling, so nobody has to guess
+   who "M. Ahsan W." is when they're looking for someone in the list.
+   Muhammad Ahsan Waheed -> M. Ahsan Waheed -> M. Ahsan W. */
+const VC_NAME_MAX=18;
+function vcShortName(name){
+  const full=String(name||'').trim();
+  if(full.length<=VC_NAME_MAX)return full;
+  const parts=full.split(/\s+/);
+  if(parts.length<2)return full;
+  const ini=w=>/^[A-Za-z]/.test(w)?w[0].toUpperCase()+'.':w;   /* leaves "$undas" alone */
+  const out=[...parts], join=()=>out.join(' ');
+  out[0]=ini(out[0]);
+  if(join().length<=VC_NAME_MAX)return join();
+  out[out.length-1]=ini(out[out.length-1]);
+  if(join().length<=VC_NAME_MAX)return join();
+  for(let i=1;i<out.length-1;i++){       /* four-part names: initial the middles too */
+    out[i]=ini(out[i]);
+    if(join().length<=VC_NAME_MAX)break;
+  }
+  return join();
+}
 function vcPollCard(p){
   const app=appVotes(p),total=pollTally(p);
   const tie=tieState[p.id];
   return `<div class="card" ${p.status==='closed'?'style="border-color:var(--good)"':''}>
     <div class="row"><h3 class="grow" style="margin:0">${esc(p.category)}
-      ${p.status==='closed'?`<span class="pill done">closed</span> <span class="chip gold">🏆 ${esc(winnerName(p))}</span>`:'<span class="pill other">voting open</span>'}</h3>
+      ${p.status==='closed'?`<span class="pill done">closed</span> <span class="chip gold" title="${esc(winnerName(p))}">🏆 ${esc(vcShortName(winnerName(p)))}</span>`:'<span class="pill other">voting open</span>'}</h3>
       ${p.status==='open'?`<button class="btn small" onclick="closePoll('${p.id}')">Close voting</button>`
         :`<button class="btn ghost small" onclick="reopenPoll('${p.id}')">Reopen</button>`}
       <button class="btn danger small" onclick="deletePoll('${p.id}')">✕</button>
     </div>
-    <div class="tblwrap"><table><thead><tr><th>Candidate</th><th class="num">App votes</th><th class="num">Paper</th><th class="num">Total</th></tr></thead><tbody>
+    <div class="tblwrap" data-scroll="poll-${p.id}"><table><thead><tr><th>Candidate</th><th class="num">App votes</th><th class="num">Paper</th><th class="num">Total</th></tr></thead><tbody>
       ${(p.candidates||[]).map(c=>`<tr>
-        <td>${esc(c.name)} ${p.winner_key===c.key?'🏆':''}</td>
+        <td title="${esc(c.name)}">${esc(vcShortName(c.name))} ${p.winner_key===c.key?'🏆':''}</td>
         <td class="num">${app[c.key]}</td>
         <td class="num">
           <button class="btn ghost small" onclick="adjustPoll('${p.id}','${c.key}',-1)">−</button>
@@ -736,7 +792,7 @@ function vcPollCard(p){
       </tr>`).join('')}
     </tbody></table></div>
     ${tie?`<div class="warnline">⚖ It's a tie — pick the winner:
-      ${tie.map(k=>{const c=p.candidates.find(c=>c.key===k);return `<button class="btn small" onclick="finalizePoll('${p.id}','${k}')">${esc(c?c.name:k)}</button>`;}).join(' ')}
+      ${tie.map(k=>{const c=p.candidates.find(c=>c.key===k);return `<button class="btn small" title="${esc(c?c.name:k)}" onclick="finalizePoll('${p.id}','${k}')">${esc(vcShortName(c?c.name:k))}</button>`;}).join(' ')}
     </div>`:''}
     ${p.status==='open'?`<div class="row small" style="margin-top:8px">
       <select style="width:auto" onchange="if(this.value){addCandidate('${p.id}',this.value);}">
@@ -745,7 +801,7 @@ function vcPollCard(p){
         <option value="__custom">Custom name…</option>
       </select>
       <span class="muted" style="margin-left:10px">🧾 Voted on paper:</span>
-      ${(p.paper_voters||[]).map(pid=>{const mm=memberById(pid);return `<span class="chip bad">${esc(mm?mm.name:'?')} <a style="cursor:pointer" onclick="paperVoter('${p.id}','${pid}',false)">✕</a></span>`;}).join('')||'<span class="muted small">none</span>'}
+      ${(p.paper_voters||[]).map(pid=>{const mm=memberById(pid);return `<span class="chip bad" title="${esc(mm?mm.name:'?')}">${esc(vcShortName(mm?mm.name:'?'))} <a style="cursor:pointer" onclick="paperVoter('${p.id}','${pid}',false)">✕</a></span>`;}).join('')||'<span class="muted small">none</span>'}
       <select style="width:auto" onchange="if(this.value){paperVoter('${p.id}',this.value,true);}" title="Marked members can't vote in the app for this poll (their app vote, if any, is removed)">
         <option value="">＋ Mark member…</option>
         ${state.members.filter(x=>!x.archived&&x.hasAccount&&!(p.paper_voters||[]).includes(x.id)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
@@ -2496,7 +2552,7 @@ async function enterApp(profile){
   show('appWrap'); render();
   if(!entered){
     entered=true;
-    api.subscribe(async(table,p)=>{ await reload(); if(['book','schedule','voting'].includes(tab))render(); });
+    api.subscribe(async(table,p)=>{ await reload(); if(['book','schedule','voting'].includes(tab))renderLive(); });
     setInterval(dateRollCheck,60000);
     document.addEventListener('visibilitychange',()=>{ if(!document.hidden)dateRollCheck(); });
   }
