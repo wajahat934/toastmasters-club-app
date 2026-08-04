@@ -130,8 +130,12 @@ const SupabaseApi={
     const {error}=await sb.from('assignments').insert({meeting_id,slot_key,profile_id});
     if(error)throw error;
   },
-  async adminAssign(meeting_id,slot_key,profile_id){
-    const {error}=await sb.from('assignments').upsert({meeting_id,slot_key,profile_id,status:'booked',actual_role:null});
+  async adminAssign(meeting_id,slot_key,profile_id,booked_at){
+    const row={meeting_id,slot_key,profile_id,status:'booked',actual_role:null};
+    /* carried across when a booking is moved forward: a member who is bumped
+       must keep their original place in the queue, not go to the back of it */
+    if(booked_at)row.booked_at=booked_at;
+    const {error}=await sb.from('assignments').upsert(row);
     if(error)throw error;
   },
   async unbook(meeting_id,slot_key){
@@ -258,10 +262,11 @@ const DemoApi=(function(){
       if(assignments.some(a=>a.meeting_id===mid&&a.slot_key===key))throw {message:'duplicate key value'};
       assignments.push({meeting_id:mid,slot_key:key,profile_id:pid,status:'booked',actual_role:null});
     },
-    async adminAssign(mid,key,pid){
+    async adminAssign(mid,key,pid,booked_at){
+      const at=booked_at||new Date().toISOString();
       const ex=assignments.find(a=>a.meeting_id===mid&&a.slot_key===key);
-      if(ex){ex.profile_id=pid;ex.status='booked';ex.actual_role=null;}
-      else assignments.push({meeting_id:mid,slot_key:key,profile_id:pid,status:'booked',actual_role:null});
+      if(ex){ex.profile_id=pid;ex.status='booked';ex.actual_role=null;ex.booked_at=at;}
+      else assignments.push({meeting_id:mid,slot_key:key,profile_id:pid,status:'booked',actual_role:null,booked_at:at});
     },
     async unbook(mid,key){ const i=assignments.findIndex(a=>a.meeting_id===mid&&a.slot_key===key); if(i>=0)assignments.splice(i,1); },
     async setAsg(mid,key,f){ Object.assign(assignments.find(a=>a.meeting_id===mid&&a.slot_key===key)||{},f); },
@@ -1228,7 +1233,9 @@ function viewBook(){
 async function myBook(mid,key){
   try{
     await api.book(mid,key,me.profileId);
-    S.assignments.push({meeting_id:mid,slot_key:key,profile_id:me.profileId,status:'booked',actual_role:null});
+    /* stamped locally too, so give-way order is right straight away rather than
+       only after the next full load (the DB default is authoritative) */
+    S.assignments.push({meeting_id:mid,slot_key:key,profile_id:me.profileId,status:'booked',actual_role:null,booked_at:new Date().toISOString()});
     rebuild();render();toast('Booked ✓');
   }catch(e){
     if(String(e.message||'').includes('duplicate')){ toast('Someone just took that slot'); await reload(); }
@@ -1441,7 +1448,9 @@ function memberOptions(sel){
 function viewSchedule(){
   const up=upcomingMeetings(ADMIN_HORIZON);
   let html=`<h2>Next ${up.length} meeting${up.length===1?'':'s'} — book roles</h2>
-  <p class="small muted" style="margin:-6px 0 10px">Members see the next ${MEMBER_HORIZON} of these; you see further ahead so speakers can be moved between meetings.</p>`;
+  <p class="small muted" style="margin:-6px 0 10px">Members see the next ${MEMBER_HORIZON} of these; you see further ahead so bookings can be moved between meetings.</p>
+  ${lastMove?`<div class="warnline">⏩ Moved <b>${esc(lastMove.label)}</b> forward.
+    <button class="btn ghost small" onclick="undoMove()">↩ Undo</button></div>`:''}`;
   for(const m of up)html+=meetingBookingCard(m);
   const needReview=pastMeetings().filter(m=>!m.reviewed);
   html+=`<h2>Past meetings — confirm what happened</h2>
@@ -1502,11 +1511,19 @@ function meetingBookingCard(m){
     <div class="grid-roles">
       ${slots.map(s=>{
         const a=(m.assignments||{})[s.key];
-        const canDefer=/^spk\|/.test(s.key)&&a&&a.memberId;
-        return `<div class="slot"><label>${esc(s.label)}${canDefer?`
+        const rid=ridOf(s.key);
+        const canDefer=deferrable(rid)&&a&&a.memberId;
+        /* surface the queue: whoever gives way first for this role, and when
+           each booking was made (blank until booked_at exists in the table) */
+        const group=canDefer?bookingsByGiveWay(m,rid):[];
+        const isNext=group.length>1&&group[0].key===s.key;
+        const at=canDefer?bookedAt(m.id,s.key):null;
+        const when=at?`booked ${new Date(at).toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}`
+                     :'booking time not recorded yet';
+        return `<div class="slot"><label>${esc(s.label)}${isNext?` <span class="pill other" title="Booked last of the ${esc(roleNameById(rid))}s — gives way first">gives way</span>`:''}${canDefer?`
             <button class="btn ghost small" style="float:right;padding:0 6px"
-              title="Move this speech to a later meeting" onclick="deferSpeaker('${m.id}','${s.key}')">⏩</button>`:''}</label>
-          <select onchange="assign('${m.id}','${s.key}',this)">${memberOptions(a&&a.memberId)}</select></div>`;
+              title="Move to a later meeting — ${esc(when)}" onclick="deferBooking('${m.id}','${s.key}')">⏩</button>`:''}</label>
+          <select ${canDefer?`title="${esc(when)}"`:''} onchange="assign('${m.id}','${s.key}',this)">${memberOptions(a&&a.memberId)}</select></div>`;
       }).join('')}
     </div>
     ${dupes.length?`<div class="warnline">⚠ Double-booked in this meeting: ${dupes.map(esc).join(', ')}</div>`:''}
@@ -1632,10 +1649,10 @@ async function cancelMeeting(id){
   if(Object.values(m.assignments||{}).some(a=>a&&a.memberId)&&!confirm('This meeting has bookings. Cancel it anyway?'))return;
   /* offer to carry the speeches over before the meeting disappears from view —
      done first, while this meeting is still in the upcoming list */
-  const speakers=speakersByGiveWay(m);
+  const bookings=allDeferrable(m);
   let carried=0;
-  if(speakers.length&&confirm(`Move ${speakers.length} booked speech${speakers.length>1?'es':''} forward to the next meetings?\n\nWhoever booked earliest keeps the earliest slot.`))
-    carried=deferAllSpeakers(id);
+  if(bookings.length&&confirm(`Move ${bookings.length} booked role${bookings.length>1?'s':''} forward to the next meetings?\n\nWhoever booked earliest keeps the earliest slot. SAA and Presiding Officer stay put.`))
+    carried=deferAllBookings(id);
   const row=S.meetings.find(x=>x.id===id); if(row)row.cancelled=true;
   sync(api.updateMeeting(id,{cancelled:true}));
   await ensureMeetings(); autoFillStanding(); render();
@@ -1654,11 +1671,15 @@ function bookedAt(mid,key){
   const row=S.assignments.find(a=>a.meeting_id===mid&&a.slot_key===key);
   return row&&row.booked_at?row.booked_at:null;
 }
-/* speakers on a meeting, the one who gives way first at the front */
-function speakersByGiveWay(m){
+/* SAA and the Presiding Officer are standing appointments, not slots members
+   pick — everything else can be moved to a later meeting. */
+const ridOf=key=>key.split('|')[0];
+function deferrable(rid){ return !UNTRACKED_ROLES.includes(rid); }
+/* bookings for one role on a meeting, the one who gives way first at the front */
+function bookingsByGiveWay(m,rid){
   const out=[];
   for(const s of slotListFor(m)){
-    if(!/^spk\|/.test(s.key))continue;
+    if(ridOf(s.key)!==rid)continue;
     const a=(m.assignments||{})[s.key];
     if(a&&a.memberId)out.push({key:s.key,memberId:a.memberId,at:bookedAt(m.id,s.key),idx:Number(s.key.split('|')[1])});
   }
@@ -1667,13 +1688,18 @@ function speakersByGiveWay(m){
     return y.idx-x.idx;                                  /* tie / no timestamps: highest slot first */
   });
 }
-function freeSpeakerSlot(m){
+function freeSlotFor(m,rid){
   for(const s of slotListFor(m)){
-    if(!/^spk\|/.test(s.key))continue;
+    if(ridOf(s.key)!==rid)continue;
     const a=(m.assignments||{})[s.key];
     if(!a||!a.memberId)return s.key;
   }
   return null;
+}
+/* every deferrable booking on a meeting, grouped give-way-first within its role */
+function allDeferrable(m){
+  const rids=[...new Set(slotListFor(m).map(s=>ridOf(s.key)))].filter(deferrable);
+  return rids.flatMap(rid=>bookingsByGiveWay(m,rid).map(b=>({...b,rid})));
 }
 function laterMeetingIds(m){
   return state.meetings.filter(x=>!x.cancelled&&x.date>m.date)
@@ -1681,35 +1707,35 @@ function laterMeetingIds(m){
 }
 /* Place one member into the next meeting that has room, pushing that meeting's
    own give-way speaker along if it is full. Returns the meeting landed on. */
-function speaksAt(m,memberId){
-  return speakersByGiveWay(m).some(s=>s.memberId===memberId);
+function holdsRole(m,rid,memberId){
+  return bookingsByGiveWay(m,rid).some(s=>s.memberId===memberId);
 }
 /* Works on meeting IDs and re-resolves after every write: bookLocal/unbookLocal
    mutate S, and the derived `state` only catches up on rebuild(). Holding object
    references across a placement meant the next speaker read a stale slot map and
    overwrote the one just placed. */
-function pushInto(chainIds,memberId,hops){
+function pushInto(chainIds,rid,memberId,at,hops){
   if(!chainIds.length||hops>ADMIN_HORIZON)return null;
   const target=state.meetings.find(x=>x.id===chainIds[0]);
-  if(!target)return pushInto(chainIds.slice(1),memberId,hops+1);
-  /* never stack someone twice on one meeting — carry them to the next instead */
-  if(speaksAt(target,memberId))return pushInto(chainIds.slice(1),memberId,hops+1);
-  let slot=freeSpeakerSlot(target);
+  if(!target)return pushInto(chainIds.slice(1),rid,memberId,at,hops+1);
+  /* never stack someone twice on the same role — carry them to the next instead */
+  if(holdsRole(target,rid,memberId))return pushInto(chainIds.slice(1),rid,memberId,at,hops+1);
+  let slot=freeSlotFor(target,rid);
   if(!slot){
-    const give=speakersByGiveWay(target)[0];
+    const give=bookingsByGiveWay(target,rid)[0];
     if(!give)return null;
-    if(!pushInto(chainIds.slice(1),give.memberId,hops+1))return null;
+    if(!pushInto(chainIds.slice(1),rid,give.memberId,give.at,hops+1))return null;
     unbookLocal(target.id,give.key);
     slot=give.key;
   }
-  bookLocal(target.id,slot,memberId);
+  bookLocal(target.id,slot,memberId,at);
   return state.meetings.find(x=>x.id===chainIds[0]);
 }
-function bookLocal(mid,key,memberId){
+function bookLocal(mid,key,memberId,at){
   const had=S.assignments.find(a=>a.meeting_id===mid&&a.slot_key===key);
-  if(had){ had.profile_id=memberId; had.status='booked'; had.actual_role=null; }
-  else S.assignments.push({meeting_id:mid,slot_key:key,profile_id:memberId,status:'booked',actual_role:null});
-  sync(api.adminAssign(mid,key,memberId));
+  if(had){ had.profile_id=memberId; had.status='booked'; had.actual_role=null; if(at)had.booked_at=at; }
+  else S.assignments.push({meeting_id:mid,slot_key:key,profile_id:memberId,status:'booked',actual_role:null,booked_at:at||undefined});
+  sync(api.adminAssign(mid,key,memberId,at));
   rebuild();
 }
 function unbookLocal(mid,key){
@@ -1717,31 +1743,66 @@ function unbookLocal(mid,key){
   sync(api.unbook(mid,key));
   rebuild();
 }
-function deferSpeaker(mid,key){
+/* A cascade can touch several meetings at once, so undo restores the whole
+   booking table rather than trying to retrace the individual hops. */
+let lastMove=null;
+const asgKey=a=>a.meeting_id+'|'+a.slot_key;
+function snapshotBookings(label){
+  /* the cancelled flags come too: undoing a cancel-and-carry that only put the
+     bookings back would restore them onto a meeting still marked cancelled,
+     where nobody can see them */
+  lastMove={label,rows:S.assignments.map(a=>({...a})),
+            cancelled:S.meetings.map(m=>({id:m.id,cancelled:!!m.cancelled}))};
+}
+function undoMove(){
+  if(!lastMove){ toast('Nothing to undo'); return; }
+  for(const c of lastMove.cancelled||[]){
+    const row=S.meetings.find(m=>m.id===c.id);
+    if(row&&!!row.cancelled!==c.cancelled){
+      row.cancelled=c.cancelled;
+      sync(api.updateMeeting(c.id,{cancelled:c.cancelled}));
+    }
+  }
+  rebuild();
+  const want=new Map(lastMove.rows.map(a=>[asgKey(a),a]));
+  const have=new Map(S.assignments.map(a=>[asgKey(a),a]));
+  for(const [k,a] of have)if(!want.has(k))unbookLocal(a.meeting_id,a.slot_key);
+  for(const [k,a] of want){
+    const cur=have.get(k);
+    if(!cur||cur.profile_id!==a.profile_id)bookLocal(a.meeting_id,a.slot_key,a.profile_id,a.booked_at);
+  }
+  const label=lastMove.label; lastMove=null;
+  render(); toast(`Undone — ${label} put back`);
+}
+function deferBooking(mid,key){
   const m=state.meetings.find(x=>x.id===mid); if(!m)return;
   const a=(m.assignments||{})[key]; if(!a||!a.memberId)return;
-  const who=memberById(a.memberId);
+  const rid=ridOf(key);
+  if(!deferrable(rid)){ toast('Standing roles stay put'); return; }
+  const who=memberById(a.memberId), at=bookedAt(mid,key);
   const chain=laterMeetingIds(m);
   if(!chain.length){ toast('No later meeting to move them to'); return; }
+  snapshotBookings(`${who?who.name:'that booking'}`);
   /* free the source slot first, or a full-meeting cascade can bounce them
      straight back into the seat they are leaving */
   unbookLocal(mid,key);
-  const landed=pushInto(chain,a.memberId,0);
-  if(!landed){ bookLocal(mid,key,a.memberId); render(); toast('Every later meeting is full — free a speaker slot first'); return; }
+  const landed=pushInto(chain,rid,a.memberId,at,0);
+  if(!landed){ bookLocal(mid,key,a.memberId,at); render(); toast(`Every later meeting's ${roleNameById(rid)} is taken — free one first`); return; }
   render();
-  toast(`${who?who.name:'Speaker'} moved to ${fmtDate(landed.date)}`);
+  toast(`${who?who.name:'Booking'} moved to ${fmtDate(landed.date)}`);
 }
-/* every speaker on a meeting moves on, the give-way order preserved */
-function deferAllSpeakers(mid){
+/* every member-picked booking on a meeting moves on, give-way order preserved */
+function deferAllBookings(mid){
   const m=state.meetings.find(x=>x.id===mid); if(!m)return 0;
-  const list=speakersByGiveWay(m).reverse();   /* earliest booker placed first, keeps their priority */
+  snapshotBookings(`${fmtDate(m.date)}'s bookings`);
+  const list=allDeferrable(m).reverse();   /* earliest booker placed first, keeps their priority */
   let moved=0;
   for(const s of list){
     const src=state.meetings.find(x=>x.id===mid);
     const chain=laterMeetingIds(src);
     unbookLocal(mid,s.key);
-    if(pushInto(chain,s.memberId,0))moved++;
-    else bookLocal(mid,s.key,s.memberId);      /* nowhere to go — leave them put */
+    if(pushInto(chain,s.rid,s.memberId,s.at,0))moved++;
+    else bookLocal(mid,s.key,s.memberId,s.at);   /* nowhere to go — leave them put */
   }
   render();
   return moved;
@@ -1761,7 +1822,7 @@ async function assign(mid,key,sel){
     if(had){ S.assignments=S.assignments.filter(a=>a!==had); sync(api.unbook(mid,key)); }
   }else{
     if(had){ had.profile_id=v; had.status='booked'; had.actual_role=null; }
-    else S.assignments.push({meeting_id:mid,slot_key:key,profile_id:v,status:'booked',actual_role:null});
+    else S.assignments.push({meeting_id:mid,slot_key:key,profile_id:v,status:'booked',actual_role:null,booked_at:new Date().toISOString()});
     sync(api.adminAssign(mid,key,v));
   }
   rebuild();
@@ -1798,7 +1859,7 @@ async function spkDelta(mid,d){
   if(d<0){
     /* the speaker who gives way is the last to have booked, not whoever happens
        to sit in the slot being removed — so move them out of the way first */
-    const give=speakersByGiveWay(m)[0];
+    const give=bookingsByGiveWay(m,'spk')[0];
     const lastSpk=`spk|${cur-1}`;
     if(give&&give.key!==lastSpk&&m.assignments[lastSpk]&&m.assignments[lastSpk].memberId){
       const occupant=m.assignments[lastSpk].memberId;
@@ -1813,7 +1874,7 @@ async function spkDelta(mid,d){
       const move=confirm(`${names} gives way.\n\nOK = move them forward to the next meeting.\nCancel = leave the slot count alone.`);
       if(!move)return;
       for(const k of dropped){
-        if(/^spk\|/.test(k))deferSpeaker(mid,k);
+        if(/^spk\|/.test(k))deferBooking(mid,k);
         else await unbookSlots(m,[k]);
       }
     }
@@ -1843,8 +1904,35 @@ function setMeetingOrder(mid,speechFirst,quiet){
   const row=S.meetings.find(x=>x.id===mid); if(row)row.config=m.config;
   sync(api.updateMeeting(mid,{config:m.config}));
 }
+/* What the meeting's own records say about whether someone was in the room. */
+function attendanceEvidence(m,pid){
+  const roles=[];
+  for(const [key,a] of Object.entries(m.assignments||{})){
+    if(!a||a.memberId!==pid||a.status==='absent')continue;
+    roles.push(a.status==='other'&&a.actualRole?a.actualRole:roleNameById(ridOf(key)));
+  }
+  const polls=pollsFor(m.id);
+  const nominated=polls.filter(p=>(p.candidates||[]).some(c=>c.profileId===pid||c.key===pid)).map(p=>p.category);
+  const voted=polls.some(p=>S.votes.some(v=>v.poll_id===p.id&&v.voter===pid));
+  return {roles,nominated,voted};
+}
 function setPresent(mid,pid,present){
   const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  if(!present){
+    const who=(memberById(pid)||{}).name||'They';
+    const ev=attendanceEvidence(m,pid);
+    /* a completed role is hard proof they were here — refuse outright, and point
+       at the fix, because the role outcome is the record that should change */
+    if(ev.roles.length){
+      toast(`${who} did ${ev.roles.join(' and ')} at this meeting. Set that role to Absent above if they missed it.`);
+      render(); return;
+    }
+    /* softer traces: nominated in a vote, or voted from their phone */
+    const soft=[];
+    if(ev.nominated.length)soft.push(`was nominated for ${ev.nominated.join(', ')}`);
+    if(ev.voted)soft.push('voted from the app');
+    if(soft.length&&!confirm(`${who} ${soft.join(' and ')} at this meeting — that usually means they were there.\n\nMark them absent anyway?`)){ render(); return; }
+  }
   const list=new Set(absentList(m));
   present?list.delete(pid):list.add(pid);
   m.config={...(m.config||{}),absent:[...list]};
@@ -3163,7 +3251,7 @@ function bindAuth(){
 /* ---------- boot ---------- */
 Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
-  spkDelta,setMeetingTT,setMeetingOrder,setPresent,markAllPresent,creditSpeech,deferSpeaker,deferAllSpeakers,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
+  spkDelta,setMeetingTT,setMeetingOrder,setPresent,markAllPresent,creditSpeech,deferBooking,deferAllBookings,undoMove,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   vcPick,startPoll,addCandidate,removeCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
   pStart,pAdd,pRemove,pAdjust,pPaper,pVote,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
   bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
