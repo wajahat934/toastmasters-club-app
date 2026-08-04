@@ -734,6 +734,9 @@ function viewVoting(){
     </select>
   </div>
   <p class="small muted">Open a category, members vote from their phones, and the count is live. “Paper” adds the manual votes from the room — the app and paper ballots combine. Closing announces the winner (you break any tie).</p>`;
+  /* officers only ever saw the tally, never a ballot — their own vote lives on
+     the member Book tab, which admins do not have */
+  html+=openVoteCardsHtml();
   for(const p of polls)html+=vcPollCard(p);
   const open=new Set(polls.map(p=>p.category));
   const starters=STANDARD_CATS.filter(c=>!open.has(c));
@@ -783,7 +786,8 @@ function vcPollCard(p){
     </div>
     <div class="tblwrap" data-scroll="poll-${p.id}"><table><thead><tr><th>Candidate</th><th class="num">App votes</th><th class="num">Paper</th><th class="num">Total</th></tr></thead><tbody>
       ${(p.candidates||[]).map(c=>`<tr>
-        <td title="${esc(c.name)}">${esc(vcShortName(c.name))} ${p.winner_key===c.key?'🏆':''}</td>
+        <td title="${esc(c.name)}">${esc(vcShortName(c.name))} ${p.winner_key===c.key?'🏆':''}
+          ${p.status==='open'?`<button class="del no-print" title="Remove this candidate" onclick="removeCandidate('${p.id}','${c.key}')">✕</button>`:''}</td>
         <td class="num">${app[c.key]}</td>
         <td class="num">
           <button class="btn ghost small" onclick="adjustPoll('${p.id}','${c.key}',-1)">−</button>
@@ -872,6 +876,19 @@ function deletePoll(pollId){
   S.polls=S.polls.filter(x=>x.id!==pollId);
   S.votes=S.votes.filter(v=>v.poll_id!==pollId);
   sync(api.deletePoll(pollId));
+  render();
+}
+function removeCandidate(pollId,key){
+  const p=S.polls.find(p=>p.id===pollId); if(!p)return;
+  const c=(p.candidates||[]).find(c=>c.key===key); if(!c)return;
+  /* votes for a removed candidate are simply no longer counted — appVotes only
+     tallies keys still on the list — so there is nothing to delete server-side */
+  const cast=appVotes(p)[key]||0, paper=Number((p.adjust||{})[key]||0);
+  const held=cast+paper;
+  if(held&&!confirm(`${c.name} already has ${held} vote${held>1?'s':''}.\n\nRemove them anyway? Those votes are discarded.`))return;
+  p.candidates=p.candidates.filter(x=>x.key!==key);
+  if(p.adjust)delete p.adjust[key];
+  sync(api.updatePoll(pollId,{candidates:p.candidates,adjust:p.adjust||{}}));
   render();
 }
 async function paperVoter(pollId,pid,add){
@@ -993,6 +1010,15 @@ function pAdd(pollId,v){
   }
   render();
 }
+function pRemove(pollId,key){
+  const p=pPolls.find(x=>x.id===pollId); if(!p)return;
+  const c=p.candidates.find(x=>x.key===key); if(!c)return;
+  const held=(pAppVotes(p)[key]||0)+Number((p.adjust||{})[key]||0);
+  if(held&&!confirm(`${c.name} already has ${held} vote${held>1?'s':''}.\n\nRemove them anyway? Those votes are discarded.`))return;
+  p.candidates=p.candidates.filter(x=>x.key!==key);
+  if(p.adjust)delete p.adjust[key];
+  render();
+}
 function pAdjust(pollId,key,d){
   const p=pPolls.find(x=>x.id===pollId); if(!p)return;
   p.adjust=p.adjust||{};
@@ -1066,7 +1092,8 @@ function pPollCard(p){
     </div>
     <div class="tblwrap" data-scroll="prac-${p.id}"><table><thead><tr><th>Candidate</th><th class="num">App votes</th><th class="num">Paper</th><th class="num">Total</th></tr></thead><tbody>
       ${p.candidates.map(c=>`<tr>
-        <td title="${esc(c.name)}">${esc(vcShortName(c.name))} ${p.winner_key===c.key?'🏆':''}</td>
+        <td title="${esc(c.name)}">${esc(vcShortName(c.name))} ${p.winner_key===c.key?'🏆':''}
+          ${p.status==='open'?`<button class="del no-print" title="Remove this candidate" onclick="pRemove('${p.id}','${c.key}')">✕</button>`:''}</td>
         <td class="num">${app[c.key]}</td>
         <td class="num">
           <button class="btn ghost small" onclick="pAdjust('${p.id}','${c.key}',-1)">−</button>
@@ -2856,8 +2883,8 @@ function bindAuth(){
 Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   spkDelta,setMeetingTT,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
-  vcPick,startPoll,addCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
-  pStart,pAdd,pAdjust,pPaper,pVote,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
+  vcPick,startPoll,addCandidate,removeCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
+  pStart,pAdd,pRemove,pAdjust,pPaper,pVote,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
   bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
   sugAdd,sugStatus,sugNote,sugAnnounce,sugDel,copyInvite,copyNudge,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
