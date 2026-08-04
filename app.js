@@ -1502,7 +1502,10 @@ function meetingBookingCard(m){
     <div class="grid-roles">
       ${slots.map(s=>{
         const a=(m.assignments||{})[s.key];
-        return `<div class="slot"><label>${esc(s.label)}</label>
+        const canDefer=/^spk\|/.test(s.key)&&a&&a.memberId;
+        return `<div class="slot"><label>${esc(s.label)}${canDefer?`
+            <button class="btn ghost small" style="float:right;padding:0 6px"
+              title="Move this speech to a later meeting" onclick="deferSpeaker('${m.id}','${s.key}')">⏩</button>`:''}</label>
           <select onchange="assign('${m.id}','${s.key}',this)">${memberOptions(a&&a.memberId)}</select></div>`;
       }).join('')}
     </div>
@@ -1627,9 +1630,121 @@ function pastEditToggle(id,open){ if(open)pastEditOpen.add(id); else pastEditOpe
 async function cancelMeeting(id){
   const m=state.meetings.find(x=>x.id===id); if(!m)return;
   if(Object.values(m.assignments||{}).some(a=>a&&a.memberId)&&!confirm('This meeting has bookings. Cancel it anyway?'))return;
+  /* offer to carry the speeches over before the meeting disappears from view —
+     done first, while this meeting is still in the upcoming list */
+  const speakers=speakersByGiveWay(m);
+  let carried=0;
+  if(speakers.length&&confirm(`Move ${speakers.length} booked speech${speakers.length>1?'es':''} forward to the next meetings?\n\nWhoever booked earliest keeps the earliest slot.`))
+    carried=deferAllSpeakers(id);
   const row=S.meetings.find(x=>x.id===id); if(row)row.cancelled=true;
   sync(api.updateMeeting(id,{cancelled:true}));
-  await ensureMeetings(); autoFillStanding(); render(); toast('Meeting cancelled — next date added');
+  await ensureMeetings(); autoFillStanding(); render();
+  toast(carried?`Meeting cancelled — ${carried} speech${carried>1?'es':''} moved forward`
+               :'Meeting cancelled — next date added');
+}
+/* ---------- moving speeches to a later meeting ----------
+   A cancelled meeting or a dropped speech has to go somewhere, and the club's
+   rule is first-come-first-served: whoever booked LAST gives way. assignments
+   carries no timestamp yet, so booked_at is used when the column exists and
+   slot order stands in for it otherwise (slots fill top-down, so the highest
+   numbered speaker is the best available guess at "booked last"). Run
+     alter table assignments add column booked_at timestamptz not null default now();
+   to make it exact from that point on. */
+function bookedAt(mid,key){
+  const row=S.assignments.find(a=>a.meeting_id===mid&&a.slot_key===key);
+  return row&&row.booked_at?row.booked_at:null;
+}
+/* speakers on a meeting, the one who gives way first at the front */
+function speakersByGiveWay(m){
+  const out=[];
+  for(const s of slotListFor(m)){
+    if(!/^spk\|/.test(s.key))continue;
+    const a=(m.assignments||{})[s.key];
+    if(a&&a.memberId)out.push({key:s.key,memberId:a.memberId,at:bookedAt(m.id,s.key),idx:Number(s.key.split('|')[1])});
+  }
+  return out.sort((x,y)=>{
+    if(x.at&&y.at&&x.at!==y.at)return x.at<y.at?1:-1;   /* later booking gives way first */
+    return y.idx-x.idx;                                  /* tie / no timestamps: highest slot first */
+  });
+}
+function freeSpeakerSlot(m){
+  for(const s of slotListFor(m)){
+    if(!/^spk\|/.test(s.key))continue;
+    const a=(m.assignments||{})[s.key];
+    if(!a||!a.memberId)return s.key;
+  }
+  return null;
+}
+function laterMeetingIds(m){
+  return state.meetings.filter(x=>!x.cancelled&&x.date>m.date)
+    .sort((a,b)=>a.date<b.date?-1:1).map(x=>x.id);
+}
+/* Place one member into the next meeting that has room, pushing that meeting's
+   own give-way speaker along if it is full. Returns the meeting landed on. */
+function speaksAt(m,memberId){
+  return speakersByGiveWay(m).some(s=>s.memberId===memberId);
+}
+/* Works on meeting IDs and re-resolves after every write: bookLocal/unbookLocal
+   mutate S, and the derived `state` only catches up on rebuild(). Holding object
+   references across a placement meant the next speaker read a stale slot map and
+   overwrote the one just placed. */
+function pushInto(chainIds,memberId,hops){
+  if(!chainIds.length||hops>ADMIN_HORIZON)return null;
+  const target=state.meetings.find(x=>x.id===chainIds[0]);
+  if(!target)return pushInto(chainIds.slice(1),memberId,hops+1);
+  /* never stack someone twice on one meeting — carry them to the next instead */
+  if(speaksAt(target,memberId))return pushInto(chainIds.slice(1),memberId,hops+1);
+  let slot=freeSpeakerSlot(target);
+  if(!slot){
+    const give=speakersByGiveWay(target)[0];
+    if(!give)return null;
+    if(!pushInto(chainIds.slice(1),give.memberId,hops+1))return null;
+    unbookLocal(target.id,give.key);
+    slot=give.key;
+  }
+  bookLocal(target.id,slot,memberId);
+  return state.meetings.find(x=>x.id===chainIds[0]);
+}
+function bookLocal(mid,key,memberId){
+  const had=S.assignments.find(a=>a.meeting_id===mid&&a.slot_key===key);
+  if(had){ had.profile_id=memberId; had.status='booked'; had.actual_role=null; }
+  else S.assignments.push({meeting_id:mid,slot_key:key,profile_id:memberId,status:'booked',actual_role:null});
+  sync(api.adminAssign(mid,key,memberId));
+  rebuild();
+}
+function unbookLocal(mid,key){
+  S.assignments=S.assignments.filter(a=>!(a.meeting_id===mid&&a.slot_key===key));
+  sync(api.unbook(mid,key));
+  rebuild();
+}
+function deferSpeaker(mid,key){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  const a=(m.assignments||{})[key]; if(!a||!a.memberId)return;
+  const who=memberById(a.memberId);
+  const chain=laterMeetingIds(m);
+  if(!chain.length){ toast('No later meeting to move them to'); return; }
+  /* free the source slot first, or a full-meeting cascade can bounce them
+     straight back into the seat they are leaving */
+  unbookLocal(mid,key);
+  const landed=pushInto(chain,a.memberId,0);
+  if(!landed){ bookLocal(mid,key,a.memberId); render(); toast('Every later meeting is full — free a speaker slot first'); return; }
+  render();
+  toast(`${who?who.name:'Speaker'} moved to ${fmtDate(landed.date)}`);
+}
+/* every speaker on a meeting moves on, the give-way order preserved */
+function deferAllSpeakers(mid){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return 0;
+  const list=speakersByGiveWay(m).reverse();   /* earliest booker placed first, keeps their priority */
+  let moved=0;
+  for(const s of list){
+    const src=state.meetings.find(x=>x.id===mid);
+    const chain=laterMeetingIds(src);
+    unbookLocal(mid,s.key);
+    if(pushInto(chain,s.memberId,0))moved++;
+    else bookLocal(mid,s.key,s.memberId);      /* nowhere to go — leave them put */
+  }
+  render();
+  return moved;
 }
 async function assign(mid,key,sel){
   let v=sel.value;
@@ -1681,11 +1796,26 @@ async function spkDelta(mid,d){
   const cur=speakersFor(m), next=Math.min(8,Math.max(1,cur+d));
   if(next===cur)return;
   if(d<0){
+    /* the speaker who gives way is the last to have booked, not whoever happens
+       to sit in the slot being removed — so move them out of the way first */
+    const give=speakersByGiveWay(m)[0];
+    const lastSpk=`spk|${cur-1}`;
+    if(give&&give.key!==lastSpk&&m.assignments[lastSpk]&&m.assignments[lastSpk].memberId){
+      const occupant=m.assignments[lastSpk].memberId;
+      unbookLocal(mid,give.key);
+      unbookLocal(mid,lastSpk);
+      bookLocal(mid,give.key,occupant);
+      rebuild();
+    }
     const dropped=[`spk|${cur-1}`,`eval|${cur-1}`].filter(k=>m.assignments[k]&&m.assignments[k].memberId);
     if(dropped.length){
       const names=dropped.map(k=>memberById(m.assignments[k].memberId)?.name).filter(Boolean).join(', ');
-      if(!confirm(`Removing this slot also removes the booking${dropped.length>1?'s':''} of: ${names}. Continue?`))return;
-      await unbookSlots(m,dropped);
+      const move=confirm(`${names} gives way.\n\nOK = move them forward to the next meeting.\nCancel = leave the slot count alone.`);
+      if(!move)return;
+      for(const k of dropped){
+        if(/^spk\|/.test(k))deferSpeaker(mid,k);
+        else await unbookSlots(m,[k]);
+      }
     }
   }
   m.config={...(m.config||{}),speakers:next};
@@ -3033,7 +3163,7 @@ function bindAuth(){
 /* ---------- boot ---------- */
 Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
-  spkDelta,setMeetingTT,setMeetingOrder,setPresent,markAllPresent,creditSpeech,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
+  spkDelta,setMeetingTT,setMeetingOrder,setPresent,markAllPresent,creditSpeech,deferSpeaker,deferAllSpeakers,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   vcPick,startPoll,addCandidate,removeCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
   pStart,pAdd,pRemove,pAdjust,pPaper,pVote,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
   bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
