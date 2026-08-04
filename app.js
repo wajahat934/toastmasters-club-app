@@ -365,7 +365,14 @@ function meetingOutcomes(m){
   return out;
 }
 function pastMeetings(){ const t=todayStr(); return state.meetings.filter(m=>!m.cancelled&&m.date<t).sort((a,b)=>a.date<b.date?1:-1); }
-function upcomingMeetings(){ const t=todayStr(); return state.meetings.filter(m=>!m.cancelled&&m.date>=t).sort((a,b)=>a.date<b.date?-1:1).slice(0,3); }
+/* Members only ever plan three meetings ahead — more is noise on a phone.
+   Officers need a longer runway to shuffle speakers between meetings. */
+const MEMBER_HORIZON=3, ADMIN_HORIZON=8;
+function upcomingMeetings(n){
+  const t=todayStr();
+  return state.meetings.filter(m=>!m.cancelled&&m.date>=t)
+    .sort((a,b)=>a.date<b.date?-1:1).slice(0,n||MEMBER_HORIZON);
+}
 function roleHistory(){
   const h={},abs={};
   for(const m of pastMeetings()){
@@ -496,7 +503,7 @@ async function ensureMeetings(){
     d.setDate(d.getDate()+off-step);
   }
   let guard=0;
-  while(count<3&&guard++<30){
+  while(count<ADMIN_HORIZON&&guard++<30){
     d.setDate(d.getDate()+step);
     const ds=dstr(d);
     if(!S.meetings.some(m=>m.date===ds)){
@@ -1432,8 +1439,9 @@ function memberOptions(sel){
   return o;
 }
 function viewSchedule(){
-  const up=upcomingMeetings();
-  let html=`<h2>Next ${up.length} meeting${up.length===1?'':'s'} — book roles</h2>`;
+  const up=upcomingMeetings(ADMIN_HORIZON);
+  let html=`<h2>Next ${up.length} meeting${up.length===1?'':'s'} — book roles</h2>
+  <p class="small muted" style="margin:-6px 0 10px">Members see the next ${MEMBER_HORIZON} of these; you see further ahead so speakers can be moved between meetings.</p>`;
   for(const m of up)html+=meetingBookingCard(m);
   const needReview=pastMeetings().filter(m=>!m.reviewed);
   html+=`<h2>Past meetings — confirm what happened</h2>
