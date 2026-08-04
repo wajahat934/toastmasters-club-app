@@ -335,6 +335,11 @@ function speakersFor(m){
   return (m&&m.config&&m.config.speakers!=null)?m.config.speakers:def;
 }
 function ttOn(m){ return !(m&&m.config&&m.config.tt===false); }
+/* format swap: prepared speeches run before Table Topics */
+function speechFirstOn(m){ return !!(m&&m.config&&m.config.speechFirst); }
+/* attendance is opt-out: everyone counts as present unless listed here */
+function absentList(m){ return (m&&m.config&&m.config.absent)||[]; }
+function isAbsent(m,pid){ return absentList(m).includes(pid); }
 function slotListFor(m){
   const out=[];
   for(const r of state.settings.roles){
@@ -364,9 +369,16 @@ function upcomingMeetings(){ const t=todayStr(); return state.meetings.filter(m=
 function roleHistory(){
   const h={},abs={};
   for(const m of pastMeetings()){
+    const counted=new Set();
+    /* the attendance register is the wider record — someone can miss a meeting
+       without ever having been booked for a role */
+    for(const pid of absentList(m)){ abs[pid]=(abs[pid]||0)+1; counted.add(pid); }
     for(const o of meetingOutcomes(m)){
       if(UNTRACKED_ROLES.includes(o.rid))continue;
-      if(o.status==='absent'){ abs[o.memberId]=(abs[o.memberId]||0)+1; continue; }
+      if(o.status==='absent'){
+        if(!counted.has(o.memberId)){ abs[o.memberId]=(abs[o.memberId]||0)+1; counted.add(o.memberId); }
+        continue;
+      }
       (h[o.memberId]=h[o.memberId]||{})[o.roleName]=(h[o.memberId][o.roleName]||0)+1;
     }
   }
@@ -396,6 +408,21 @@ function pathLevel(mem,pe){
   return lv;
 }
 function activePaths(mem){ return memPaths(mem).filter(p=>!p.done); }
+/* "most junior speaks first": rank on the highest level they've reached on any
+   active path, then on projects done within that path. No pathway at all = most
+   junior of the lot, which is what a brand-new member is. */
+function seniority(mem){
+  if(!mem)return {level:99,projects:99};
+  const ps=activePaths(mem);
+  if(!ps.length)return {level:0,projects:0};
+  let best=ps[0],lv=pathLevel(mem,ps[0]);
+  for(const p of ps){ const l=pathLevel(mem,p); if(l>lv){lv=l;best=p;} }
+  return {level:lv,projects:best.projectsDone||0};
+}
+function juniorFirst(a,b){
+  const x=seniority(a),y=seniority(b);
+  return x.level!==y.level?x.level-y.level:x.projects-y.projects;
+}
 function currentLevel(mem){   /* highest level reached across all paths */
   let lv=mem.baseLevel||0;
   for(const pe of memPaths(mem))lv=Math.max(lv,pathLevel(mem,pe));
@@ -1452,6 +1479,10 @@ function meetingBookingCard(m){
       <label style="display:flex;gap:6px;align-items:center;margin-left:14px">
         <input type="checkbox" ${ttOn(m)?'checked':''} onchange="setMeetingTT('${m.id}',this.checked)"> 🗣 Table Topics
       </label>
+      <label style="display:flex;gap:6px;align-items:center;margin-left:14px"
+             title="Run the Prepared Speech Session before Table Topics on the agenda">
+        <input type="checkbox" ${speechFirstOn(m)?'checked':''} onchange="setMeetingOrder('${m.id}',this.checked)"> 🔁 Speeches first
+      </label>
     </div>
     <div class="row small" style="margin-top:6px">
       <label class="muted">📖 Word of the Day</label>
@@ -1470,6 +1501,26 @@ function meetingBookingCard(m){
     ${dupes.length?`<div class="warnline">⚠ Double-booked in this meeting: ${dupes.map(esc).join(', ')}</div>`:''}
   </div>`;
 }
+/* Attendance is opt-out: everyone is present until someone says otherwise, so
+   an unreviewed meeting never quietly records the whole club as missing. */
+function attendanceHtml(m){
+  const roster=state.members.filter(x=>!x.archived&&!x.external)
+    .sort((a,b)=>a.name.localeCompare(b.name));
+  const away=absentList(m);
+  return `<details class="card sub" style="margin-top:8px" ${away.length?'open':''}>
+    <summary class="small" style="cursor:pointer"><b>🙋 Attendance</b>
+      ${away.length?`<span class="pill absent">${away.length} absent</span>`
+                   :'<span class="muted">everyone marked present</span>'}</summary>
+    <p class="small muted" style="margin:6px 0">Untick anyone who wasn't there. Everybody counts as present unless you untick them.</p>
+    <div class="grid-roles">
+      ${roster.map(x=>`<label class="small" style="display:flex;gap:6px;align-items:center">
+        <input type="checkbox" ${isAbsent(m,x.id)?'':'checked'} onchange="setPresent('${m.id}','${x.id}',this.checked)">
+        <span style="${isAbsent(m,x.id)?'color:var(--muted);text-decoration:line-through':''}">${esc(x.name)}</span>
+      </label>`).join('')}
+    </div>
+    ${away.length?`<div class="row" style="margin-top:6px"><button class="btn ghost small" onclick="markAllPresent('${m.id}')">Everyone was here</button></div>`:''}
+  </details>`;
+}
 function meetingReviewCard(m,compact){
   const rows=Object.entries(m.assignments||{}).filter(([,a])=>a&&a.memberId&&memberById(a.memberId));
   return `<div class="card ${compact?'sub':''}">
@@ -1482,6 +1533,11 @@ function meetingReviewCard(m,compact){
       const mem=memberById(a.memberId);
       const role=roleNameById(key.split('|')[0]);
       const st=a.status||'done';
+      /* a delivered speech is a Pathways project — but only the officer knows
+         which pathway it belongs to when the member is working more than one */
+      const isSpeech=/^spk\|/.test(key)&&st==='done';
+      const credited=((m.config||{}).credited||{})[key]||'';
+      const paths=activePaths(mem);
       return `<tr><td>${esc(role)}</td>
         <td>${esc(mem.name)} ${mem.external?`<span class="pill guest">guest</span>`:''}</td>
         <td><select onchange="setOutcome('${m.id}','${key}',this.value)" style="width:auto">
@@ -1490,9 +1546,16 @@ function meetingReviewCard(m,compact){
           <option value="other" ${st==='other'?'selected':''}>Did another role…</option>
         </select>
         ${st==='other'?`<input type="text" style="width:150px" placeholder="actual role" value="${esc(a.actualRole||'')}" onchange="setActualRole('${m.id}','${key}',this.value)">`:''}
+        ${isSpeech?(paths.length?`<select style="width:auto;margin-left:6px" title="Count this speech as a project on one of their pathways"
+            onchange="creditSpeech('${m.id}','${key}',this.value)">
+            <option value="">🎓 credit project…</option>
+            ${paths.map(pe=>`<option value="${esc(pe.name)}" ${credited===pe.name?'selected':''}>${esc(pe.name)}</option>`).join('')}
+          </select>${credited?'<span class="pill done">counted</span>':''}`
+          :'<span class="muted small" style="margin-left:6px">no active pathway</span>'):''}
         </td></tr>`;
     }).join('')}
     </tbody></table></div>
+    ${attendanceHtml(m)}
     <div class="row small" style="margin-top:8px;padding:6px 10px;background:var(--gold-soft);border-radius:8px">
       <span><b>🏆 Winners</b></span>
       ${STANDARD_CATS.map(cat=>{
@@ -1632,6 +1695,51 @@ async function setMeetingTT(mid,on){
   }
   m.config={...(m.config||{}),tt:on};
   saveMeetingConfig(m);
+}
+/* quiet: called from the agenda's own toolbar, where a full render() would
+   remount the sheet from its last saved state and undo the tick that got us here */
+function setMeetingOrder(mid,speechFirst,quiet){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  m.config={...(m.config||{}),speechFirst:!!speechFirst};
+  if(!quiet){ saveMeetingConfig(m); return; }
+  const row=S.meetings.find(x=>x.id===mid); if(row)row.config=m.config;
+  sync(api.updateMeeting(mid,{config:m.config}));
+}
+function setPresent(mid,pid,present){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  const list=new Set(absentList(m));
+  present?list.delete(pid):list.add(pid);
+  m.config={...(m.config||{}),absent:[...list]};
+  saveMeetingConfig(m);
+  rebuild(); render();
+}
+function markAllPresent(mid){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  m.config={...(m.config||{}),absent:[]};
+  saveMeetingConfig(m);
+  rebuild(); render();
+}
+/* Credit a delivered speech to one of the speaker's pathways. Stored per slot
+   on the meeting so re-crediting can undo the previous one — a member working
+   two pathways at once can't be guessed at, so the officer says which. */
+function creditSpeech(mid,slotKey,pathName){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  const a=(m.assignments||{})[slotKey]; if(!a||!a.memberId)return;
+  const credited={...((m.config||{}).credited||{})};
+  const prev=credited[slotKey]||'';
+  if(prev===pathName){ render(); return; }
+  pathsUpdate(a.memberId,ps=>{
+    const bump=(name,d)=>{
+      const pe=ps.find(p=>p.name===name);
+      if(pe)pe.projectsDone=Math.max(0,(pe.projectsDone||0)+d);
+    };
+    if(prev)bump(prev,-1);
+    if(pathName)bump(pathName,1);
+  });
+  if(pathName)credited[slotKey]=pathName; else delete credited[slotKey];
+  m.config={...(m.config||{}),credited};
+  saveMeetingConfig(m);
+  rebuild(); render();
 }
 function setReviewed(id,v){
   const row=S.meetings.find(x=>x.id===id); if(row)row.reviewed=v;
@@ -2204,7 +2312,7 @@ function agDefaultBlocks(){
   ];
 }
 const AgendaApp=(function(){
-  let blocks=[],showTT=true,showSpeech=true,mid=null,container=null,saveTimer=null;
+  let blocks=[],showTT=true,showSpeech=true,swapOrder=false,juniorFirstOn=true,mid=null,container=null,saveTimer=null;
   const g=id=>document.getElementById(id);
   const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
   function tmName(mem){ const n=mem.name.trim(); return /^(TM|DTM)\b/i.test(n)?n:'TM '+n; }
@@ -2218,12 +2326,25 @@ const AgendaApp=(function(){
     return out;
   }
   const one=(m,re)=>bookedNames(m,re).find(Boolean)||null;
+  /* Speakers, optionally reordered most junior first. Only the filled slots are
+     sorted — empty slots stay at the end so the blanks don't shuffle about. */
+  function speakerNames(m){
+    const booked=[];
+    for(const s of slotListFor(m)){
+      if(!/^speaker$/i.test(s.role.name.trim()))continue;
+      const a=(m.assignments||{})[s.key];
+      booked.push(a&&a.memberId?memberById(a.memberId):null);
+    }
+    const filled=booked.filter(Boolean),blanks=booked.length-filled.length;
+    if(juniorFirstOn)filled.sort(juniorFirst);
+    return [...filled.map(tmName),...Array(blanks).fill(null)];
+  }
   function roleMap(m){
     return {
       saa:one(m,/sergeant|saa/i),po:one(m,/presiding|president/i),
       tmod:one(m,/toastmaster of the day|^tmod$/i),ttm:one(m,/table topics master/i),
       ge:one(m,/general evaluator/i),tte:one(m,/table topics evaluator/i),
-      spk:bookedNames(m,/^speaker$/i),eval:bookedNames(m,/^(speech )?evaluator$/i),
+      spk:speakerNames(m),eval:bookedNames(m,/^(speech )?evaluator$/i),
       timer:one(m,/^timer$/i),vc:one(m,/vote counter/i),gram:one(m,/grammarian/i),
       al:one(m,/active listener/i),ah:one(m,/ah[- ]?counter/i),jm:one(m,/joke/i)
     };
@@ -2261,6 +2382,8 @@ const AgendaApp=(function(){
         <label>No. <input type="number" id="agNo" value="351"></label>
         <label title="Untick for a Speakathon">🗣 Table Topics <input type="checkbox" id="agTT" checked></label>
         <label title="Untick to drop the Prepared Speech Session">🎤 Speeches <input type="checkbox" id="agSp" checked></label>
+        <label title="Run the Prepared Speech Session before Table Topics">🔁 Speeches first <input type="checkbox" id="agSwap"></label>
+        <label title="Order the speakers most junior first, by Pathways level then projects done">🎓 Junior first <input type="checkbox" id="agJr" checked></label>
         <label title="Transition minutes after each prepared speech">🚶 Speech buffer <input type="number" id="agBuf" value="1" min="0" step="0.5"></label>
         <label title="Transition minutes after each evaluation">🚶 Eval buffer <input type="number" id="agBufE" value="1" min="0" step="0.5"></label>
         <button class="btn ghost small" id="agAdd">＋ Speaker</button>
@@ -2362,9 +2485,19 @@ const AgendaApp=(function(){
   function visibleRows(b){ return b.rows.filter(r=>{ if(r.kind==='tteval'&&!showTT)return false; if(r.kind==='evaluator'&&!showSpeech)return false; return true; }); }
   function blockHidden(b){ return (b.id==='tt'&&!showTT)||(b.id==='speech'&&!showSpeech); }
   function orderedBlocks(){
-    if(showTT||!showSpeech)return blocks;
-    const arr=blocks.filter(b=>b.type!=='break'); const brk=blocks.find(b=>b.type==='break');
-    if(brk)arr.splice(arr.findIndex(b=>b.id==='speech')+1,0,brk);
+    let arr=blocks;
+    if(!showTT&&showSpeech){          /* Speakathon: the break follows the speeches */
+      arr=blocks.filter(b=>b.type!=='break');
+      const brk=blocks.find(b=>b.type==='break');
+      if(brk)arr.splice(arr.findIndex(b=>b.id==='speech')+1,0,brk);
+      return arr;
+    }
+    if(swapOrder&&showTT&&showSpeech){
+      /* swap the two session blocks in place, leaving the break where it sits */
+      arr=[...blocks];
+      const i=arr.findIndex(b=>b.id==='tt'),j=arr.findIndex(b=>b.id==='speech');
+      if(i>=0&&j>=0){ const t=arr[i]; arr[i]=arr[j]; arr[j]=t; }
+    }
     return arr;
   }
   function speechBlock(){ return blocks.find(b=>b.id==='speech'); }
@@ -2522,8 +2655,10 @@ const AgendaApp=(function(){
   }
   function applyBookings(){
     const m=state.meetings.find(x=>x.id===mid); if(!m)return;
-    /* mirror the meeting's Table Topics setting onto the agenda */
+    /* mirror the meeting's Table Topics and running-order settings onto the agenda */
     g('agTT').checked=ttOn(m); showTT=ttOn(m);
+    g('agSwap').checked=speechFirstOn(m); swapOrder=speechFirstOn(m);
+    juniorFirstOn=g('agJr').checked;
     g('agChipSpk').style.display=(!showTT&&g('agSp').checked)?'inline-block':'none';
     const map=roleMap(m);
     const spkSlots=Math.max(1,map.spk.length||speakerCount());
@@ -2566,7 +2701,8 @@ const AgendaApp=(function(){
         :{type:b.type,id:b.id,title:b.title,removable:b.removable,
           rows:b.rows.map(r=>({kind:r.kind,fill:r.fill,act:r.act,label:r.label,who:r.who,dur:r.dur,preset:r.preset,autoMode:r.autoMode,lights:[...(r.lights||['','',''])]}))}),
       inputs:{date:g('agDate').value,start:g('agStart').value,no:g('agNo').value,
-              buf:g('agBuf').value,bufE:g('agBufE').value,tt:g('agTT').checked,sp:g('agSp').checked},
+              buf:g('agBuf').value,bufE:g('agBufE').value,tt:g('agTT').checked,sp:g('agSp').checked,
+              swap:g('agSwap').checked,jr:g('agJr').checked},
       texts:staticEditables().map(el=>el.innerHTML),
       excom:[g('agExcomSec').classList.contains('nobar'),g('agExcomSec').classList.contains('nosec')]
     };
@@ -2583,6 +2719,8 @@ const AgendaApp=(function(){
       if(i.bufE!=null)g('agBufE').value=i.bufE;
       if(i.tt!=null)g('agTT').checked=i.tt;
       if(i.sp!=null)g('agSp').checked=i.sp;
+      if(i.swap!=null)g('agSwap').checked=i.swap;
+      if(i.jr!=null)g('agJr').checked=i.jr;
       const els=staticEditables();
       (st.texts||[]).forEach((h,idx)=>{ if(els[idx]!=null&&h!=null)els[idx].innerHTML=h; });
       if(st.excom){
@@ -2654,6 +2792,7 @@ const AgendaApp=(function(){
       if(assets[img.dataset.asset])img.src=assets[img.dataset.asset];
     });
     showTT=g('agTT').checked; showSpeech=g('agSp').checked;
+    swapOrder=g('agSwap').checked; juniorFirstOn=g('agJr').checked;
     g('agChipSpk').style.display=(!showTT&&showSpeech)?'inline-block':'none';
     agRender(); updateDates();
   }
@@ -2678,11 +2817,15 @@ const AgendaApp=(function(){
     g('agNo').addEventListener('input',()=>{ g('agChipNo').innerText='No. '+g('agNo').value; });
     function updateToggles(){
       showTT=g('agTT').checked; showSpeech=g('agSp').checked;
+      swapOrder=g('agSwap').checked; juniorFirstOn=g('agJr').checked;
       g('agChipSpk').style.display=(!showTT&&showSpeech)?'inline-block':'none';
       agRender();
     }
     g('agTT').addEventListener('change',updateToggles);
     g('agSp').addEventListener('change',updateToggles);
+    g('agSwap').addEventListener('change',()=>{ updateToggles(); setMeetingOrder(mid,g('agSwap').checked,true); });
+    /* re-order needs the names refetched from the bookings, not just a redraw */
+    g('agJr').addEventListener('change',()=>{ juniorFirstOn=g('agJr').checked; applyBookings(); agRender(); });
     g('agAdd').addEventListener('click',()=>{
       const rows=speechBlock().rows;
       rows.splice(rows.length-1,0,{kind:'speaker',fill:'spk',who:'TM ____________',preset:'std',dur:7});
@@ -2882,7 +3025,7 @@ function bindAuth(){
 /* ---------- boot ---------- */
 Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
-  spkDelta,setMeetingTT,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
+  spkDelta,setMeetingTT,setMeetingOrder,setPresent,markAllPresent,creditSpeech,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   vcPick,startPoll,addCandidate,removeCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
   pStart,pAdd,pRemove,pAdjust,pPaper,pVote,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
   bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
