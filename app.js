@@ -2612,6 +2612,7 @@ const AgendaApp=(function(){
         <label title="Order the speakers most junior first, by Pathways level then projects done">🎓 Junior first <input type="checkbox" id="agJr" checked></label>
         <label title="Transition minutes after each prepared speech">🚶 Speech buffer <input type="number" id="agBuf" value="1" min="0" step="0.5"></label>
         <label title="Transition minutes after each evaluation">🚶 Eval buffer <input type="number" id="agBufE" value="1" min="0" step="0.5"></label>
+        <label title="Transition minutes after each item in the Opening Session">🚶 Opening buffer <input type="number" id="agBufO" value="0" min="0" step="0.5"></label>
         <button class="btn ghost small" id="agAdd">＋ Speaker</button>
         <button class="btn ghost small" id="agEdu">🎓 Educational session</button>
       </div>
@@ -2850,8 +2851,14 @@ const AgendaApp=(function(){
   function updateTimes(){
     if(!g('agBody'))return;
     let cur=startMins(); const start=cur;
-    const bufS=parseFloat(g('agBuf').value)||0,bufE=parseFloat(g('agBufE').value)||0;
-    const extra=r=>r.kind==='speaker'?bufS:(r.kind==='evaluator'||r.kind==='tteval')?bufE:0;
+    const bufS=parseFloat(g('agBuf').value)||0,bufE=parseFloat(g('agBufE').value)||0,
+          bufO=parseFloat(g('agBufO').value)||0;
+    /* the block matters for the opening — its rows carry no kind of their own */
+    const extra=(r,block)=>{
+      if(r.kind==='speaker')return bufS;
+      if(r.kind==='evaluator'||r.kind==='tteval')return bufE;
+      return block&&block.id==='opening'?bufO:0;
+    };
     orderedBlocks().forEach(block=>{
       if(block.type==='break'){
         if(block._fromEl)block._fromEl.innerText=fmtT(cur);
@@ -2861,13 +2868,13 @@ const AgendaApp=(function(){
       }
       if(blockHidden(block))return;
       const rows=visibleRows(block);
-      const total=rows.reduce((s,r)=>s+(r.dur||0)+extra(r),0);
+      const total=rows.reduce((s,r)=>s+(r.dur||0)+extra(r,block),0);
       if(block._minsEl)block._minsEl.innerText=`${total} min`;
       rows.forEach(row=>{
         if(row._fromEl)row._fromEl.innerText=fmtT(cur);
         cur+=(row.dur||0);
         if(row._toEl)row._toEl.innerText=fmtT(cur);
-        cur+=extra(row);
+        cur+=extra(row,block);
       });
     });
     g('agChipTime').innerText=`${fmtT(start)} – ${fmtT(cur)} ${ampm(cur)}`;
@@ -2927,7 +2934,8 @@ const AgendaApp=(function(){
         :{type:b.type,id:b.id,title:b.title,removable:b.removable,
           rows:b.rows.map(r=>({kind:r.kind,fill:r.fill,act:r.act,label:r.label,who:r.who,dur:r.dur,preset:r.preset,autoMode:r.autoMode,lights:[...(r.lights||['','',''])]}))}),
       inputs:{date:g('agDate').value,start:g('agStart').value,no:g('agNo').value,
-              buf:g('agBuf').value,bufE:g('agBufE').value,tt:g('agTT').checked,sp:g('agSp').checked,
+              buf:g('agBuf').value,bufE:g('agBufE').value,bufO:g('agBufO').value,
+              tt:g('agTT').checked,sp:g('agSp').checked,
               swap:g('agSwap').checked,jr:g('agJr').checked},
       texts:staticEditables().map(el=>el.innerHTML),
       excom:[g('agExcomSec').classList.contains('nobar'),g('agExcomSec').classList.contains('nosec')]
@@ -2943,6 +2951,7 @@ const AgendaApp=(function(){
       if(i.no!=null){ g('agNo').value=i.no; g('agChipNo').innerText='No. '+i.no; }
       if(i.buf!=null)g('agBuf').value=i.buf;
       if(i.bufE!=null)g('agBufE').value=i.bufE;
+      if(i.bufO!=null)g('agBufO').value=i.bufO;
       if(i.tt!=null)g('agTT').checked=i.tt;
       if(i.sp!=null)g('agSp').checked=i.sp;
       if(i.swap!=null)g('agSwap').checked=i.swap;
@@ -3040,6 +3049,7 @@ const AgendaApp=(function(){
     g('agStart').addEventListener('input',updateTimes);
     g('agBuf').addEventListener('input',updateTimes);
     g('agBufE').addEventListener('input',updateTimes);
+    g('agBufO').addEventListener('input',updateTimes);
     g('agNo').addEventListener('input',()=>{ g('agChipNo').innerText='No. '+g('agNo').value; });
     function updateToggles(){
       showTT=g('agTT').checked; showSpeech=g('agSp').checked;
