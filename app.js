@@ -2991,7 +2991,7 @@ const AgendaApp=(function(){
   }
   /* Target a few mm short of true A4 (297mm): printer rendering differs
      slightly from screen, and a sub-mm overflow spills a near-empty page 2. */
-  const PAGE_W=210,PAGE_H=291;
+  const PAGE_W=210,PAGE_H=291,MAX_ZOOM=1.3;
   let pxPerMm=null,savedTitle=null;
   function measurePxPerMm(){
     const probe=document.createElement('div');
@@ -3006,13 +3006,19 @@ const AgendaApp=(function(){
     document.title=`RTC_Agenda_meeting no. ${g('agNo').value}_${datePart}`;
     if(!pxPerMm)measurePxPerMm();
     sheet.style.transform='';
+    /* Converges on the page height from either side. It used to only ever
+       shrink, so a short agenda printed at 100% and left the bottom third of
+       the sheet blank. Capped, because blowing a very short agenda up to fill
+       A4 looks like a poster rather than a meeting agenda. */
     let z=1;
-    for(let i=0;i<8;i++){
+    for(let i=0;i<10;i++){
       sheet.style.width=(PAGE_W/z)+'mm';
       const hMm=sheet.offsetHeight/pxPerMm;   /* offsetHeight ignores transform — true layout height */
       const rendered=z*hMm;
-      if(rendered<=PAGE_H)break;
-      z=z*PAGE_H/rendered*0.99;
+      if(Math.abs(rendered-PAGE_H)<1)break;
+      const next=Math.min(MAX_ZOOM,z*(PAGE_H/rendered)*0.995);
+      if(Math.abs(next-z)<0.002)break;
+      z=next;
     }
     /* transform:scale prints deterministically (CSS zoom fragments unreliably
        when the sheet is nested); the .agprint clamp caps output at one page */
