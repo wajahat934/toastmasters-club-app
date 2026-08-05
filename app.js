@@ -2515,7 +2515,7 @@ function agDefaultBlocks(){
     ]},
     {type:'break',dur:15},
     {type:'session',id:'speech',title:'Prepared Speech Session',rows:[
-      {act:'Introduction &amp; Purpose',fill:'tmod',who:P,dur:1},
+      {act:'Introduction &amp; Purpose',fill:'tmod',who:P,dur:1,introRow:true},
       {kind:'speaker',fill:'spk',who:P,preset:'std',dur:7},
       {kind:'speaker',fill:'spk',who:P,preset:'std',dur:7},
       {kind:'speaker',fill:'spk',who:P,preset:'std',dur:7},
@@ -2727,6 +2727,22 @@ const AgendaApp=(function(){
     }
     return arr;
   }
+  /* The TMOD introduces the session they hand over to. Run speeches first and
+     they are still on stage from the Opening, but they have to come back for
+     Table Topics — so the introduction travels with the later session. Moved on
+     the real blocks rather than a render-time copy, because agRender hangs
+     _minsEl on the block objects and updateTimes looks them up again. */
+  function isIntroRow(r){
+    return r.introRow===true||(r.fill==='tmod'&&/introduction/i.test(String(r.act||'').replace(/<[^>]*>/g,'')));
+  }
+  function placeIntroRow(){
+    const sp=blocks.find(b=>b.id==='speech'),tt=blocks.find(b=>b.id==='tt');
+    if(!sp||!tt)return;
+    const from=swapOrder?sp:tt,to=swapOrder?tt:sp;
+    const i=from.rows.findIndex(isIntroRow);
+    if(i<0)return;                       /* already sitting where it belongs */
+    to.rows.unshift(from.rows.splice(i,1)[0]);
+  }
   function speechBlock(){ return blocks.find(b=>b.id==='speech'); }
   function evalBlock(){ return blocks.find(b=>b.id==='eval'); }
   function speakerCount(){ return speechBlock().rows.filter(r=>r.kind==='speaker').length; }
@@ -2932,7 +2948,7 @@ const AgendaApp=(function(){
     return {
       blocks:blocks.map(b=>b.type==='break'?{type:'break',dur:b.dur}
         :{type:b.type,id:b.id,title:b.title,removable:b.removable,
-          rows:b.rows.map(r=>({kind:r.kind,fill:r.fill,act:r.act,label:r.label,who:r.who,dur:r.dur,preset:r.preset,autoMode:r.autoMode,lights:[...(r.lights||['','',''])]}))}),
+          rows:b.rows.map(r=>({kind:r.kind,fill:r.fill,act:r.act,label:r.label,introRow:r.introRow,who:r.who,dur:r.dur,preset:r.preset,autoMode:r.autoMode,lights:[...(r.lights||['','',''])]}))}),
       inputs:{date:g('agDate').value,start:g('agStart').value,no:g('agNo').value,
               buf:g('agBuf').value,bufE:g('agBufE').value,bufO:g('agBufO').value,
               tt:g('agTT').checked,sp:g('agSp').checked,
@@ -3028,6 +3044,7 @@ const AgendaApp=(function(){
     });
     showTT=g('agTT').checked; showSpeech=g('agSp').checked;
     swapOrder=g('agSwap').checked; juniorFirstOn=g('agJr').checked;
+    placeIntroRow();
     g('agChipSpk').style.display=(!showTT&&showSpeech)?'inline-block':'none';
     agRender(); updateDates();
   }
@@ -3054,6 +3071,7 @@ const AgendaApp=(function(){
     function updateToggles(){
       showTT=g('agTT').checked; showSpeech=g('agSp').checked;
       swapOrder=g('agSwap').checked; juniorFirstOn=g('agJr').checked;
+      placeIntroRow();
       g('agChipSpk').style.display=(!showTT&&showSpeech)?'inline-block':'none';
       agRender();
     }
