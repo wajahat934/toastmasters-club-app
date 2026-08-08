@@ -2550,6 +2550,26 @@ const AG_UR={
 };
 let agUrdu=false;
 function agT(key,en){ return (agUrdu&&AG_UR[key])?AG_UR[key]:en; }
+/* Recognise a phrase in either language, so an agenda saved before the keys
+   existed can still be translated. Tags, entities and spacing are stripped
+   because the stored markup varies. */
+function agNorm(t){
+  return String(t==null?'':t).replace(/<[^>]*>/g,'')
+    .replace(/&amp;/g,'&').replace(/&nbsp;/g,' ')
+    .replace(/[‘’“”]/g,"'").replace(/[–—]/g,'-')
+    .replace(/\s+/g,' ').trim().toLowerCase();
+}
+const AG_SESSION_KEY={opening:'s_opening',tt:'s_tt',speech:'s_speech',eval:'s_eval',awards:'s_awards'};
+let AG_BY_TEXT=null;
+function agKeyOf(text){
+  const n=agNorm(text); if(!n)return null;
+  if(!AG_BY_TEXT){
+    AG_BY_TEXT={};
+    for(const src of [AG_EN,AG_UR])
+      for(const k of Object.keys(src)){ const nn=agNorm(src[k]); if(nn&&!AG_BY_TEXT[nn])AG_BY_TEXT[nn]=k; }
+  }
+  return AG_BY_TEXT[n]||null;
+}
 function agDefaultBlocks(){
   const P=agT('p_blank','TM ____________');
   return [
@@ -2845,21 +2865,24 @@ const AgendaApp=(function(){
     sheet.setAttribute('dir',agUrdu?'rtl':'ltr');
     sheet.classList.toggle('urdu',agUrdu);
     const other=agUrdu?AG_EN:AG_UR, mine=agUrdu?AG_UR:AG_EN;
-    const swap=(cur,k)=>(mine[k]==null||!(cur==null||cur===other[k]))?cur:mine[k];
+    const eq=(a,b)=>agNorm(a)===agNorm(b)&&agNorm(a)!=='';
+    const swap=(cur,k)=>(mine[k]==null||!(cur==null||cur===''||eq(cur,other[k])))?cur:mine[k];
     for(const b of blocks){
-      if(b.k)b.title=swap(b.title,b.k);
+      /* agendas saved before the keys existed carry none, so fall back to the
+         block id and then to recognising the wording itself */
+      const bk=b.k||AG_SESSION_KEY[b.id]||agKeyOf(b.title);
+      if(bk&&mine[bk]!=null){ b.k=bk; b.title=swap(b.title,bk); }
       for(const r of (b.rows||[])){
-        if(r.k)r.act=swap(r.act,r.k);
-        for(const pk of Object.keys(AG_EN)){          /* placeholder people */
-          if(!pk.startsWith('p_'))continue;
-          if(r.who===AG_EN[pk]||r.who===AG_UR[pk]){ r.who=mine[pk]; break; }
-        }
+        const rk=r.k||agKeyOf(r.act);
+        if(rk&&mine[rk]!=null){ r.k=rk; r.act=swap(r.act,rk); }
+        const wk=agKeyOf(r.who);
+        if(wk&&wk.startsWith('p_')&&mine[wk]!=null)r.who=mine[wk];
       }
     }
     sheet.querySelectorAll('[data-k]').forEach(el=>{
       const k=el.dataset.k; if(mine[k]==null)return;
       const cur=el.innerHTML.trim();
-      if(cur===''||cur===String(other[k]).trim())el.innerHTML=mine[k];
+      if(cur===''||eq(cur,other[k]))el.innerHTML=mine[k];
     });
   }
   function speechBlock(){ return blocks.find(b=>b.id==='speech'); }
