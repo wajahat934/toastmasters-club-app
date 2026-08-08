@@ -2108,10 +2108,12 @@ function viewMembers(){
     <button class="btn ${memView==='matrix'?'':'ghost'} small" onclick="memView='matrix';render()">Role history matrix</button>
     <button class="btn ${memView==='signup'?'':'ghost'} small" onclick="memView='signup';render()">Signup drive</button>
     <button class="btn ${memView==='sug'?'':'ghost'} small" onclick="memView='sug';render()">💡 Suggestions${S.suggestions.filter(s=>s.status==='new').length?' ('+S.suggestions.filter(s=>s.status==='new').length+')':''}</button>
+    <button class="btn ${memView==='urdu'?'':'ghost'} small" onclick="memView='urdu';render()">اردو نام</button>
   </div>`;
   if(memView==='matrix')return html+roleMatrix(h,abs);
   if(memView==='signup')return html+signupDriveHtml();
   if(memView==='sug')return html+sugAdminHtml();
+  if(memView==='urdu')return html+urduNamesHtml();
   const active=state.members.filter(m=>!m.archived&&(m.approved||!m.hasAccount));
   if(!active.length)html+=`<div class="empty">No members yet.</div>`;
   for(const mem of active)html+=memberCard(mem,h[mem.id]||{},abs[mem.id]||0);
@@ -2471,6 +2473,80 @@ function viewSettings(){
     <p class="small muted">The database is the source of truth (Supabase also keeps daily backups on paid tiers); this snapshot is an extra safety copy.</p>
   </div>`;
 }
+const URDU_NAME_PARTS={
+  muhammad:'محمد',mohammad:'محمد',mohammed:'محمد',md:'محمد',
+  ahmed:'احمد',ahmad:'احمد',ali:'علی',khan:'خان',syed:'سید',shah:'شاہ',
+  hassan:'حسن',hasan:'حسن',hussain:'حسین',hosain:'حسین',husain:'حسین',
+  bilal:'بلال',usman:'عثمان',umer:'عمر',umar:'عمر',
+  fatima:'فاطمہ',ayesha:'عائشہ',aisha:'عائشہ',zainab:'زینب',
+  danish:'دانش',salman:'سلمان',imtiaz:'امتیاز',madiha:'مدیحہ',
+  osama:'اسامہ',majeed:'مجید',zameer:'ضمیر',sundas:'سندس',sarfraz:'سرفراز',
+  wajahat:'وجاہت',ejaz:'اعجاز',ul:'ال',haq:'حق',almas:'الماس',
+  laiba:'لائبہ',abaidullah:'عبیداللہ',ubaidullah:'عبیداللہ',
+  adeel:'عدیل',amir:'عامر',aamir:'عامر',mehmood:'محمود',mahmood:'محمود',
+  fazal:'فضل',akbar:'اکبر',mesum:'میثم',haider:'حیدر',
+  noor:'نور',din:'دین',ud:'ال',uddin:'الدین',taifoor:'طیفور',tamseela:'تمثیلہ',
+  rashed:'راشد',rashid:'راشد',shahnawaz:'شاہنواز',shaique:'شائق',
+  rizwan:'رضوان',ahsan:'احسن',waheed:'وحید',hammad:'حماد',
+  sheikh:'شیخ',malik:'ملک',mirza:'مرزا',raja:'راجہ',chaudhry:'چوہدری',
+  abdul:'عبدال',rehman:'رحمان',rahman:'رحمان',aslam:'اسلم',akram:'اکرم',
+  javed:'جاوید',nadeem:'ندیم',asif:'آصف',tariq:'طارق',kamran:'کامران',
+  saad:'سعد',zeeshan:'ذیشان',arslan:'ارسلان',iqbal:'اقبال',anwar:'انور',
+  sana:'ثنا',hira:'حرا',maryam:'مریم',amna:'آمنہ',sadia:'سعدیہ',nida:'ندا'
+};
+function suggestUrduName(name){
+  const parts=String(name||'').trim().split(/\s+/).filter(Boolean);
+  if(!parts.length)return '';
+  const mapped=parts.map(p=>URDU_NAME_PARTS[p.toLowerCase().replace(/[^a-z]/g,'')]||null);
+  if(mapped.every(x=>x===null))return '';
+  return mapped.map((x,i)=>x||parts[i]).join(' ');
+}
+function urduNames(){ return state.settings.urduNames||{}; }
+function urduNameOf(id){ return (urduNames()[id]||'').trim(); }
+function setUrduName(id,v){
+  const map={...urduNames()};
+  v=String(v||'').trim();
+  if(v)map[id]=v; else delete map[id];
+  state.settings.urduNames=map; S.settings=state.settings;
+  saveSettingsRemote();
+}
+function suggestUrduNames(){
+  const map={...urduNames()};
+  let n=0;
+  for(const m of state.members){
+    if(m.external||m.archived||map[m.id])continue;
+    const g=suggestUrduName(m.name);
+    if(g){ map[m.id]=g; n++; }
+  }
+  state.settings.urduNames=map; S.settings=state.settings;
+  saveSettingsRemote(); render();
+  toast(n?`${n} name${n>1?'s':''} filled in — please check each one`:'Nothing new matched the dictionary');
+}
+function urduNamesHtml(){
+  const mems=state.members.filter(m=>!m.archived).sort((a,b)=>a.name.localeCompare(b.name));
+  const done=mems.filter(m=>urduNameOf(m.id)).length;
+  return `<div class="card">
+    <h3>اردو نام — Urdu names <span class="muted small">(${done} of ${mems.length} set)</span></h3>
+    <p class="small muted">Used on the agenda when it is switched to Urdu; anyone left blank keeps their Latin name.
+      <b>Suggest</b> fills in the ones the dictionary recognises — read every one, transliteration is guesswork and a
+      name spelt wrong in print is worse than an English one. Parts it doesn't know stay in Latin so you can spot them.</p>
+    <div class="row" style="margin:8px 0">
+      <button class="btn small" onclick="suggestUrduNames()">✨ Suggest the ones I haven't set</button>
+    </div>
+    <div class="tblwrap"><table><thead><tr><th style="width:45%">Name</th><th>اردو نام</th></tr></thead><tbody>
+    ${mems.map(m=>{
+      const cur=urduNameOf(m.id), hint=suggestUrduName(m.name);
+      const latinLeft=cur&&/[A-Za-z]/.test(cur);
+      return `<tr>
+        <td>${esc(m.name)} ${m.external?'<span class="pill guest">guest</span>':''}
+          ${latinLeft?'<span class="pill absent" title="Part of this is still Latin - the dictionary did not know it">check</span>':''}</td>
+        <td><input type="text" dir="rtl" style="width:100%;font-size:1.05rem"
+             value="${esc(cur)}" placeholder="${esc(hint||'—')}"
+             onchange="setUrduName('${m.id}',this.value)"></td>
+      </tr>`;}).join('')}
+    </tbody></table></div>
+  </div>`;
+}
 function saveSettingsRemote(){ sync(api.saveSettings(state.settings)); }
 function s_set(k,v){ state.settings[k]=typeof v==='string'?v.trim():v; S.settings=state.settings; saveSettingsRemote(); render(); }
 function roleEdit(i,k,v){ state.settings.roles[i][k]=typeof v==='string'?v.trim():v; saveSettingsRemote(); render(); }
@@ -2641,7 +2717,11 @@ const AgendaApp=(function(){
   let blocks=[],showTT=true,showSpeech=true,swapOrder=false,juniorFirstOn=true,mid=null,container=null,saveTimer=null;
   const g=id=>document.getElementById(id);
   const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
-  function tmName(mem){ const n=mem.name.trim(); return /^(TM|DTM)\b/i.test(n)?n:'TM '+n; }
+  /* an Urdu agenda uses the member's Urdu name when one has been set */
+  function tmName(mem){
+    if(agUrdu){ const u=urduNameOf(mem.id); if(u)return 'ٹی ایم '+u; }
+    const n=mem.name.trim(); return /^(TM|DTM)\b/i.test(n)?n:'TM '+n;
+  }
   function bookedNames(meeting,re){
     const out=[];
     for(const s of slotListFor(meeting)){
@@ -2883,6 +2963,26 @@ const AgendaApp=(function(){
       const k=el.dataset.k; if(mine[k]==null)return;
       const cur=el.innerHTML.trim();
       if(cur===''||eq(cur,other[k]))el.innerHTML=mine[k];
+    });
+    /* Booked names were written in whichever language was active when the
+       bookings were filled, so re-render them — but only strings that still
+       match a member exactly, leaving anything hand-typed alone. */
+    const byForm=new Map();
+    for(const m of state.members){
+      const latin=/^(TM|DTM)\b/i.test(m.name.trim())?m.name.trim():'TM '+m.name.trim();
+      byForm.set(agNorm(latin),m);
+      const u=urduNameOf(m.id); if(u)byForm.set(agNorm('ٹی ایم '+u),m);
+    }
+    const reName=v=>{
+      const m=byForm.get(agNorm(v)); if(!m)return v;
+      const u=urduNameOf(m.id);
+      if(agUrdu&&u)return 'ٹی ایم '+u;
+      const n=m.name.trim(); return /^(TM|DTM)\b/i.test(n)?n:'TM '+n;
+    };
+    for(const b of blocks)for(const r of (b.rows||[]))if(r.who)r.who=reName(r.who);
+    sheet.querySelectorAll('[data-sup],[data-fp]').forEach(el=>{
+      const parts=el.innerHTML.split(/(&nbsp;|,\s*)/);
+      el.innerHTML=parts.map(x=>/^(&nbsp;|,\s*)$/.test(x)?x:reName(x)).join('');
     });
   }
   function speechBlock(){ return blocks.find(b=>b.id==='speech'); }
@@ -3435,6 +3535,7 @@ function bindAuth(){
 /* ---------- boot ---------- */
 Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
+  setUrduName,suggestUrduNames,
   spkDelta,setMeetingTT,setMeetingOrder,setPresent,markAllPresent,creditSpeech,deferBooking,deferAllBookings,undoMove,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   vcPick,startPoll,addCandidate,removeCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
   pStart,pAdd,pRemove,pAdjust,pPaper,pVote,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
