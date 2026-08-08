@@ -2743,6 +2743,20 @@ const AgendaApp=(function(){
     if(i<0)return;                       /* already sitting where it belongs */
     to.rows.unshift(from.rows.splice(i,1)[0]);
   }
+  /* Evaluations run in the order the sessions did: Table Topics first normally,
+     so its evaluator leads — but with speeches first the speech evaluators go
+     ahead of it. Kept before the wrap-up rows (timer's report, reports, GE). */
+  function placeTTEvalRow(){
+    const ev=blocks.find(b=>b.id==='eval'); if(!ev)return;
+    const i=ev.rows.findIndex(r=>r.kind==='tteval'); if(i<0)return;
+    const [row]=ev.rows.splice(i,1);
+    const first=ev.rows.findIndex(r=>r.kind==='evaluator');
+    const last=ev.rows.map(r=>r.kind).lastIndexOf('evaluator');
+    let at;
+    if(swapOrder)at=last>=0?last+1:1;          /* after the speech evaluators */
+    else at=first>=0?first:1;                  /* ahead of them */
+    ev.rows.splice(Math.max(0,Math.min(at,ev.rows.length)),0,row);
+  }
   function speechBlock(){ return blocks.find(b=>b.id==='speech'); }
   function evalBlock(){ return blocks.find(b=>b.id==='eval'); }
   function speakerCount(){ return speechBlock().rows.filter(r=>r.kind==='speaker').length; }
@@ -2756,6 +2770,9 @@ const AgendaApp=(function(){
       diff--;
     }
     while(diff<0){ rows.splice(rows.map(r=>r.kind).lastIndexOf('evaluator'),1); diff++; }
+    /* adding the first evaluator inserts relative to the TT evaluator, so
+       re-settle it afterwards rather than leaving it stranded mid-list */
+    placeTTEvalRow();
   }
   function makeEditable(el,fn){ el.contentEditable='true'; el.addEventListener('input',fn); }
   function agRender(){
@@ -3050,7 +3067,7 @@ const AgendaApp=(function(){
     });
     showTT=g('agTT').checked; showSpeech=g('agSp').checked;
     swapOrder=g('agSwap').checked; juniorFirstOn=g('agJr').checked;
-    placeIntroRow();
+    placeIntroRow(); placeTTEvalRow();
     g('agChipSpk').style.display=(!showTT&&showSpeech)?'inline-block':'none';
     agRender(); updateDates();
   }
@@ -3077,7 +3094,7 @@ const AgendaApp=(function(){
     function updateToggles(){
       showTT=g('agTT').checked; showSpeech=g('agSp').checked;
       swapOrder=g('agSwap').checked; juniorFirstOn=g('agJr').checked;
-      placeIntroRow();
+      placeIntroRow(); placeTTEvalRow();
       g('agChipSpk').style.display=(!showTT&&showSpeech)?'inline-block':'none';
       agRender();
     }
