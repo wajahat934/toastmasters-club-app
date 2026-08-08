@@ -225,6 +225,17 @@ details.mem .body{padding:12px 16px}
 #agSheet .restore:hover{color:var(--blue);border-color:var(--blue)}
 #agSheet .excom.nobar .restore,#agSheet .excom.nosec .restore{display:block}
 #agSheet .foot{margin-top:auto;padding-top:7px;text-align:center;font-size:9px;color:var(--blue);font-weight:600;letter-spacing:.4px}
+/* ---- Urdu agenda: RTL, and a Nastaliq face if the machine has one.
+   Nastaliq needs far more vertical room than Latin, hence the taller lines. */
+#agSheet.urdu{font-family:"Noto Nastaliq Urdu","Jameel Noori Nastaleeq","Alvi Nastaleeq",
+  "Urdu Typesetting","Segoe UI",Tahoma,Arial,sans-serif; line-height:2}
+#agSheet.urdu td,#agSheet.urdu th{line-height:2}
+#agSheet.urdu .big{line-height:1.9}
+#agSheet.urdu .mission,#agSheet.urdu .pbody{line-height:1.95}
+#agSheet.urdu .foot{letter-spacing:0}
+/* the timer lights are a fixed left-to-right green/yellow/red sequence */
+#agSheet.urdu .lights{direction:ltr}
+#agSheet.urdu td.time,#agSheet.urdu td.dur{direction:ltr}
 #agSheet .foot .motto{font-style:italic}
 #agSheet [contenteditable]:hover{outline:1px dashed #8fb3cc}
 #agSheet [contenteditable]:focus{outline:2px solid var(--blue);background:#eef6fc}

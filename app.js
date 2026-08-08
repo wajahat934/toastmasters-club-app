@@ -2500,43 +2500,123 @@ const AG_PRESETS={
   ice:{label:'(Ice Breaker)',dur:6,lights:['4','5','6'],name:'Ice Breaker 4–6'},
   custom:{label:'',dur:null,lights:null,name:'Custom…'}
 };
+/* ---- Urdu agenda ----------------------------------------------------------
+   The club runs the occasional Urdu meeting. Every phrase the sheet generates
+   carries a key, so switching language is a lookup rather than a text match —
+   anything the officer has typed themselves has no key and is left alone.
+   Machine-written Urdu: the sheet stays click-to-edit precisely so wording can
+   be corrected in place. */
+const AG_UR={
+  /* sessions */
+  s_opening:'افتتاحی نشست', s_tt:'موضوعاتی تقاریر کی نشست',
+  s_speech:'تیار شدہ تقاریر کی نشست', s_eval:'تجزیاتی نشست',
+  s_awards:'انعامات و اختتام', s_edu:'تعلیمی نشست',
+  /* activity rows */
+  r_call:'اجلاس کا آغاز — ناظمِ انتظامات',
+  r_welcome:'خیرمقدمی کلمات — صدرِ اجلاس',
+  r_tmod:'میزبانِ اجلاس',
+  r_ttm:'موضوعاتی تقاریر کے میزبان',
+  r_tt:'موضوعاتی تقاریر <span class="role-note">(فی مقرر ۱–۲ منٹ)</span>',
+  r_timer:'وقت نگار کی رپورٹ و ووٹنگ',
+  r_intro:'تعارف و مقصد',
+  r_teamIntro:'ٹیم کا تعارف — مجموعی تجزیہ کار',
+  r_tteval:'موضوعاتی تقاریر کے تجزیہ کار',
+  r_reports:'رپورٹس کی طلبی',
+  r_ge:'مجموعی تجزیہ کار',
+  r_feedback:'مہمانوں کی رائے و انعامات',
+  r_photo:'گروپ تصویر 📸',
+  r_eduIntro:'مہمان مقرر کا تعارف', r_eduTalk:'تعلیمی نشست <span class="role-note">(موضوع)</span>',
+  r_eduQa:'سوال و جواب و اظہارِ تشکر',
+  /* people placeholders */
+  p_blank:'ٹی ایم ____________', p_guests:'غیر کردار دار اراکین و مہمان',
+  p_timerVc:'وقت نگار و ووٹ شمار کنندہ', p_rolePlayers:'کردار دار اراکین',
+  p_everyone:'تمام شرکاء', p_tmod:'میزبانِ اجلاس', p_guestSpk:'مہمان مقرر — ____________',
+  p_guestTmod:'مہمان مقرر و میزبانِ اجلاس',
+  /* generated labels */
+  l_speaker:'تیار شدہ مقرر', l_evaluator:'تقریر کے تجزیہ کار',
+  l_break:'☕ وقفہ و باہمی ملاقات', l_min:'منٹ',
+  /* sheet furniture */
+  h_activity:'سرگرمی', h_role:'کردار', h_from:'سے', h_to:'تک', h_min:'منٹ',
+  h_timer:'وقت', h_lights:'سبز · زرد · سرخ',
+  h_theme:'اجلاس کا موضوع', h_wod:'لفظِ روز', h_meaning:'مطلب', h_eg:'مثلاً',
+  h_support:'معاون کردار', h_planner:'آئندہ اجلاس کی منصوبہ بندی', h_mission:'کلب کا مشن',
+  h_meeting:'اجلاس', h_inperson:'بالمشافہ', h_speakathon:'تقریری میلہ',
+  sup_timer:'وقت نگار', sup_vc:'ووٹ شمار کنندہ', sup_gram:'ماہرِ قواعد',
+  sup_al:'متوجہ سامع', sup_ah:'’آہ‘ شمار کنندہ', sup_jm:'لطیفہ گو',
+  fp_tmod:'میزبانِ اجلاس', fp_ttm:'موضوعاتی تقاریر کے میزبان',
+  fp_spk:'مقررین', fp_ge:'مجموعی تجزیہ کار',
+  mission:'ہم ایک معاون اور مثبت ماحول فراہم کرتے ہیں جس میں اراکین اپنی ابلاغی اور قائدانہ صلاحیتیں نکھارتے ہیں، جس سے اعتمادِ نفس اور ذاتی نشوونما میں اضافہ ہوتا ہے۔',
+  motto:'’’بہتر سننے، بہتر سوچنے، بہتر بولنے کے لیے — ہم کر کے سیکھتے ہیں۔‘‘'
+};
+let agUrdu=false;
+function agT(key,en){ return (agUrdu&&AG_UR[key])?AG_UR[key]:en; }
 function agDefaultBlocks(){
-  const P='TM ____________';
+  const P=agT('p_blank','TM ____________');
   return [
-    {type:'session',id:'opening',title:'Opening Session',rows:[
-      {act:'Call to Order by SAA',fill:'saa',who:P,dur:2},
-      {act:'Welcome Note by Presiding Officer',fill:'po',who:P,dur:5},
-      {act:'Toastmaster of the Day (TMOD)',fill:'tmod',who:P,dur:3}
+    {type:'session',id:'opening',k:'s_opening',title:agT('s_opening','Opening Session'),rows:[
+      {k:'r_call',act:agT('r_call','Call to Order by SAA'),fill:'saa',who:P,dur:2},
+      {k:'r_welcome',act:agT('r_welcome','Welcome Note by Presiding Officer'),fill:'po',who:P,dur:5},
+      {k:'r_tmod',act:agT('r_tmod','Toastmaster of the Day (TMOD)'),fill:'tmod',who:P,dur:3}
     ]},
-    {type:'session',id:'tt',title:'Table Topics Session',rows:[
-      {act:'Table Topics Master',fill:'ttm',who:P,dur:2},
-      {act:'Table Topics <span class="role-note">(speakers: 1 – 2 min each)</span>',who:'Non-Role Players &amp; Guests',dur:25,autoMode:'manual',lights:['1','1.5','2']},
-      {act:'Timer’s Report &amp; Voting',who:'Timer &amp; Vote Counter',dur:2}
+    {type:'session',id:'tt',k:'s_tt',title:agT('s_tt','Table Topics Session'),rows:[
+      {k:'r_ttm',act:agT('r_ttm','Table Topics Master'),fill:'ttm',who:P,dur:2},
+      {k:'r_tt',act:agT('r_tt','Table Topics <span class="role-note">(speakers: 1 – 2 min each)</span>'),who:agT('p_guests','Non-Role Players &amp; Guests'),dur:25,autoMode:'manual',lights:['1','1.5','2']},
+      {k:'r_timer',act:agT('r_timer','Timer’s Report &amp; Voting'),who:agT('p_timerVc','Timer &amp; Vote Counter'),dur:2}
     ]},
     {type:'break',dur:15},
-    {type:'session',id:'speech',title:'Prepared Speech Session',rows:[
-      {act:'Introduction &amp; Purpose',fill:'tmod',who:P,dur:1,introRow:true},
+    {type:'session',id:'speech',k:'s_speech',title:agT('s_speech','Prepared Speech Session'),rows:[
+      {k:'r_intro',act:agT('r_intro','Introduction &amp; Purpose'),fill:'tmod',who:P,dur:1,introRow:true},
       {kind:'speaker',fill:'spk',who:P,preset:'std',dur:7},
       {kind:'speaker',fill:'spk',who:P,preset:'std',dur:7},
       {kind:'speaker',fill:'spk',who:P,preset:'std',dur:7},
-      {act:'Timer’s Report &amp; Voting',fill:'tmod',who:P,dur:2}
+      {k:'r_timer',act:agT('r_timer','Timer’s Report &amp; Voting'),fill:'tmod',who:P,dur:2}
     ]},
-    {type:'session',id:'eval',title:'Evaluation Session',rows:[
-      {act:'Team Introduction by GE',fill:'ge',who:P,dur:1},
-      {kind:'tteval',fill:'tte',act:'Table Topics Evaluator',who:P,dur:5},
+    {type:'session',id:'eval',k:'s_eval',title:agT('s_eval','Evaluation Session'),rows:[
+      {k:'r_teamIntro',act:agT('r_teamIntro','Team Introduction by GE'),fill:'ge',who:P,dur:1},
+      {kind:'tteval',k:'r_tteval',fill:'tte',act:agT('r_tteval','Table Topics Evaluator'),who:P,dur:5},
       {kind:'evaluator',fill:'eval',who:P,dur:3},
       {kind:'evaluator',fill:'eval',who:P,dur:3},
       {kind:'evaluator',fill:'eval',who:P,dur:3},
-      {act:'Timer’s Report &amp; Voting',who:'Timer &amp; Vote Counter',dur:2},
-      {act:'Call for Reports',who:'Role Players',dur:5},
-      {act:'General Evaluator',fill:'ge',who:P,dur:5}
+      {k:'r_timer',act:agT('r_timer','Timer’s Report &amp; Voting'),who:agT('p_timerVc','Timer &amp; Vote Counter'),dur:2},
+      {k:'r_reports',act:agT('r_reports','Call for Reports'),who:agT('p_rolePlayers','Role Players'),dur:5},
+      {k:'r_ge',act:agT('r_ge','General Evaluator'),fill:'ge',who:P,dur:5}
     ]},
-    {type:'session',id:'awards',title:'Awards &amp; Closing',rows:[
-      {act:'Feedback from Guests &amp; Awards',fill:'po',who:P,dur:5},
-      {act:'Group Picture 📸',who:'Everyone',dur:1,autoMode:'manual',lights:['','','']}
+    {type:'session',id:'awards',k:'s_awards',title:agT('s_awards','Awards &amp; Closing'),rows:[
+      {k:'r_feedback',act:agT('r_feedback','Feedback from Guests &amp; Awards'),fill:'po',who:P,dur:5},
+      {k:'r_photo',act:agT('r_photo','Group Picture 📸'),who:agT('p_everyone','Everyone'),dur:1,autoMode:'manual',lights:['','','']}
     ]}
   ];
 }
+/* English source strings, so a language switch can rewrite only the phrases the
+   sheet generated and leave anything hand-typed untouched. */
+const AG_EN={};
+(function(){
+  const was=agUrdu; agUrdu=false;
+  for(const b of agDefaultBlocks()){
+    if(b.k)AG_EN[b.k]=b.title;
+    for(const r of (b.rows||[]))if(r.k&&AG_EN[r.k]==null)AG_EN[r.k]=r.act;
+  }
+  Object.assign(AG_EN,{
+    p_blank:'TM ____________',p_guests:'Non-Role Players &amp; Guests',
+    p_timerVc:'Timer &amp; Vote Counter',p_rolePlayers:'Role Players',p_everyone:'Everyone',
+    p_tmod:'TMOD',p_guestSpk:'Guest Speaker — ____________',p_guestTmod:'Guest Speaker &amp; TMOD',
+    s_edu:'Educational Session',r_eduIntro:'Introduction of Guest Speaker',
+    r_eduTalk:'Educational Session <span class="role-note">(topic)</span>',
+    r_eduQa:'Q&amp;A &amp; Vote of Thanks',
+    l_speaker:'Prepared Speaker',l_evaluator:'Speech Evaluator',
+    l_break:'☕ Networking Break',l_min:'min',
+    h_activity:'Activity',h_role:'Role Player',h_from:'From',h_to:'To',h_min:'Min',
+    h_timer:'Timer',h_lights:'G · Y · R',h_theme:'Theme of the Meeting',h_wod:'Word of the Day',
+    h_meaning:'Meaning',h_eg:'e.g.',h_support:'Supporting Roles',h_planner:'Forward Planner',
+    h_mission:'Club Mission',h_meeting:'Meeting',h_inperson:'In-Person',h_speakathon:'SPEAKATHON',
+    sup_timer:'Timer',sup_vc:'Vote Counter',sup_gram:'Grammarian',sup_al:'Active Listener',
+    sup_ah:'Ah Counter',sup_jm:'Joke Master',
+    fp_tmod:'TMOD',fp_ttm:'TT Master',fp_spk:'Speakers',fp_ge:'General Evaluator',
+    mission:'We provide a supportive and positive learning experience in which members are empowered to develop communication and leadership skills, resulting in greater self-confidence and personal growth.',
+    motto:'“For better listening, for better thinking, for better speaking — we learn by doing.”'
+  });
+  agUrdu=was;
+})();
 const AgendaApp=(function(){
   let blocks=[],showTT=true,showSpeech=true,swapOrder=false,juniorFirstOn=true,mid=null,container=null,saveTimer=null;
   const g=id=>document.getElementById(id);
@@ -2610,6 +2690,7 @@ const AgendaApp=(function(){
         <label title="Untick to drop the Prepared Speech Session">🎤 Speeches <input type="checkbox" id="agSp" checked></label>
         <label title="Run the Prepared Speech Session before Table Topics">🔁 Speeches first <input type="checkbox" id="agSwap"></label>
         <label title="Order the speakers most junior first, by Pathways level then projects done">🎓 Junior first <input type="checkbox" id="agJr" checked></label>
+        <label title="Render this agenda in Urdu, right to left">اردو Urdu <input type="checkbox" id="agUr"></label>
         <label title="Transition minutes after each prepared speech">🚶 Speech buffer <input type="number" id="agBuf" value="1" min="0" step="0.5"></label>
         <label title="Transition minutes after each evaluation">🚶 Eval buffer <input type="number" id="agBufE" value="1" min="0" step="0.5"></label>
         <label title="Transition minutes after each item in the Opening Session">🚶 Opening buffer <input type="number" id="agBufO" value="0" min="0" step="0.5"></label>
@@ -2626,56 +2707,56 @@ const AgendaApp=(function(){
           <div class="sub" contenteditable="true">Club No. 07247940 &nbsp;•&nbsp; District 122 &nbsp;•&nbsp; Area A9 &nbsp;•&nbsp; Division B</div>
         </div>
         <div class="meet-chips">
-          <span class="mchip spk" id="agChipSpk">🎤 SPEAKATHON</span>
-          <span class="mchip">Meeting <b id="agChipNo">No. 351</b></span>
+          <span class="mchip spk" id="agChipSpk">🎤 <span data-k="h_speakathon">SPEAKATHON</span></span>
+          <span class="mchip"><span data-k="h_meeting">Meeting</span> <b id="agChipNo">No. 351</b></span>
           <span class="mchip" id="agChipDate"></span><br>
           <span class="mchip" id="agChipTime"></span>
-          <span class="mchip" contenteditable="true">In-Person</span>
+          <span class="mchip" contenteditable="true" data-k="h_inperson">In-Person</span>
         </div>
       </div>
       <div class="themebar">
         <div class="theme">
-          <div class="kicker">Theme of the Meeting</div>
+          <div class="kicker" data-k="h_theme">Theme of the Meeting</div>
           <div class="big" id="agTheme" contenteditable="true">—</div>
         </div>
         <div class="wod">
-          <div class="kicker">Word of the Day</div>
+          <div class="kicker" data-k="h_wod">Word of the Day</div>
           <div class="big" id="agWodWord" contenteditable="true">“____”</div>
           <div class="def" id="agWodDef" contenteditable="true"><b>Meaning:</b> ____ &nbsp;·&nbsp; <i>e.g. “____.”</i></div>
         </div>
       </div>
       <table>
         <thead><tr>
-          <th style="width:34%">Activity</th><th style="width:28%">Role Player</th>
-          <th class="c" style="width:8%">From</th><th class="c" style="width:8%">To</th>
-          <th class="c" style="width:6%">Min</th><th class="c" style="width:16%">Timer &nbsp;<span style="font-weight:400">G · Y · R</span></th>
+          <th style="width:34%" data-k="h_activity">Activity</th><th style="width:28%" data-k="h_role">Role Player</th>
+          <th class="c" style="width:8%" data-k="h_from">From</th><th class="c" style="width:8%" data-k="h_to">To</th>
+          <th class="c" style="width:6%" data-k="h_min">Min</th><th class="c" style="width:16%"><span data-k="h_timer">Timer</span> &nbsp;<span style="font-weight:400" data-k="h_lights">G · Y · R</span></th>
         </tr></thead>
         <tbody id="agBody"></tbody>
       </table>
       <div class="bottom">
         <div class="panel bluehead" style="flex:1.15">
-          <h3>Supporting Roles</h3>
+          <h3 data-k="h_support">Supporting Roles</h3>
           <div class="pbody roles2">
-            <div><b>Timer</b><br><span contenteditable="true" data-sup="timer">TM ____________</span></div>
-            <div><b>Vote Counter</b><br><span contenteditable="true" data-sup="vc">TM ____________</span></div>
-            <div><b>Grammarian</b><br><span contenteditable="true" data-sup="gram">TM ____________</span></div>
-            <div><b>Active Listener</b><br><span contenteditable="true" data-sup="al">TM ____________</span></div>
-            <div><b>Ah Counter</b><br><span contenteditable="true" data-sup="ah">TM ____________</span></div>
-            <div><b>Joke Master</b><br><span contenteditable="true" data-sup="jm">TM ____________</span></div>
+            <div><b data-k="sup_timer">Timer</b><br><span contenteditable="true" data-sup="timer">TM ____________</span></div>
+            <div><b data-k="sup_vc">Vote Counter</b><br><span contenteditable="true" data-sup="vc">TM ____________</span></div>
+            <div><b data-k="sup_gram">Grammarian</b><br><span contenteditable="true" data-sup="gram">TM ____________</span></div>
+            <div><b data-k="sup_al">Active Listener</b><br><span contenteditable="true" data-sup="al">TM ____________</span></div>
+            <div><b data-k="sup_ah">Ah Counter</b><br><span contenteditable="true" data-sup="ah">TM ____________</span></div>
+            <div><b data-k="sup_jm">Joke Master</b><br><span contenteditable="true" data-sup="jm">TM ____________</span></div>
           </div>
         </div>
         <div class="panel">
-          <h3>Forward Planner — <span id="agFpDate"></span></h3>
+          <h3><span data-k="h_planner">Forward Planner</span> — <span id="agFpDate"></span></h3>
           <div class="pbody fp"><ul style="list-style:none;margin:0;padding:0">
-            <li><b>TMOD:</b> <span contenteditable="true" data-fp="tmod">—</span></li>
-            <li><b>TT Master:</b> <span contenteditable="true" data-fp="ttm">—</span></li>
-            <li><b>Speakers:</b> <span contenteditable="true" data-fp="spk">—</span></li>
-            <li><b>General Evaluator:</b> <span contenteditable="true" data-fp="ge">—</span></li>
+            <li><b><span data-k="fp_tmod">TMOD</span>:</b> <span contenteditable="true" data-fp="tmod">—</span></li>
+            <li><b><span data-k="fp_ttm">TT Master</span>:</b> <span contenteditable="true" data-fp="ttm">—</span></li>
+            <li><b><span data-k="fp_spk">Speakers</span>:</b> <span contenteditable="true" data-fp="spk">—</span></li>
+            <li><b><span data-k="fp_ge">General Evaluator</span>:</b> <span contenteditable="true" data-fp="ge">—</span></li>
           </ul></div>
         </div>
         <div class="panel bluehead">
-          <h3>Club Mission</h3>
-          <div class="pbody mission" contenteditable="true">
+          <h3 data-k="h_mission">Club Mission</h3>
+          <div class="pbody mission" contenteditable="true" data-k="mission">
             We provide a supportive and positive learning experience in which members are
             empowered to develop communication and leadership skills, resulting in greater
             self-confidence and personal growth.
@@ -2689,7 +2770,7 @@ const AgendaApp=(function(){
         <div class="restore no-print" id="agExcomRestore">ExCom bar/banner hidden (won’t print) — click to restore</div>
         <img class="agswap" data-asset="excom" src="${window.AG_EXCOM}" alt="ExCom officers">
       </div>
-      <div class="foot"><span class="motto" contenteditable="true">“For better listening, for better thinking, for better speaking — we learn by doing.”</span></div>
+      <div class="foot"><span class="motto" contenteditable="true" data-k="motto">“For better listening, for better thinking, for better speaking — we learn by doing.”</span></div>
     </div></div>`;
   }
   function fmtT(mins){ const h24=Math.floor(mins/60),mm=String(Math.round(mins%60)).padStart(2,'0'); return `${((h24+11)%12)+1}:${mm}`; }
@@ -2757,6 +2838,30 @@ const AgendaApp=(function(){
     else at=first>=0?first:1;                  /* ahead of them */
     ev.rows.splice(Math.max(0,Math.min(at,ev.rows.length)),0,row);
   }
+  /* Rewrites only the phrases the sheet generated — anything hand-typed either
+     has no key or no longer matches the other language's wording, so it stays. */
+  function applyLanguage(){
+    const sheet=g('agSheet'); if(!sheet)return;
+    sheet.setAttribute('dir',agUrdu?'rtl':'ltr');
+    sheet.classList.toggle('urdu',agUrdu);
+    const other=agUrdu?AG_EN:AG_UR, mine=agUrdu?AG_UR:AG_EN;
+    const swap=(cur,k)=>(mine[k]==null||!(cur==null||cur===other[k]))?cur:mine[k];
+    for(const b of blocks){
+      if(b.k)b.title=swap(b.title,b.k);
+      for(const r of (b.rows||[])){
+        if(r.k)r.act=swap(r.act,r.k);
+        for(const pk of Object.keys(AG_EN)){          /* placeholder people */
+          if(!pk.startsWith('p_'))continue;
+          if(r.who===AG_EN[pk]||r.who===AG_UR[pk]){ r.who=mine[pk]; break; }
+        }
+      }
+    }
+    sheet.querySelectorAll('[data-k]').forEach(el=>{
+      const k=el.dataset.k; if(mine[k]==null)return;
+      const cur=el.innerHTML.trim();
+      if(cur===''||cur===String(other[k]).trim())el.innerHTML=mine[k];
+    });
+  }
   function speechBlock(){ return blocks.find(b=>b.id==='speech'); }
   function evalBlock(){ return blocks.find(b=>b.id==='eval'); }
   function speakerCount(){ return speechBlock().rows.filter(r=>r.kind==='speaker').length; }
@@ -2781,7 +2886,7 @@ const AgendaApp=(function(){
     orderedBlocks().forEach(block=>{
       if(block.type==='break'){
         const tr=document.createElement('tr'); tr.className='break';
-        tr.innerHTML=`<td colspan="6">☕ Networking Break — <span class="bdur">${block.dur}</span> min (<span class="bfrom"></span> – <span class="bto"></span>)</td>`;
+        tr.innerHTML=`<td colspan="6">${agT('l_break','☕ Networking Break')} — <span class="bdur">${block.dur}</span> ${agT('l_min','min')} (<span class="bfrom"></span> – <span class="bto"></span>)</td>`;
         block._fromEl=tr.querySelector('.bfrom'); block._toEl=tr.querySelector('.bto');
         const durEl=tr.querySelector('.bdur');
         makeEditable(durEl,()=>{ block.dur=parseFloat(durEl.innerText)||0; updateTimes(); });
@@ -2808,7 +2913,7 @@ const AgendaApp=(function(){
           spkN++;
           const lbl=document.createElement('span');
           lbl.title='Click to rename (clear it to go back to "Prepared Speaker N")';
-          lbl.innerHTML=row.label||`Prepared Speaker ${spkN}`;
+          lbl.innerHTML=row.label||`${agT('l_speaker','Prepared Speaker')} ${spkN}`;
           /* blank it out and the row falls back to the auto-numbered label */
           makeEditable(lbl,()=>{ row.label=lbl.innerText.trim()?lbl.innerHTML:undefined; });
           actTd.appendChild(lbl);
@@ -2837,7 +2942,7 @@ const AgendaApp=(function(){
           });
           actTd.appendChild(del);
         } else if(row.kind==='evaluator'){
-          evalN++; actTd.innerHTML=`Speech Evaluator ${evalN}`;
+          evalN++; actTd.innerHTML=`${agT('l_evaluator','Speech Evaluator')} ${evalN}`;
         } else {
           actTd.innerHTML=row.act;
           makeEditable(actTd,()=>{ row.act=actTd.innerHTML; });
@@ -2902,7 +3007,7 @@ const AgendaApp=(function(){
       if(blockHidden(block))return;
       const rows=visibleRows(block);
       const total=rows.reduce((s,r)=>s+(r.dur||0)+extra(r,block),0);
-      if(block._minsEl)block._minsEl.innerText=`${total} min`;
+      if(block._minsEl)block._minsEl.innerText=`${total} ${agT('l_min','min')}`;
       rows.forEach(row=>{
         if(row._fromEl)row._fromEl.innerText=fmtT(cur);
         cur+=(row.dur||0);
@@ -2964,12 +3069,12 @@ const AgendaApp=(function(){
   function collectAgState(){
     return {
       blocks:blocks.map(b=>b.type==='break'?{type:'break',dur:b.dur}
-        :{type:b.type,id:b.id,title:b.title,removable:b.removable,
-          rows:b.rows.map(r=>({kind:r.kind,fill:r.fill,act:r.act,label:r.label,introRow:r.introRow,who:r.who,dur:r.dur,preset:r.preset,autoMode:r.autoMode,lights:[...(r.lights||['','',''])]}))}),
+        :{type:b.type,id:b.id,k:b.k,title:b.title,removable:b.removable,
+          rows:b.rows.map(r=>({kind:r.kind,k:r.k,fill:r.fill,act:r.act,label:r.label,introRow:r.introRow,who:r.who,dur:r.dur,preset:r.preset,autoMode:r.autoMode,lights:[...(r.lights||['','',''])]}))}),
       inputs:{date:g('agDate').value,start:g('agStart').value,no:g('agNo').value,
               buf:g('agBuf').value,bufE:g('agBufE').value,bufO:g('agBufO').value,
               tt:g('agTT').checked,sp:g('agSp').checked,
-              swap:g('agSwap').checked,jr:g('agJr').checked},
+              swap:g('agSwap').checked,jr:g('agJr').checked,urdu:g('agUr').checked},
       texts:staticEditables().map(el=>el.innerHTML),
       excom:[g('agExcomSec').classList.contains('nobar'),g('agExcomSec').classList.contains('nosec')]
     };
@@ -2989,6 +3094,7 @@ const AgendaApp=(function(){
       if(i.sp!=null)g('agSp').checked=i.sp;
       if(i.swap!=null)g('agSwap').checked=i.swap;
       if(i.jr!=null)g('agJr').checked=i.jr;
+      if(i.urdu!=null){ g('agUr').checked=i.urdu; agUrdu=!!i.urdu; }
       const els=staticEditables();
       (st.texts||[]).forEach((h,idx)=>{ if(els[idx]!=null&&h!=null)els[idx].innerHTML=h; });
       if(st.excom){
@@ -3067,6 +3173,9 @@ const AgendaApp=(function(){
     });
     showTT=g('agTT').checked; showSpeech=g('agSp').checked;
     swapOrder=g('agSwap').checked; juniorFirstOn=g('agJr').checked;
+    /* the shell is fresh so the checkbox is the truth: a previous meeting may
+       have left agUrdu set, and the defaults were built in that language */
+    agUrdu=g('agUr').checked; applyLanguage();
     placeIntroRow(); placeTTEvalRow();
     g('agChipSpk').style.display=(!showTT&&showSpeech)?'inline-block':'none';
     agRender(); updateDates();
@@ -3103,6 +3212,7 @@ const AgendaApp=(function(){
     g('agSwap').addEventListener('change',()=>{ updateToggles(); setMeetingOrder(mid,g('agSwap').checked,true); });
     /* re-order needs the names refetched from the bookings, not just a redraw */
     g('agJr').addEventListener('change',()=>{ juniorFirstOn=g('agJr').checked; applyBookings(); agRender(); });
+    g('agUr').addEventListener('change',()=>{ agUrdu=g('agUr').checked; applyLanguage(); agRender(); queueAgSave(); });
     g('agAdd').addEventListener('click',()=>{
       const rows=speechBlock().rows;
       rows.splice(rows.length-1,0,{kind:'speaker',fill:'spk',who:'TM ____________',preset:'std',dur:7});
@@ -3110,10 +3220,10 @@ const AgendaApp=(function(){
     });
     g('agEdu').addEventListener('click',()=>{
       const idx=blocks.findIndex(b=>b.type==='break');
-      blocks.splice(idx+1,0,{type:'session',title:'Educational Session',removable:true,rows:[
-        {act:'Introduction of Guest Speaker',who:'TMOD',dur:2},
-        {act:'Educational Session <span class="role-note">(topic)</span>',who:'Guest Speaker — ____________',dur:20},
-        {act:'Q&amp;A &amp; Vote of Thanks',who:'Guest Speaker &amp; TMOD',dur:5}
+      blocks.splice(idx+1,0,{type:'session',k:'s_edu',title:agT('s_edu','Educational Session'),removable:true,rows:[
+        {k:'r_eduIntro',act:agT('r_eduIntro','Introduction of Guest Speaker'),who:agT('p_tmod','TMOD'),dur:2},
+        {k:'r_eduTalk',act:agT('r_eduTalk','Educational Session <span class="role-note">(topic)</span>'),who:agT('p_guestSpk','Guest Speaker — ____________'),dur:20},
+        {k:'r_eduQa',act:agT('r_eduQa','Q&amp;A &amp; Vote of Thanks'),who:agT('p_guestTmod','Guest Speaker &amp; TMOD'),dur:5}
       ]});
       agRender();
     });
