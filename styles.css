@@ -237,12 +237,13 @@ details.mem .body{padding:12px 16px}
    RTL paragraph direction reorders its parts: "4:30 – 6:30 PM" came out as
    "PM 6:30 – 4:30", and "08 August 2026" as "August 2026 08". isolate keeps
    each one a self-contained run inside the surrounding Urdu. */
+/* display is deliberately left alone here: .lights is a centred flex row and
+   forcing inline-block knocked the timer chips out of alignment */
 #agSheet.urdu .lights,
-#agSheet.urdu td.time,#agSheet.urdu td.dur,
+#agSheet.urdu td.time,#agSheet.urdu td.dur{direction:ltr; unicode-bidi:isolate}
 #agSheet.urdu #agChipTime,#agSheet.urdu #agChipDate,
 #agSheet.urdu #agChipNo,#agSheet.urdu #agFpDate{
   direction:ltr; unicode-bidi:isolate; display:inline-block}
-#agSheet.urdu td.time,#agSheet.urdu td.dur{display:table-cell}
 #agSheet .foot .motto{font-style:italic}
 #agSheet [contenteditable]:hover{outline:1px dashed #8fb3cc}
 #agSheet [contenteditable]:focus{outline:2px solid var(--blue);background:#eef6fc}

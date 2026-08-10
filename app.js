@@ -1490,7 +1490,7 @@ function meetingBookingCard(m){
     </div>
     <div class="row small" style="margin-top:8px;padding:6px 10px;background:var(--surface2);border:1px solid var(--line);border-radius:8px">
       <span class="muted">This meeting:</span>
-      <span>🎤 Speakers <button class="btn ghost small" onclick="spkDelta('${m.id}',-1)" ${nSpk<=1?'disabled':''}>−</button>
+      <span>🎤 Speakers <button class="btn ghost small" onclick="spkDelta('${m.id}',-1)" ${nSpk<=0?'disabled':''}>−</button>
         <b>&nbsp;${nSpk}&nbsp;</b><button class="btn ghost small" onclick="spkDelta('${m.id}',1)" ${nSpk>=8?'disabled':''}>＋</button>
         <span class="muted">(evaluator slots follow)</span></span>
       <label style="display:flex;gap:6px;align-items:center;margin-left:14px">
@@ -1602,7 +1602,7 @@ function meetingReviewCard(m,compact){
       <summary class="small" style="cursor:pointer;color:var(--accent)">✎ Edit / add role players</summary>
       <div class="row small" style="margin-top:8px">
         <input type="text" style="max-width:220px" placeholder="Meeting theme" value="${esc(m.theme)}" onchange="setTheme('${m.id}',this.value)">
-        <span>🎤 Speakers <button class="btn ghost small" onclick="spkDelta('${m.id}',-1)" ${speakersFor(m)<=1?'disabled':''}>−</button>
+        <span>🎤 Speakers <button class="btn ghost small" onclick="spkDelta('${m.id}',-1)" ${speakersFor(m)<=0?'disabled':''}>−</button>
           <b>&nbsp;${speakersFor(m)}&nbsp;</b><button class="btn ghost small" onclick="spkDelta('${m.id}',1)" ${speakersFor(m)>=8?'disabled':''}>＋</button></span>
         <label style="display:flex;gap:6px;align-items:center">
           <input type="checkbox" ${ttOn(m)?'checked':''} onchange="setMeetingTT('${m.id}',this.checked)"> 🗣 Table Topics
@@ -1854,7 +1854,9 @@ async function unbookSlots(m,keys){
 }
 async function spkDelta(mid,d){
   const m=state.meetings.find(x=>x.id===mid); if(!m)return;
-  const cur=speakersFor(m), next=Math.min(8,Math.max(1,cur+d));
+  /* 0 is allowed: an Urdu night, an educational session or a Table-Topics-only
+     meeting has no prepared speeches at all */
+  const cur=speakersFor(m), next=Math.min(8,Math.max(0,cur+d));
   if(next===cur)return;
   if(d<0){
     /* the speaker who gives way is the last to have booked, not whoever happens
@@ -2796,6 +2798,7 @@ const AgendaApp=(function(){
         <label title="Transition minutes after each item in the Opening Session">🚶 Opening buffer <input type="number" id="agBufO" value="0" min="0" step="0.5"></label>
         <button class="btn ghost small" id="agAdd">＋ Speaker</button>
         <button class="btn ghost small" id="agEdu">🎓 Educational session</button>
+        <button class="btn ghost small" id="agAddSession" title="A blank session you can name and fill — quiz, national anthem, anything">＋ Session</button>
       </div>
       <p class="small muted" style="margin:8px 0 0">Role players fill automatically from the meeting's bookings. Click any text on the sheet to edit — changes save per meeting for all admins. The PDF auto-scales to one A4 page.</p>
     </div>
@@ -2985,6 +2988,14 @@ const AgendaApp=(function(){
       el.innerHTML=parts.map(x=>/^(&nbsp;|,\s*)$/.test(x)?x:reName(x)).join('');
     });
   }
+  /* Moves a session past its neighbour, the break included — the break is a
+     real position in the running order, so stepping across it is meaningful. */
+  function moveBlock(block,dir){
+    const i=blocks.indexOf(block), j=i+dir;
+    if(i<0||j<0||j>=blocks.length)return;
+    blocks.splice(j,0,blocks.splice(i,1)[0]);
+    agRender();
+  }
   function speechBlock(){ return blocks.find(b=>b.id==='speech'); }
   function evalBlock(){ return blocks.find(b=>b.id==='eval'); }
   function speakerCount(){ return speechBlock().rows.filter(r=>r.kind==='speaker').length; }
@@ -3024,7 +3035,21 @@ const AgendaApp=(function(){
         const del=document.createElement('button');
         del.className='del no-print'; del.textContent='✕'; del.title='Remove this session';
         del.addEventListener('click',()=>{ blocks.splice(blocks.indexOf(block),1); agRender(); });
-        headTd.appendChild(titleSpan); headTd.appendChild(del);
+        headTd.appendChild(titleSpan);
+        /* added sessions can be slotted anywhere in the running order */
+        const mk=(txt,title,fn)=>{
+          const b=document.createElement('button');
+          b.className='del no-print'; b.style.background='#4a6572';
+          b.textContent=txt; b.title=title;
+          b.addEventListener('click',fn); headTd.appendChild(b);
+        };
+        mk('↑','Move this session earlier',()=>moveBlock(block,-1));
+        mk('↓','Move this session later',()=>moveBlock(block,1));
+        mk('＋','Add a line to this session',()=>{
+          block.rows.push({act:'New item',who:agT('p_blank','TM ____________'),dur:2});
+          agRender();
+        });
+        headTd.appendChild(del);
       } else headTd.appendChild(titleSpan);
       block._minsEl=document.createElement('span'); block._minsEl.className='mins';
       headTd.appendChild(block._minsEl); head.appendChild(headTd); body.appendChild(head);
@@ -3155,7 +3180,8 @@ const AgendaApp=(function(){
     juniorFirstOn=g('agJr').checked;
     g('agChipSpk').style.display=(!showTT&&g('agSp').checked)?'inline-block':'none';
     const map=roleMap(m);
-    const spkSlots=Math.max(1,map.spk.length||speakerCount());
+    /* respect a meeting configured with no prepared speeches */
+    const spkSlots=Math.max(0,speakersFor(m));
     const rows=speechBlock().rows;
     let cur=rows.filter(r=>r.kind==='speaker').length;
     while(cur<spkSlots){ rows.splice(rows.length-1,0,{kind:'speaker',fill:'spk',who:'TM ____________',preset:'std',dur:7}); cur++; }
@@ -3340,6 +3366,13 @@ const AgendaApp=(function(){
       const rows=speechBlock().rows;
       rows.splice(rows.length-1,0,{kind:'speaker',fill:'spk',who:'TM ____________',preset:'std',dur:7});
       syncEvaluators(); agRender();
+    });
+    g('agAddSession').addEventListener('click',()=>{
+      const idx=blocks.findIndex(b=>b.id==='eval');
+      blocks.splice(idx<0?blocks.length:idx,0,{type:'session',title:'New Session',removable:true,rows:[
+        {act:'New item',who:agT('p_blank','TM ____________'),dur:5}
+      ]});
+      agRender();
     });
     g('agEdu').addEventListener('click',()=>{
       const idx=blocks.findIndex(b=>b.type==='break');
