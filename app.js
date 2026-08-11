@@ -3041,12 +3041,12 @@ const AgendaApp=(function(){
     const EV=agT('p_everyone','Everyone');
     /* keyed like the standard rows, so these follow the Urdu switch too */
     const anthem={type:'session',removable:true,_pk:1,k:'s_anthem',title:agT('s_anthem','National Anthem'),rows:[
-      {k:'r_anthem',act:agT('r_anthem','National Anthem'),who:EV,dur:2,autoMode:'manual',lights:['','','']}]};
+      {k:'r_anthem',act:agT('r_anthem','National Anthem'),who:EV,dur:2}]};
     const naghma={type:'session',removable:true,_pk:1,k:'s_naghma',title:agT('s_naghma','Milli Naghma'),rows:[
-      {k:'r_naghma',act:agT('r_naghma','Milli Naghma'),who:P,dur:5,autoMode:'manual',lights:['','','']}]};
+      {k:'r_naghma',act:agT('r_naghma','Milli Naghma'),who:P,dur:5}]};
     const quiz={type:'session',removable:true,_pk:1,k:'s_quiz',title:agT('s_quiz','Independence Day Quiz'),rows:[
       {k:'r_quizmaster',act:agT('r_quizmaster','Quiz Master'),who:P,dur:2},
-      {k:'r_quiz',act:agT('r_quiz','Quiz'),who:EV,dur:12,autoMode:'manual',lights:['','','']}]};
+      {k:'r_quiz',act:agT('r_quiz','Quiz'),who:EV,dur:12}]};
     const at=id=>{const i=blocks.findIndex(b=>b.id===id);return i<0?blocks.length:i;};
     blocks.splice(at('opening'),0,anthem);                 /* before everything */
     blocks.splice(at('opening')+1,0,naghma);               /* straight after the opening */
