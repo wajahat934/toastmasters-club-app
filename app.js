@@ -2623,6 +2623,9 @@ const AG_UR={
   sup_al:'متوجہ سامع', sup_ah:'’آہ‘ شمار کنندہ', sup_jm:'لطیفہ گو',
   fp_tmod:'میزبانِ اجلاس', fp_ttm:'موضوعاتی تقاریر کے میزبان',
   fp_spk:'مقررین', fp_ge:'مجموعی تجزیہ کار',
+  s_anthem:'قومی ترانہ', s_naghma:'ملی نغمہ', s_quiz:'یومِ آزادی کوئز',
+  r_anthem:'قومی ترانہ', r_naghma:'ملی نغمہ',
+  r_quizmaster:'کوئز ماسٹر کا تعارف', r_quiz:'کوئز',
   mission:'ہم ایک معاون اور مثبت ماحول فراہم کرتے ہیں جس میں اراکین اپنی ابلاغی اور قائدانہ صلاحیتیں نکھارتے ہیں، جس سے اعتمادِ نفس اور ذاتی نشوونما میں اضافہ ہوتا ہے۔',
   motto:'’’بہتر سننے، بہتر سوچنے، بہتر بولنے کے لیے — ہم کر کے سیکھتے ہیں۔‘‘'
 };
@@ -2710,13 +2713,16 @@ const AG_EN={};
     sup_timer:'Timer',sup_vc:'Vote Counter',sup_gram:'Grammarian',sup_al:'Active Listener',
     sup_ah:'Ah Counter',sup_jm:'Joke Master',
     fp_tmod:'TMOD',fp_ttm:'TT Master',fp_spk:'Speakers',fp_ge:'General Evaluator',
+    s_anthem:'National Anthem',s_naghma:'Milli Naghma',s_quiz:'Independence Day Quiz',
+    r_anthem:'National Anthem',r_naghma:'Milli Naghma',
+    r_quizmaster:'Quiz Master',r_quiz:'Quiz',
     mission:'We provide a supportive and positive learning experience in which members are empowered to develop communication and leadership skills, resulting in greater self-confidence and personal growth.',
     motto:'“For better listening, for better thinking, for better speaking — we learn by doing.”'
   });
   agUrdu=was;
 })();
 const AgendaApp=(function(){
-  let blocks=[],showTT=true,showSpeech=true,swapOrder=false,juniorFirstOn=true,mid=null,container=null,saveTimer=null;
+  let blocks=[],showTT=true,showSpeech=true,swapOrder=false,juniorFirstOn=true,sheetTheme='',mid=null,container=null,saveTimer=null;
   const g=id=>document.getElementById(id);
   const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
   /* an Urdu agenda uses the member's Urdu name when one has been set */
@@ -2799,6 +2805,11 @@ const AgendaApp=(function(){
         <button class="btn ghost small" id="agAdd">＋ Speaker</button>
         <button class="btn ghost small" id="agEdu">🎓 Educational session</button>
         <button class="btn ghost small" id="agAddSession" title="A blank session you can name and fill — quiz, national anthem, anything">＋ Session</button>
+        <label title="Colour scheme for the printed sheet">🎨 <select id="agTheme2" style="width:auto">
+          <option value="">Standard</option>
+          <option value="pk">🇵🇰 Independence Day</option>
+        </select></label>
+        <button class="btn ghost small" id="agPkKit" title="Add the National Anthem, Milli Naghma and a Quiz in the usual places">🇵🇰 Independence Day layout</button>
       </div>
       <p class="small muted" style="margin:8px 0 0">Role players fill automatically from the meeting's bookings. Click any text on the sheet to edit — changes save per meeting for all admins. The PDF auto-scales to one A4 page.</p>
     </div>
@@ -2995,6 +3006,35 @@ const AgendaApp=(function(){
     if(i<0||j<0||j>=blocks.length)return;
     blocks.splice(j,0,blocks.splice(i,1)[0]);
     agRender();
+  }
+  function applyTheme(){
+    const sheet=g('agSheet'); if(!sheet)return;
+    sheet.classList.remove('theme-pk');
+    if(sheetTheme)sheet.classList.add('theme-'+sheetTheme);
+  }
+  /* Drops the three Independence Day items into sensible places: the anthem
+     opens the meeting, the milli naghma follows the opening, and the quiz sits
+     where Table Topics would warm the room up. All of it is editable after. */
+  function addPkKit(){
+    if(blocks.some(b=>b._pk)){ toast('Those sessions are already on this agenda'); return; }
+    if(!confirm('Add National Anthem, Milli Naghma and Quiz sessions to this agenda?'))return;
+    const P=agT('p_blank','TM ____________');
+    const EV=agT('p_everyone','Everyone');
+    /* keyed like the standard rows, so these follow the Urdu switch too */
+    const anthem={type:'session',removable:true,_pk:1,k:'s_anthem',title:agT('s_anthem','National Anthem'),rows:[
+      {k:'r_anthem',act:agT('r_anthem','National Anthem'),who:EV,dur:2,autoMode:'manual',lights:['','','']}]};
+    const naghma={type:'session',removable:true,_pk:1,k:'s_naghma',title:agT('s_naghma','Milli Naghma'),rows:[
+      {k:'r_naghma',act:agT('r_naghma','Milli Naghma'),who:P,dur:5,autoMode:'manual',lights:['','','']}]};
+    const quiz={type:'session',removable:true,_pk:1,k:'s_quiz',title:agT('s_quiz','Independence Day Quiz'),rows:[
+      {k:'r_quizmaster',act:agT('r_quizmaster','Quiz Master'),who:P,dur:2},
+      {k:'r_quiz',act:agT('r_quiz','Quiz'),who:EV,dur:12,autoMode:'manual',lights:['','','']}]};
+    const at=id=>{const i=blocks.findIndex(b=>b.id===id);return i<0?blocks.length:i;};
+    blocks.splice(at('opening'),0,anthem);                 /* before everything */
+    blocks.splice(at('opening')+1,0,naghma);               /* straight after the opening */
+    blocks.splice(at('tt'),0,quiz);                        /* where the room warms up */
+    sheetTheme='pk'; g('agTheme2').value='pk'; applyTheme();
+    agRender();
+    toast('Added — rename or move any of them with the ↑ ↓ buttons');
   }
   function speechBlock(){ return blocks.find(b=>b.id==='speech'); }
   function evalBlock(){ return blocks.find(b=>b.id==='eval'); }
@@ -3218,12 +3258,12 @@ const AgendaApp=(function(){
   function collectAgState(){
     return {
       blocks:blocks.map(b=>b.type==='break'?{type:'break',dur:b.dur}
-        :{type:b.type,id:b.id,k:b.k,title:b.title,removable:b.removable,
+        :{type:b.type,id:b.id,k:b.k,_pk:b._pk,title:b.title,removable:b.removable,
           rows:b.rows.map(r=>({kind:r.kind,k:r.k,fill:r.fill,act:r.act,label:r.label,introRow:r.introRow,who:r.who,dur:r.dur,preset:r.preset,autoMode:r.autoMode,lights:[...(r.lights||['','',''])]}))}),
       inputs:{date:g('agDate').value,start:g('agStart').value,no:g('agNo').value,
               buf:g('agBuf').value,bufE:g('agBufE').value,bufO:g('agBufO').value,
               tt:g('agTT').checked,sp:g('agSp').checked,
-              swap:g('agSwap').checked,jr:g('agJr').checked,urdu:g('agUr').checked},
+              swap:g('agSwap').checked,jr:g('agJr').checked,urdu:g('agUr').checked,theme:g('agTheme2').value},
       texts:staticEditables().map(el=>el.innerHTML),
       excom:[g('agExcomSec').classList.contains('nobar'),g('agExcomSec').classList.contains('nosec')]
     };
@@ -3244,6 +3284,7 @@ const AgendaApp=(function(){
       if(i.swap!=null)g('agSwap').checked=i.swap;
       if(i.jr!=null)g('agJr').checked=i.jr;
       if(i.urdu!=null){ g('agUr').checked=i.urdu; agUrdu=!!i.urdu; }
+      if(i.theme!=null){ g('agTheme2').value=i.theme; sheetTheme=i.theme||''; }
       const els=staticEditables();
       (st.texts||[]).forEach((h,idx)=>{ if(els[idx]!=null&&h!=null)els[idx].innerHTML=h; });
       if(st.excom){
@@ -3325,6 +3366,7 @@ const AgendaApp=(function(){
     /* the shell is fresh so the checkbox is the truth: a previous meeting may
        have left agUrdu set, and the defaults were built in that language */
     agUrdu=g('agUr').checked; applyLanguage();
+    sheetTheme=g('agTheme2').value; applyTheme();
     placeIntroRow(); placeTTEvalRow();
     g('agChipSpk').style.display=(!showTT&&showSpeech)?'inline-block':'none';
     agRender(); updateDates();
@@ -3361,6 +3403,8 @@ const AgendaApp=(function(){
     g('agSwap').addEventListener('change',()=>{ updateToggles(); setMeetingOrder(mid,g('agSwap').checked,true); });
     /* re-order needs the names refetched from the bookings, not just a redraw */
     g('agJr').addEventListener('change',()=>{ juniorFirstOn=g('agJr').checked; applyBookings(); agRender(); });
+    g('agTheme2').addEventListener('change',()=>{ sheetTheme=g('agTheme2').value; applyTheme(); queueAgSave(); });
+    g('agPkKit').addEventListener('click',addPkKit);
     g('agUr').addEventListener('change',()=>{ agUrdu=g('agUr').checked; applyLanguage(); agRender(); queueAgSave(); });
     g('agAdd').addEventListener('click',()=>{
       const rows=speechBlock().rows;
