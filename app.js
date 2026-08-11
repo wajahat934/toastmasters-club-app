@@ -2623,6 +2623,8 @@ const AG_UR={
   sup_al:'متوجہ سامع', sup_ah:'’آہ‘ شمار کنندہ', sup_jm:'لطیفہ گو',
   fp_tmod:'میزبانِ اجلاس', fp_ttm:'موضوعاتی تقاریر کے میزبان',
   fp_spk:'مقررین', fp_ge:'مجموعی تجزیہ کار',
+  h_club:'راولپنڈی ٹوسٹ ماسٹرز کلب',
+  wod_blank:'’’____‘‘', wod_def:'<b>مطلب:</b> ____ &nbsp;·&nbsp; <i>مثلاً ’’____۔‘‘</i>',
   s_anthem:'قومی ترانہ', s_naghma:'ملی نغمہ', s_quiz:'یومِ آزادی کوئز',
   r_anthem:'قومی ترانہ', r_naghma:'ملی نغمہ',
   r_quizmaster:'کوئز ماسٹر کا تعارف', r_quiz:'کوئز',
@@ -2713,6 +2715,8 @@ const AG_EN={};
     sup_timer:'Timer',sup_vc:'Vote Counter',sup_gram:'Grammarian',sup_al:'Active Listener',
     sup_ah:'Ah Counter',sup_jm:'Joke Master',
     fp_tmod:'TMOD',fp_ttm:'TT Master',fp_spk:'Speakers',fp_ge:'General Evaluator',
+    h_club:'Rawalpindi Toastmasters Club',
+    wod_blank:'“____”', wod_def:'<b>Meaning:</b> ____ &nbsp;·&nbsp; <i>e.g. “____.”</i>',
     s_anthem:'National Anthem',s_naghma:'Milli Naghma',s_quiz:'Independence Day Quiz',
     r_anthem:'National Anthem',r_naghma:'Milli Naghma',
     r_quizmaster:'Quiz Master',r_quiz:'Quiz',
@@ -2817,8 +2821,8 @@ const AgendaApp=(function(){
       <div class="masthead">
         <div class="badge"><img class="agswap" data-asset="badge" src="${window.AG_BADGE}" alt="Toastmasters International"></div>
         <div>
-          <h1 contenteditable="true">Rawalpindi Toastmasters Club</h1>
-          <div class="sub" contenteditable="true">Club No. 07247940 &nbsp;•&nbsp; District 122 &nbsp;•&nbsp; Area A9 &nbsp;•&nbsp; Division B</div>
+          <h1 contenteditable="true" data-k="h_club">Rawalpindi Toastmasters Club</h1>
+          <div class="sub" contenteditable="true" data-sub="1">Club No. 07247940 &nbsp;•&nbsp; District 122 &nbsp;•&nbsp; Area A9 &nbsp;•&nbsp; Division B</div>
         </div>
         <div class="meet-chips">
           <span class="mchip spk" id="agChipSpk">🎤 <span data-k="h_speakathon">SPEAKATHON</span></span>
@@ -2835,8 +2839,8 @@ const AgendaApp=(function(){
         </div>
         <div class="wod">
           <div class="kicker" data-k="h_wod">Word of the Day</div>
-          <div class="big" id="agWodWord" contenteditable="true">“____”</div>
-          <div class="def" id="agWodDef" contenteditable="true"><b>Meaning:</b> ____ &nbsp;·&nbsp; <i>e.g. “____.”</i></div>
+          <div class="big" id="agWodWord" contenteditable="true" data-k="wod_blank">“____”</div>
+          <div class="def" id="agWodDef" contenteditable="true" data-k="wod_def"><b>Meaning:</b> ____ &nbsp;·&nbsp; <i>e.g. “____.”</i></div>
         </div>
       </div>
       <table>
@@ -2979,6 +2983,15 @@ const AgendaApp=(function(){
         if(wk&&wk.startsWith('p_')&&mine[wk]!=null)r.who=mine[wk];
       }
     }
+    /* the sub-line carries the club's real numbers, so only its labels are
+       swapped — a whole-string swap would either bake in the wrong district or
+       skip the line entirely once it had been edited */
+    const SUB=[['Club No.','کلب نمبر'],['District','ڈسٹرکٹ'],['Area','ایریا'],['Division','ڈویژن']];
+    sheet.querySelectorAll('[data-sub]').forEach(el=>{
+      let t=el.innerHTML;
+      for(const [en,ur] of SUB)t=agUrdu?t.split(en).join(ur):t.split(ur).join(en);
+      el.innerHTML=t;
+    });
     sheet.querySelectorAll('[data-k]').forEach(el=>{
       const k=el.dataset.k; if(mine[k]==null)return;
       const cur=el.innerHTML.trim();
@@ -3246,8 +3259,8 @@ const AgendaApp=(function(){
     if(m.wod&&m.wod.word)g('agWodWord').innerText='“'+m.wod.word.replace(/^[\s"“”']+|[\s"“”']+$/g,'')+'”';
     if(m.wod&&(m.wod.def||m.wod.sent)){
       const parts=[];
-      if(m.wod.def)parts.push('<b>Meaning:</b> '+esc(m.wod.def));
-      if(m.wod.sent)parts.push('<i>e.g. “'+esc(m.wod.sent.replace(/^[\s"“”']+|[\s"“”'.]+$/g,''))+'.”</i>');
+      if(m.wod.def)parts.push('<b>'+agT('h_meaning','Meaning')+':</b> '+esc(m.wod.def));
+      if(m.wod.sent)parts.push('<i>'+agT('h_eg','e.g.')+' “'+esc(m.wod.sent.replace(/^[\s"“”']+|[\s"“”'.]+$/g,''))+'.”</i>');
       g('agWodDef').innerHTML=parts.join(' &nbsp;·&nbsp; ');
     }
     const nm=nextMeetingAfter(m.date);
