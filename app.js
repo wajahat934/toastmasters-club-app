@@ -2918,10 +2918,10 @@ const AgendaApp=(function(){
   }
   function orderedBlocks(){
     let arr=blocks;
-    if(!showTT&&showSpeech){          /* Speakathon: the break follows the speeches */
+    const brk0=blocks.find(b=>b.type==='break');
+    if(!showTT&&showSpeech&&!(brk0&&brk0.moved)){   /* Speakathon: the break follows the speeches */
       arr=blocks.filter(b=>b.type!=='break');
-      const brk=blocks.find(b=>b.type==='break');
-      if(brk)arr.splice(arr.findIndex(b=>b.id==='speech')+1,0,brk);
+      if(brk0)arr.splice(arr.findIndex(b=>b.id==='speech')+1,0,brk0);
       return arr;
     }
     if(swapOrder&&showTT&&showSpeech){
@@ -3023,6 +3023,9 @@ const AgendaApp=(function(){
   function moveBlock(block,dir){
     const i=blocks.indexOf(block), j=i+dir;
     if(i<0||j<0||j>=blocks.length)return;
+    /* Speakathons otherwise shunt the break back behind the speeches on the
+       next render, undoing the move a moment after it was made. */
+    if(block.type==='break')block.moved=true;
     blocks.splice(j,0,blocks.splice(i,1)[0]);
     agRender();
   }
@@ -3097,6 +3100,16 @@ const AgendaApp=(function(){
         block._fromEl=tr.querySelector('.bfrom'); block._toEl=tr.querySelector('.bto');
         const durEl=tr.querySelector('.bdur');
         makeEditable(durEl,()=>{ block.dur=parseFloat(durEl.innerText)||0; updateTimes(); });
+        const td=tr.querySelector('td');
+        const brkBtn=(txt,title,fn)=>{
+          const b=document.createElement('button');
+          b.className='del no-print'; b.style.background='#6b5b13';
+          b.textContent=txt; b.title=title;
+          b.addEventListener('click',fn); td.appendChild(b);
+        };
+        brkBtn('↑','Move the break earlier',()=>moveBlock(block,-1));
+        brkBtn('↓','Move the break later',()=>moveBlock(block,1));
+        brkBtn('✕','Remove the break',()=>{ blocks.splice(blocks.indexOf(block),1); agRender(); });
         body.appendChild(tr); return;
       }
       if(blockHidden(block))return;
@@ -3315,7 +3328,7 @@ const AgendaApp=(function(){
   }
   function collectAgState(){
     return {
-      blocks:blocks.map(b=>b.type==='break'?{type:'break',dur:b.dur}
+      blocks:blocks.map(b=>b.type==='break'?{type:'break',dur:b.dur,moved:b.moved}
         :{type:b.type,id:b.id,k:b.k,_pk:b._pk,title:b.title,removable:b.removable,
           rows:b.rows.map(r=>({kind:r.kind,k:r.k,fill:r.fill,act:r.act,label:r.label,introRow:r.introRow,who:r.who,dur:r.dur,preset:r.preset,autoMode:r.autoMode,lights:[...(r.lights||['','',''])]}))}),
       inputs:{date:g('agDate').value,start:g('agStart').value,no:g('agNo').value,
