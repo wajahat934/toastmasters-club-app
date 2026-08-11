@@ -1207,11 +1207,11 @@ function viewBook(){
         <label><b>🎨 You're the TMOD</b> — set the theme:</label>
         <input type="text" style="max-width:260px" class="grow" placeholder="Meeting theme" value="${esc(m.theme)}" onchange="setTheme('${m.id}',this.value)">
       </div>`:''}
-      ${isGram?`<div class="row small" style="margin-top:6px;padding:6px 10px;background:var(--gold-soft);border-radius:8px">
+      ${isGram?`<div class="row small wodrow" style="margin-top:6px;padding:6px 10px;background:var(--gold-soft);border-radius:8px">
         <label><b>📖 You're the Grammarian</b> — Word of the Day:</label>
-        <input type="text" style="max-width:130px" placeholder="word" value="${esc((m.wod||{}).word||'')}" onchange="setWod('${m.id}','word',this.value)">
-        <input type="text" style="max-width:280px" class="grow" placeholder="meaning" value="${esc((m.wod||{}).def||'')}" onchange="setWod('${m.id}','def',this.value)">
-        <input type="text" style="max-width:320px" class="grow" placeholder="example sentence" value="${esc((m.wod||{}).sent||'')}" onchange="setWod('${m.id}','sent',this.value)">
+        <input type="text" class="wod-word" placeholder="word" value="${esc((m.wod||{}).word||'')}" onchange="setWod('${m.id}','word',this.value)">
+        <input type="text" class="grow wod-def" placeholder="meaning" value="${esc((m.wod||{}).def||'')}" onchange="setWod('${m.id}','def',this.value)">
+        <input type="text" class="grow wod-sent" placeholder="example sentence" value="${esc((m.wod||{}).sent||'')}" onchange="setWod('${m.id}','sent',this.value)">
       </div>`:''}
       <div class="bookgrid">
       ${slots.map(s=>{
@@ -1501,11 +1501,11 @@ function meetingBookingCard(m){
         <input type="checkbox" ${speechFirstOn(m)?'checked':''} onchange="setMeetingOrder('${m.id}',this.checked)"> 🔁 Speeches first
       </label>
     </div>
-    <div class="row small" style="margin-top:6px">
+    <div class="row small wodrow" style="margin-top:6px">
       <label class="muted">📖 Word of the Day</label>
-      <input type="text" style="max-width:130px" placeholder="word" value="${esc((m.wod||{}).word||'')}" onchange="setWod('${m.id}','word',this.value)">
-      <input type="text" style="max-width:280px" class="grow" placeholder="meaning" value="${esc((m.wod||{}).def||'')}" onchange="setWod('${m.id}','def',this.value)">
-      <input type="text" style="max-width:320px" class="grow" placeholder="example sentence" value="${esc((m.wod||{}).sent||'')}" onchange="setWod('${m.id}','sent',this.value)">
+      <input type="text" class="wod-word" placeholder="word" value="${esc((m.wod||{}).word||'')}" onchange="setWod('${m.id}','word',this.value)">
+      <input type="text" class="grow wod-def" placeholder="meaning" value="${esc((m.wod||{}).def||'')}" onchange="setWod('${m.id}','def',this.value)">
+      <input type="text" class="grow wod-sent" placeholder="example sentence" value="${esc((m.wod||{}).sent||'')}" onchange="setWod('${m.id}','sent',this.value)">
       <span class="muted">(the meeting's Grammarian can also set this; TMOD can set the theme)</span>
     </div>
     <div class="grid-roles">
@@ -3055,6 +3055,20 @@ const AgendaApp=(function(){
     agRender();
     toast('Added — rename or move any of them with the ↑ ↓ buttons');
   }
+  /* The Independence Day rows first shipped with their timer chips forced
+     blank. Sheets saved in that window keep the blanks, which read as missing
+     rather than deliberate, so restore them to automatic on load. Only those
+     rows — Group Picture's blanks are long-standing and intended. */
+  const KIT_LIGHT_KEYS=['r_anthem','r_naghma','r_quiz'];
+  function healKitLights(){
+    for(const b of blocks)for(const r of (b.rows||[])){
+      const isKit=KIT_LIGHT_KEYS.includes(r.k)||(b._pk&&r.act);
+      if(!isKit)continue;
+      if(r.autoMode==='manual'&&(r.lights||[]).every(x=>!String(x||'').trim())){
+        delete r.autoMode; delete r.lights;
+      }
+    }
+  }
   function speechBlock(){ return blocks.find(b=>b.id==='speech'); }
   function evalBlock(){ return blocks.find(b=>b.id==='eval'); }
   function speakerCount(){ return speechBlock().rows.filter(r=>r.kind==='speaker').length; }
@@ -3155,8 +3169,23 @@ const AgendaApp=(function(){
           lbl.innerHTML=row.act;
           makeEditable(lbl,()=>{ row.act=lbl.innerHTML; });
           actTd.appendChild(lbl);
-          /* any hand-added line can be taken out again; evaluator rows are left
-             alone because they follow the speaker count */
+          /* Arrows rather than drag-and-drop: most of this gets done on a phone
+             the morning of the meeting, where dragging a table row is fiddly and
+             fights the page scroll. Moves within the session; evaluator rows are
+             left alone because they follow the speaker count. */
+          const rowBtn=(txt,title,fn)=>{
+            const b=document.createElement('button');
+            b.className='del no-print'; b.style.background='#4a6572';
+            b.textContent=txt; b.title=title;
+            b.addEventListener('click',fn); actTd.appendChild(b);
+          };
+          const shift=dir=>{
+            const rows=block.rows, i=rows.indexOf(row), j=i+dir;
+            if(i<0||j<0||j>=rows.length)return;
+            rows.splice(j,0,rows.splice(i,1)[0]); agRender();
+          };
+          rowBtn('↑','Move this line up',()=>shift(-1));
+          rowBtn('↓','Move this line down',()=>shift(1));
           const rd=document.createElement('button');
           rd.className='del no-print'; rd.textContent='✕'; rd.title='Remove this line';
           rd.addEventListener('click',()=>{
@@ -3394,6 +3423,7 @@ const AgendaApp=(function(){
     swapOrder=g('agSwap').checked; juniorFirstOn=g('agJr').checked;
     /* the shell is fresh so the checkbox is the truth: a previous meeting may
        have left agUrdu set, and the defaults were built in that language */
+    healKitLights();
     agUrdu=g('agUr').checked; applyLanguage();
     sheetTheme=g('agTheme2').value; applyTheme();
     placeIntroRow(); placeTTEvalRow();
