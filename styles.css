@@ -259,6 +259,15 @@ details.mem .body{padding:12px 16px}
 #agSheet.urdu{font-family:"Noto Nastaliq Urdu","Jameel Noori Nastaleeq","Alvi Nastaleeq",
   "Urdu Typesetting","Segoe UI",Tahoma,Arial,sans-serif; line-height:2}
 #agSheet.urdu td,#agSheet.urdu th{line-height:2}
+/* the base table styles hard-code text-align:left, which beats the RTL
+   direction — cells have to be told explicitly to start on the right */
+#agSheet.urdu th,#agSheet.urdu td,#agSheet.urdu thead th{text-align:right}
+#agSheet.urdu th.c,#agSheet.urdu td.c,
+#agSheet.urdu th.num,#agSheet.urdu td.num,
+#agSheet.urdu tr.break td{text-align:center}
+/* the session's minute total floats away from the title, so it swaps sides */
+#agSheet.urdu tr.session .mins{float:left}
+#agSheet.urdu .roles2 div,#agSheet.urdu .fp li{text-align:right}
 #agSheet.urdu .big{line-height:1.9}
 #agSheet.urdu .mission,#agSheet.urdu .pbody{line-height:1.95}
 #agSheet.urdu .foot{letter-spacing:0}
