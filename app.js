@@ -2905,7 +2905,13 @@ const AgendaApp=(function(){
     row.lights.forEach((v,i)=>{ const s=row._ltEls[i]; s.className=v===''?'lt empty':`lt ${['g','y','r'][i]}`; s.innerText=v===''?'–':v; });
   }
   function visibleRows(b){ return b.rows.filter(r=>{ if(r.kind==='tteval'&&!showTT)return false; if(r.kind==='evaluator'&&!showSpeech)return false; return true; }); }
-  function blockHidden(b){ return (b.id==='tt'&&!showTT)||(b.id==='speech'&&!showSpeech); }
+  /* A speech session with no speakers left is just its timer's report, which
+     reads as a stray two-minute session on the sheet — drop the whole block. */
+  function blockHidden(b){
+    if(b.id==='tt')return !showTT;
+    if(b.id==='speech')return !showSpeech||!b.rows.some(r=>r.kind==='speaker');
+    return false;
+  }
   function orderedBlocks(){
     let arr=blocks;
     if(!showTT&&showSpeech){          /* Speakathon: the break follows the speeches */
