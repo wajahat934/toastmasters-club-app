@@ -3151,8 +3151,18 @@ const AgendaApp=(function(){
         } else if(row.kind==='evaluator'){
           evalN++; actTd.innerHTML=`${agT('l_evaluator','Speech Evaluator')} ${evalN}`;
         } else {
-          actTd.innerHTML=row.act;
-          makeEditable(actTd,()=>{ row.act=actTd.innerHTML; });
+          const lbl=document.createElement('span');
+          lbl.innerHTML=row.act;
+          makeEditable(lbl,()=>{ row.act=lbl.innerHTML; });
+          actTd.appendChild(lbl);
+          /* any hand-added line can be taken out again; evaluator rows are left
+             alone because they follow the speaker count */
+          const rd=document.createElement('button');
+          rd.className='del no-print'; rd.textContent='✕'; rd.title='Remove this line';
+          rd.addEventListener('click',()=>{
+            block.rows.splice(block.rows.indexOf(row),1); agRender();
+          });
+          actTd.appendChild(rd);
         }
         tr.appendChild(actTd);
         const whoTd=document.createElement('td');
