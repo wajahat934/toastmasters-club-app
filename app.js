@@ -3029,6 +3029,10 @@ const AgendaApp=(function(){
       const n=m.name.trim(); return /^(TM|DTM)\b/i.test(n)?n:'TM '+n;
     };
     for(const b of blocks)for(const r of (b.rows||[]))if(r.who)r.who=reName(r.who);
+    /* Names typed straight onto the sheet cannot be tied back to a member, so
+       reName never touches them and they kept the honorific. On an Urdu sheet
+       the prefix goes wherever it appears, member or not. */
+    const dropTM=v=>agUrdu?String(v).replace(/(^|>|\s)\s*ٹی\s*ایم\s+/g,'$1'):v;
     /* the unbooked placeholder is not a member, so reName cannot reach it */
     const blank=v=>{
       const t=String(v).trim();
@@ -3038,9 +3042,9 @@ const AgendaApp=(function(){
     };
     sheet.querySelectorAll('[data-sup],[data-fp]').forEach(el=>{
       const parts=el.innerHTML.split(/(&nbsp;|,\s*)/);
-      el.innerHTML=parts.map(x=>/^(&nbsp;|,\s*)$/.test(x)?x:blank(reName(x))).join('');
+      el.innerHTML=parts.map(x=>/^(&nbsp;|,\s*)$/.test(x)?x:dropTM(blank(reName(x)))).join('');
     });
-    for(const b of blocks)for(const r of (b.rows||[]))if(r.who)r.who=blank(r.who);
+    for(const b of blocks)for(const r of (b.rows||[]))if(r.who)r.who=dropTM(blank(r.who));
   }
   /* Moves a session past its neighbour, the break included — the break is a
      real position in the running order, so stepping across it is meaningful. */
