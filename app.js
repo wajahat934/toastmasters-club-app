@@ -2586,19 +2586,19 @@ const AG_PRESETS={
    be corrected in place. */
 const AG_UR={
   /* sessions */
-  s_opening:'افتتاحی نشست', s_tt:'موضوعاتی تقاریر کی نشست',
+  s_opening:'افتتاحی نشست', s_tt:'فی البدیہہ تقاریر کی نشست',
   s_speech:'تیار شدہ تقاریر کی نشست', s_eval:'تجزیاتی نشست',
   s_awards:'انعامات و اختتام', s_edu:'تعلیمی نشست',
   /* activity rows */
   r_call:'اجلاس کا آغاز — ناظمِ انتظامات',
   r_welcome:'خیرمقدمی کلمات — صدرِ اجلاس',
   r_tmod:'میزبانِ اجلاس',
-  r_ttm:'موضوعاتی تقاریر کے میزبان',
-  r_tt:'موضوعاتی تقاریر <span class="role-note">(فی مقرر ۱–۲ منٹ)</span>',
+  r_ttm:'فی البدیہہ تقاریر کے میزبان',
+  r_tt:'فی البدیہہ تقاریر <span class="role-note">(فی مقرر ۱–۲ منٹ)</span>',
   r_timer:'وقت نگار کی رپورٹ و ووٹنگ',
   r_intro:'تعارف و مقصد',
   r_teamIntro:'ٹیم کا تعارف — مجموعی تجزیہ کار',
-  r_tteval:'موضوعاتی تقاریر کے تجزیہ کار',
+  r_tteval:'فی البدیہہ تقاریر کے تجزیہ کار',
   r_reports:'رپورٹس کی طلبی',
   r_ge:'مجموعی تجزیہ کار',
   r_feedback:'مہمانوں کی رائے و انعامات',
@@ -2621,7 +2621,7 @@ const AG_UR={
   h_meeting:'اجلاس', h_inperson:'بالمشافہ', h_speakathon:'تقریری میلہ',
   sup_timer:'وقت نگار', sup_vc:'ووٹ شمار کنندہ', sup_gram:'ماہرِ قواعد',
   sup_al:'متوجہ سامع', sup_ah:'’آہ‘ شمار کنندہ', sup_jm:'لطیفہ گو',
-  fp_tmod:'میزبانِ اجلاس', fp_ttm:'موضوعاتی تقاریر کے میزبان',
+  fp_tmod:'میزبانِ اجلاس', fp_ttm:'فی البدیہہ تقاریر کے میزبان',
   fp_spk:'مقررین', fp_ge:'مجموعی تجزیہ کار',
   h_club:'راولپنڈی ٹوسٹ ماسٹرز کلب',
   wod_blank:'’’____‘‘', wod_def:'<b>مطلب:</b> ____ &nbsp;·&nbsp; <i>مثلاً ’’____۔‘‘</i>',
@@ -2630,6 +2630,16 @@ const AG_UR={
   r_quizmaster:'کوئز ماسٹر کا تعارف', r_quiz:'کوئز',
   mission:'ہم ایک معاون اور مثبت ماحول فراہم کرتے ہیں جس میں اراکین اپنی ابلاغی اور قائدانہ صلاحیتیں نکھارتے ہیں، جس سے اعتمادِ نفس اور ذاتی نشوونما میں اضافہ ہوتا ہے۔',
   motto:'’’بہتر سننے، بہتر سوچنے، بہتر بولنے کے لیے — ہم کر کے سیکھتے ہیں۔‘‘'
+};
+/* Wordings that have been replaced. A sheet saved with one of these is
+   recognised and brought up to date on the next language switch — otherwise it
+   matches neither language's current default and sticks. */
+const AG_UR_RETIRED={
+  s_tt:'موضوعاتی تقاریر کی نشست',
+  r_ttm:'موضوعاتی تقاریر کے میزبان',
+  r_tt:'موضوعاتی تقاریر <span class="role-note">(فی مقرر ۱–۲ منٹ)</span>',
+  r_tteval:'موضوعاتی تقاریر کے تجزیہ کار',
+  fp_ttm:'موضوعاتی تقاریر کے میزبان'
 };
 let agUrdu=false;
 function agT(key,en){ return (agUrdu&&AG_UR[key])?AG_UR[key]:en; }
@@ -2648,7 +2658,7 @@ function agKeyOf(text){
   const n=agNorm(text); if(!n)return null;
   if(!AG_BY_TEXT){
     AG_BY_TEXT={};
-    for(const src of [AG_EN,AG_UR])
+    for(const src of [AG_EN,AG_UR,AG_UR_RETIRED])
       for(const k of Object.keys(src)){ const nn=agNorm(src[k]); if(nn&&!AG_BY_TEXT[nn])AG_BY_TEXT[nn]=k; }
   }
   return AG_BY_TEXT[n]||null;
@@ -2970,7 +2980,8 @@ const AgendaApp=(function(){
     sheet.classList.toggle('urdu',agUrdu);
     const other=agUrdu?AG_EN:AG_UR, mine=agUrdu?AG_UR:AG_EN;
     const eq=(a,b)=>agNorm(a)===agNorm(b)&&agNorm(a)!=='';
-    const swap=(cur,k)=>(mine[k]==null||!(cur==null||cur===''||eq(cur,other[k])))?cur:mine[k];
+    const stale=(cur,k)=>AG_UR_RETIRED[k]!=null&&eq(cur,AG_UR_RETIRED[k]);
+    const swap=(cur,k)=>(mine[k]==null||!(cur==null||cur===''||eq(cur,other[k])||stale(cur,k)))?cur:mine[k];
     for(const b of blocks){
       /* agendas saved before the keys existed carry none, so fall back to the
          block id and then to recognising the wording itself */
@@ -2995,7 +3006,7 @@ const AgendaApp=(function(){
     sheet.querySelectorAll('[data-k]').forEach(el=>{
       const k=el.dataset.k; if(mine[k]==null)return;
       const cur=el.innerHTML.trim();
-      if(cur===''||eq(cur,other[k]))el.innerHTML=mine[k];
+      if(cur===''||eq(cur,other[k])||stale(cur,k))el.innerHTML=mine[k];
     });
     /* Booked names were written in whichever language was active when the
        bookings were filled, so re-render them — but only strings that still
