@@ -2606,7 +2606,7 @@ const AG_UR={
   r_eduIntro:'مہمان مقرر کا تعارف', r_eduTalk:'تعلیمی نشست <span class="role-note">(موضوع)</span>',
   r_eduQa:'سوال و جواب و اظہارِ تشکر',
   /* people placeholders */
-  p_blank:'ٹی ایم ____________', p_guests:'غیر کردار دار اراکین و مہمان',
+  p_blank:'____________', p_guests:'غیر کردار دار اراکین و مہمان',
   p_timerVc:'وقت نگار و ووٹ شمار کنندہ', p_rolePlayers:'کردار دار اراکین',
   p_everyone:'تمام شرکاء', p_tmod:'میزبانِ اجلاس', p_guestSpk:'مہمان مقرر — ____________',
   p_guestTmod:'مہمان مقرر و میزبانِ اجلاس',
@@ -2635,6 +2635,7 @@ const AG_UR={
    recognised and brought up to date on the next language switch — otherwise it
    matches neither language's current default and sticks. */
 const AG_UR_RETIRED={
+  p_blank:'ٹی ایم ____________',
   s_tt:'موضوعاتی تقاریر کی نشست',
   r_ttm:'موضوعاتی تقاریر کے میزبان',
   r_tt:'موضوعاتی تقاریر <span class="role-note">(فی مقرر ۱–۲ منٹ)</span>',
@@ -2741,7 +2742,7 @@ const AgendaApp=(function(){
   const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
   /* an Urdu agenda uses the member's Urdu name when one has been set */
   function tmName(mem){
-    if(agUrdu){ const u=urduNameOf(mem.id); if(u)return 'ٹی ایم '+u; }
+    if(agUrdu)return urduNameOf(mem.id)||mem.name.trim().replace(/^(TM|DTM)\s+/i,'');
     const n=mem.name.trim(); return /^(TM|DTM)\b/i.test(n)?n:'TM '+n;
   }
   function bookedNames(meeting,re){
@@ -3015,19 +3016,31 @@ const AgendaApp=(function(){
     for(const m of state.members){
       const latin=/^(TM|DTM)\b/i.test(m.name.trim())?m.name.trim():'TM '+m.name.trim();
       byForm.set(agNorm(latin),m);
-      const u=urduNameOf(m.id); if(u)byForm.set(agNorm('ٹی ایم '+u),m);
+      byForm.set(agNorm(m.name.trim()),m);
+      const u=urduNameOf(m.id);
+      /* both forms indexed: sheets written before the honorific was dropped
+         still carry "ٹی ایم <name>" and have to be recognised */
+      if(u){ byForm.set(agNorm(u),m); byForm.set(agNorm('ٹی ایم '+u),m); }
     }
     const reName=v=>{
       const m=byForm.get(agNorm(v)); if(!m)return v;
       const u=urduNameOf(m.id);
-      if(agUrdu&&u)return 'ٹی ایم '+u;
+      if(agUrdu)return u||m.name.trim().replace(/^(TM|DTM)\s+/i,'');
       const n=m.name.trim(); return /^(TM|DTM)\b/i.test(n)?n:'TM '+n;
     };
     for(const b of blocks)for(const r of (b.rows||[]))if(r.who)r.who=reName(r.who);
+    /* the unbooked placeholder is not a member, so reName cannot reach it */
+    const blank=v=>{
+      const t=String(v).trim();
+      if(agUrdu&&t===AG_EN.p_blank)return AG_UR.p_blank;
+      if(!agUrdu&&t===AG_UR.p_blank)return AG_EN.p_blank;
+      return v;
+    };
     sheet.querySelectorAll('[data-sup],[data-fp]').forEach(el=>{
       const parts=el.innerHTML.split(/(&nbsp;|,\s*)/);
-      el.innerHTML=parts.map(x=>/^(&nbsp;|,\s*)$/.test(x)?x:reName(x)).join('');
+      el.innerHTML=parts.map(x=>/^(&nbsp;|,\s*)$/.test(x)?x:blank(reName(x))).join('');
     });
+    for(const b of blocks)for(const r of (b.rows||[]))if(r.who)r.who=blank(r.who);
   }
   /* Moves a session past its neighbour, the break included — the break is a
      real position in the running order, so stepping across it is meaningful. */
