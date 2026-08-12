@@ -3073,6 +3073,27 @@ const AgendaApp=(function(){
      blank. Sheets saved in that window keep the blanks, which read as missing
      rather than deliberate, so restore them to automatic on load. Only those
      rows — Group Picture's blanks are long-standing and intended. */
+  /* Straight text replacement of retired wordings, run on every load in either
+     language. The keyed path in applyLanguage already handles this, but it
+     depends on a row resolving to a key; this does not depend on anything. */
+  function healRetiredWording(){
+    const pairs=Object.keys(AG_UR_RETIRED).map(k=>[AG_UR_RETIRED[k],AG_UR[k]])
+      .filter(([o,n])=>o&&n&&o!==n);
+    const fix=t=>{
+      if(!t)return t;
+      let out=String(t);
+      for(const [o,n] of pairs)out=out.split(o).join(n);
+      return out;
+    };
+    for(const b of blocks){
+      if(b.title)b.title=fix(b.title);
+      for(const r of (b.rows||[])){ if(r.act)r.act=fix(r.act); if(r.who)r.who=fix(r.who); }
+    }
+    const sheet=g('agSheet');
+    if(sheet)sheet.querySelectorAll('[data-fp],[data-sup],[data-k]').forEach(el=>{
+      const f=fix(el.innerHTML); if(f!==el.innerHTML)el.innerHTML=f;
+    });
+  }
   const KIT_LIGHT_KEYS=['r_anthem','r_naghma','r_quiz'];
   function healKitLights(){
     for(const b of blocks)for(const r of (b.rows||[])){
@@ -3447,7 +3468,7 @@ const AgendaApp=(function(){
     swapOrder=g('agSwap').checked; juniorFirstOn=g('agJr').checked;
     /* the shell is fresh so the checkbox is the truth: a previous meeting may
        have left agUrdu set, and the defaults were built in that language */
-    healKitLights();
+    healKitLights(); healRetiredWording();
     agUrdu=g('agUr').checked; applyLanguage();
     sheetTheme=g('agTheme2').value; applyTheme();
     placeIntroRow(); placeTTEvalRow();
