@@ -2625,6 +2625,7 @@ const AG_UR={
   fp_spk:'مقررین', fp_ge:'مجموعی تجزیہ کار',
   h_club:'راولپنڈی ٹوسٹ ماسٹرز کلب',
   wod_blank:'’’____‘‘', wod_def:'<b>مطلب:</b> ____ &nbsp;·&nbsp; <i>مثلاً ’’____۔‘‘</i>',
+  s_joke:'لطیفہ گو', r_joke:'لطیفہ گو',
   s_anthem:'قومی ترانہ', s_naghma:'ملی نغمہ', s_quiz:'یومِ آزادی کوئز',
   r_anthem:'قومی ترانہ', r_naghma:'ملی نغمہ',
   r_quizmaster:'کوئز ماسٹر کا تعارف', r_quiz:'کوئز',
@@ -2728,6 +2729,7 @@ const AG_EN={};
     fp_tmod:'TMOD',fp_ttm:'TT Master',fp_spk:'Speakers',fp_ge:'General Evaluator',
     h_club:'Rawalpindi Toastmasters Club',
     wod_blank:'“____”', wod_def:'<b>Meaning:</b> ____ &nbsp;·&nbsp; <i>e.g. “____.”</i>',
+    s_joke:'Joke Master',r_joke:'Joke Master',
     s_anthem:'National Anthem',s_naghma:'Milli Naghma',s_quiz:'Independence Day Quiz',
     r_anthem:'National Anthem',r_naghma:'Milli Naghma',
     r_quizmaster:'Quiz Master',r_quiz:'Quiz',
@@ -2820,6 +2822,7 @@ const AgendaApp=(function(){
         <button class="btn ghost small" id="agAdd">＋ Speaker</button>
         <button class="btn ghost small" id="agEdu">🎓 Educational session</button>
         <button class="btn ghost small" id="agAddSession" title="A blank session you can name and fill — quiz, national anthem, anything">＋ Session</button>
+        <button class="btn ghost small" id="agJoke" title="A one-minute Joke Master slot — move it anywhere with the arrows">😄 Joke Master</button>
         <label title="Colour scheme for the printed sheet">🎨 <select id="agTheme2" style="width:auto">
           <option value="">Standard</option>
           <option value="pk">🇵🇰 Independence Day</option>
@@ -3531,6 +3534,21 @@ const AgendaApp=(function(){
       const rows=speechBlock().rows;
       rows.splice(rows.length-1,0,{kind:'speaker',fill:'spk',who:'TM ____________',preset:'std',dur:7});
       syncEvaluators(); agRender();
+    });
+    g('agJoke').addEventListener('click',()=>{
+      /* a session rather than a row: sessions move anywhere on the sheet with
+         the arrows, a row can only move inside the one it sits in */
+      const i=blocks.findIndex(b=>b.id==='opening');
+      /* fill from the booking straight away — the row is added after
+         applyBookings has run, so it would otherwise sit blank until the next
+         "Fill from bookings" */
+      const mt=state.meetings.find(x=>x.id===mid);
+      const who=(mt?roleMap(mt).jm:null)||agT('p_blank','TM ____________');
+      blocks.splice(i<0?0:i+1,0,{type:'session',removable:true,k:'s_joke',
+        title:agT('s_joke','Joke Master'),rows:[
+          {k:'r_joke',act:agT('r_joke','Joke Master'),fill:'jm',who,dur:1}]});
+      agRender();
+      toast('Added after the Opening — move it with ↑ ↓');
     });
     g('agAddSession').addEventListener('click',()=>{
       const idx=blocks.findIndex(b=>b.id==='eval');
