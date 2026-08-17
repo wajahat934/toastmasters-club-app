@@ -3246,8 +3246,16 @@ const AgendaApp=(function(){
           };
           const shift=dir=>{
             const rows=block.rows, i=rows.indexOf(row), j=i+dir;
-            if(i<0||j<0||j>=rows.length)return;
-            rows.splice(j,0,rows.splice(i,1)[0]); agRender();
+            if(i<0)return;
+            if(j>=0&&j<rows.length){ rows.splice(j,0,rows.splice(i,1)[0]); agRender(); return; }
+            /* at the edge of its session, step into the next one that can hold
+               rows — the break has none, and a hidden session would swallow it */
+            let k=blocks.indexOf(block)+dir;
+            while(k>=0&&k<blocks.length&&(!blocks[k].rows||blockHidden(blocks[k])))k+=dir;
+            if(k<0||k>=blocks.length)return;
+            rows.splice(i,1);
+            if(dir<0)blocks[k].rows.push(row); else blocks[k].rows.unshift(row);
+            agRender();
           };
           rowBtn('↑','Move this line up',()=>shift(-1));
           rowBtn('↓','Move this line down',()=>shift(1));
@@ -3536,19 +3544,18 @@ const AgendaApp=(function(){
       syncEvaluators(); agRender();
     });
     g('agJoke').addEventListener('click',()=>{
-      /* a session rather than a row: sessions move anywhere on the sheet with
-         the arrows, a row can only move inside the one it sits in */
-      const i=blocks.findIndex(b=>b.id==='opening');
+      /* a plain line, not a session of its own — a one-minute joke does not
+         warrant a banner, and rows can now cross session boundaries anyway */
+      const host=blocks.find(b=>b.id==='opening')||blocks.find(b=>b.rows);
+      if(!host)return;
       /* fill from the booking straight away — the row is added after
          applyBookings has run, so it would otherwise sit blank until the next
          "Fill from bookings" */
       const mt=state.meetings.find(x=>x.id===mid);
       const who=(mt?roleMap(mt).jm:null)||agT('p_blank','TM ____________');
-      blocks.splice(i<0?0:i+1,0,{type:'session',removable:true,k:'s_joke',
-        title:agT('s_joke','Joke Master'),rows:[
-          {k:'r_joke',act:agT('r_joke','Joke Master'),fill:'jm',who,dur:1}]});
+      host.rows.push({k:'r_joke',act:agT('r_joke','Joke Master'),fill:'jm',who,dur:1});
       agRender();
-      toast('Added after the Opening — move it with ↑ ↓');
+      toast('Added to the Opening — move it anywhere with ↑ ↓');
     });
     g('agAddSession').addEventListener('click',()=>{
       const idx=blocks.findIndex(b=>b.id==='eval');
