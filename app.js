@@ -2503,6 +2503,17 @@ function suggestUrduName(name){
   if(mapped.every(x=>x===null))return '';
   return mapped.map((x,i)=>x||parts[i]).join(' ');
 }
+/* The club's name and its Club No. / District / Area / Division line belong to
+   the club, not to one meeting's agenda. They used to ride along in the
+   per-agenda text list, so an edit only stuck to the sheet it was made on and
+   any other agenda still carried the defaults. */
+function agHeader(){ return state.settings.agendaHeader||{}; }
+function setAgHeader(k,v){
+  const h={...agHeader()}; v=String(v||'').trim();
+  if(v)h[k]=v; else delete h[k];
+  state.settings.agendaHeader=h; S.settings=state.settings;
+  saveSettingsRemote();
+}
 function urduNames(){ return state.settings.urduNames||{}; }
 function urduNameOf(id){ return (urduNames()[id]||'').trim(); }
 function setUrduName(id,v){
@@ -3114,6 +3125,17 @@ const AgendaApp=(function(){
       const f=fix(el.innerHTML); if(f!==el.innerHTML)el.innerHTML=f;
     });
   }
+  /* Educational sessions added before this carry the literal word TMOD. Give
+     them the fill so they follow the booking, and swap the placeholder for the
+     booked name. */
+  function healEduTmod(){
+    const lit=[AG_EN.p_tmod,AG_UR.p_tmod,'TMOD'];
+    for(const b of blocks)for(const r of (b.rows||[])){
+      if(r.k!=='r_eduIntro')continue;
+      if(!r.fill)r.fill='tmod';
+      if(lit.includes(String(r.who||'').trim()))r.who=eduTmod();
+    }
+  }
   const KIT_LIGHT_KEYS=['r_anthem','r_naghma','r_quiz'];
   function healKitLights(){
     for(const b of blocks)for(const r of (b.rows||[])){
@@ -3123,6 +3145,18 @@ const AgendaApp=(function(){
         delete r.autoMode; delete r.lights;
       }
     }
+  }
+  /* the booked Toastmaster of the Day, so the educational rows carry a name
+     rather than the literal word TMOD */
+  function eduTmod(){
+    const m=state.meetings.find(x=>x.id===mid);
+    return (m?roleMap(m).tmod:null)||agT('p_tmod','TMOD');
+  }
+  function applyHeader(){
+    const h=agHeader(), sheet=g('agSheet'); if(!sheet)return;
+    const club=sheet.querySelector('.masthead h1'), sub=sheet.querySelector('.masthead .sub');
+    if(club&&h.club)club.innerHTML=h.club;
+    if(sub&&h.sub)sub.innerHTML=h.sub;
   }
   function speechBlock(){ return blocks.find(b=>b.id==='speech'); }
   function evalBlock(){ return blocks.find(b=>b.id==='eval'); }
@@ -3496,7 +3530,10 @@ const AgendaApp=(function(){
     swapOrder=g('agSwap').checked; juniorFirstOn=g('agJr').checked;
     /* the shell is fresh so the checkbox is the truth: a previous meeting may
        have left agUrdu set, and the defaults were built in that language */
-    healKitLights(); healRetiredWording();
+    healKitLights(); healRetiredWording(); healEduTmod();
+    /* applied after applyAgState so a stale copy saved into an old agenda's
+       text list cannot overwrite the club's current header */
+    applyHeader();
     agUrdu=g('agUr').checked; applyLanguage();
     sheetTheme=g('agTheme2').value; applyTheme();
     placeIntroRow(); placeTTEvalRow();
@@ -3567,9 +3604,9 @@ const AgendaApp=(function(){
     g('agEdu').addEventListener('click',()=>{
       const idx=blocks.findIndex(b=>b.type==='break');
       blocks.splice(idx+1,0,{type:'session',k:'s_edu',title:agT('s_edu','Educational Session'),removable:true,rows:[
-        {k:'r_eduIntro',act:agT('r_eduIntro','Introduction of Guest Speaker'),who:agT('p_tmod','TMOD'),dur:2},
+        {k:'r_eduIntro',act:agT('r_eduIntro','Introduction of Guest Speaker'),fill:'tmod',who:eduTmod(),dur:2},
         {k:'r_eduTalk',act:agT('r_eduTalk','Educational Session <span class="role-note">(topic)</span>'),who:agT('p_guestSpk','Guest Speaker — ____________'),dur:20},
-        {k:'r_eduQa',act:agT('r_eduQa','Q&amp;A &amp; Vote of Thanks'),who:agT('p_guestTmod','Guest Speaker &amp; TMOD'),dur:5}
+        {k:'r_eduQa',act:agT('r_eduQa','Q&amp;A &amp; Vote of Thanks'),who:agT('p_guestSpk2','Guest Speaker')+' &amp; '+eduTmod(),dur:5}
       ]});
       agRender();
     });
@@ -3595,6 +3632,20 @@ const AgendaApp=(function(){
       });
     });
     const wrap=document.getElementById('agWrap');
+    /* the club header is club-wide, so edits go to settings rather than being
+       buried in this one agenda's saved text */
+    const club=g('agSheet').querySelector('.masthead h1');
+    const sub=g('agSheet').querySelector('.masthead .sub');
+    let hdrTimer=null;
+    const saveHdr=()=>{
+      clearTimeout(hdrTimer);
+      hdrTimer=setTimeout(()=>{
+        setAgHeader('club',club?club.innerHTML:'');
+        setAgHeader('sub',sub?sub.innerHTML:'');
+      },600);
+    };
+    if(club)club.addEventListener('input',saveHdr);
+    if(sub)sub.addEventListener('input',saveHdr);
     wrap.addEventListener('input',queueAgSave);
     wrap.addEventListener('change',queueAgSave);
     loadMeeting();
