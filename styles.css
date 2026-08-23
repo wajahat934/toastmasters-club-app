@@ -301,3 +301,16 @@ details.mem .body{padding:12px 16px}
   html.agprint #appWrap,html.agprint main.wrap,html.agprint #agWrap{height:296mm;overflow:hidden}
   @page{size:A4 portrait;margin:0}
 }
+
+/* the add-to-home-screen offer: a bar along the bottom so it is visible on the
+   sign-in screen and inside the app alike, and above the safe area on phones */
+#installBar{position:fixed;left:8px;right:8px;bottom:8px;z-index:60;
+  display:none;align-items:center;gap:8px;flex-wrap:wrap;
+  background:var(--surface2,#12232e);color:var(--text,#eaf0f4);
+  border:1px solid rgba(255,255,255,.14);border-radius:12px;
+  padding:10px 12px;font-size:.92rem;line-height:1.35;
+  box-shadow:0 8px 24px rgba(0,0,0,.35);
+  padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+#installBar .grow{flex:1 1 auto;min-width:0}
+#installBar #installMsg{flex:1 1 190px}
+@media print{#installBar{display:none!important}}

@@ -4136,9 +4136,80 @@ function serialiseWrites(a){
   return a;
 }
 
+/* ---------- add to home screen ----------
+   Chrome decides for itself whether a site can be installed and fires
+   beforeinstallprompt at the page before showing anything. The app ignored it,
+   so the only route in was Chrome's hidden menu item and almost no member ever
+   found it. Catching the event lets us keep it and fire it from a real button.
+   iPhones have no such event, so those members get the manual steps instead. */
+const INSTALL_HIDDEN='installHiddenUntil';
+let deferredInstall=null;
+function runningInstalled(){
+  return window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true;
+}
+function installHidden(){
+  const until=Number(localStorage.getItem(INSTALL_HIDDEN)||0);
+  return until>Date.now();
+}
+/* "Not now" means not now, not never — a member who dismisses it on the bus
+   should still be offered it next month */
+function hideInstallFor(days){
+  try{ localStorage.setItem(INSTALL_HIDDEN,String(Date.now()+days*864e5)); }catch(e){}
+}
+function showInstallBar(msg,canPrompt){
+  const bar=document.getElementById('installBar');
+  if(!bar||runningInstalled()||installHidden())return;
+  document.getElementById('installMsg').innerText=msg;
+  document.getElementById('installGo').style.display=canPrompt?'':'none';
+  bar.style.display='flex';
+}
+function hideInstallBar(){
+  const bar=document.getElementById('installBar');
+  if(bar)bar.style.display='none';
+}
+/* The browser will not offer to install a site that has no service worker.
+   sw.js is network-first on purpose — see the long comment at the top of it —
+   so registering it does not put the ?v=NN deploy ritual at risk. */
+function registerWorker(){
+  if(!('serviceWorker' in navigator))return;
+  navigator.serviceWorker.register('sw.js')
+    .then(()=>authLog('sw:registered'))
+    .catch(e=>authLog('sw:failed',{why:String(e&&e.message||e)}));
+}
+function initInstall(){
+  const bar=document.getElementById('installBar'); if(!bar)return;
+  registerWorker();
+  window.addEventListener('beforeinstallprompt',e=>{
+    e.preventDefault();                 /* keep it: without this Chrome spends it on its own banner */
+    deferredInstall=e;
+    authLog('install:offered');
+    showInstallBar('Add the club app to your home screen',true);
+  });
+  window.addEventListener('appinstalled',()=>{
+    authLog('install:done');
+    deferredInstall=null; hideInstallBar(); hideInstallFor(3650);
+    toast('Installed — open it from your home screen next time');
+  });
+  document.getElementById('installGo').addEventListener('click',async()=>{
+    if(!deferredInstall)return;
+    deferredInstall.prompt();
+    const {outcome}=await deferredInstall.userChoice;
+    authLog('install:'+outcome);
+    deferredInstall=null;               /* the event is single use */
+    if(outcome!=='accepted'){ hideInstallBar(); hideInstallFor(30); }
+  });
+  document.getElementById('installNo').addEventListener('click',()=>{
+    hideInstallBar(); hideInstallFor(30);
+  });
+  /* iPhone: Safari has no install event, so name the buttons they need */
+  if(/iphone|ipad|ipod/i.test(navigator.userAgent)&&!runningInstalled())
+    setTimeout(()=>showInstallBar('To install: tap Share, then Add to Home Screen',false),4000);
+}
+
 (async function boot(){
   api=serialiseWrites(DEMO?DemoApi:SupabaseApi);
   bindAuth();
+  initInstall();
   await api.init();
   await route();
 })();

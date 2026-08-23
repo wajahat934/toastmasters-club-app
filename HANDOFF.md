@@ -9,11 +9,18 @@
 
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs. Bump it on every
    deploy or browsers serve the old `app.js`. There is no service worker; that bump is the only
-   cache control. Currently **v=69**.
+   cache control. Currently **v=70**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
-3. **Watch for backslash halving.** Writing JS through Bash/python heredocs eats one level of
+3. **There is now a service worker (`sw.js`), and it is network-first on purpose.**
+   Read the comment at the top of it before touching it. A cache-first worker would fight the
+   `?v=NN` ritual and pin members to an old `app.js` with no way to push them off — the worst
+   failure this codebase could have. It was tested both ways: online a changed file is served
+   fresh, offline the cached copy is served. It exists because a browser will not offer to install
+   a site that has no service worker. If it ever misbehaves in the wild, replace the file's body
+   with `self.registration.unregister()` and it clears itself from every device on the next visit.
+4. **Watch for backslash halving.** Writing JS through Bash/python heredocs eats one level of
    backslash. `\b` in a patch became a literal backspace byte inside three regexes once, and the
    file still parsed. After any scripted edit: `node --check app.js` **and** grep for control
    characters.
