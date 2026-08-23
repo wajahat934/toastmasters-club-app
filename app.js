@@ -1472,14 +1472,22 @@ function viewSchedule(){
 }
 function meetingBookingCard(m){
   const slots=slotListFor(m);
+  /* Only slots this meeting actually has. Dropping the speaker count or turning
+     Table Topics off hides a slot but can leave its booking behind, and counting
+     those made one booking look like two. */
+  const live=new Set(slots.map(s=>s.key));
   const counts={};
   for(const [key,a] of Object.entries(m.assignments||{})){
-    if(!a||!a.memberId)continue;
+    if(!a||!a.memberId||!live.has(key))continue;
     if(UNTRACKED_ROLES.includes(key.split('|')[0]))continue;  /* SAA/PO alongside another role is normal */
     counts[a.memberId]=(counts[a.memberId]||0)+1;
   }
   const dupes=Object.entries(counts).filter(([,c])=>c>1).map(([id])=>memberById(id)?.name).filter(Boolean);
-  const filled=Object.values(m.assignments||{}).filter(a=>a&&a.memberId).length;
+  const filled=Object.entries(m.assignments||{}).filter(([k,a])=>a&&a.memberId&&live.has(k)).length;
+  /* surfaced rather than silently ignored: they come back if the slot returns */
+  const orphans=Object.entries(m.assignments||{})
+    .filter(([k,a])=>a&&a.memberId&&!live.has(k))
+    .map(([k,a])=>({key:k,name:(memberById(a.memberId)||{}).name||'?'}));
   const nSpk=speakersFor(m);
   return `<div class="card">
     <div class="row">
@@ -1527,6 +1535,9 @@ function meetingBookingCard(m){
       }).join('')}
     </div>
     ${dupes.length?`<div class="warnline">⚠ Double-booked in this meeting: ${dupes.map(esc).join(', ')}</div>`:''}
+    ${orphans.length?`<div class="warnline">📎 Booked on ${orphans.length} slot${orphans.length>1?'s':''} this meeting no longer has:
+      ${orphans.map(o=>esc(o.name)+' ('+esc(roleNameById(ridOf(o.key)))+')').join(', ')}
+      <button class="btn ghost small" onclick="releaseOrphans('${m.id}')">Release</button></div>`:''}
   </div>`;
 }
 /* Attendance is opt-out: everyone is present until someone says otherwise, so
@@ -1851,6 +1862,17 @@ async function unbookSlots(m,keys){
     S.assignments=S.assignments.filter(a=>!(a.meeting_id===m.id&&a.slot_key===key));
     sync(api.unbook(m.id,key));
   }
+}
+/* bookings left on slots a meeting no longer has — they reappear if the slot
+   comes back, so they are cleared deliberately rather than automatically */
+function releaseOrphans(mid){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  const live=new Set(slotListFor(m).map(s=>s.key));
+  const gone=Object.keys(m.assignments||{}).filter(k=>!live.has(k)&&m.assignments[k]&&m.assignments[k].memberId);
+  if(!gone.length)return;
+  for(const k of gone)unbookLocal(mid,k);
+  rebuild(); render();
+  toast(`Released ${gone.length} leftover booking${gone.length>1?'s':''}`);
 }
 async function spkDelta(mid,d){
   const m=state.meetings.find(x=>x.id===mid); if(!m)return;
@@ -3810,6 +3832,7 @@ function bindAuth(){
 Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
+  releaseOrphans,
   spkDelta,setMeetingTT,setMeetingOrder,setPresent,markAllPresent,creditSpeech,deferBooking,deferAllBookings,undoMove,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   vcPick,startPoll,addCandidate,removeCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
   pStart,pAdd,pRemove,pAdjust,pPaper,pVote,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
