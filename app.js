@@ -12,6 +12,45 @@ const DEMO = !window.CLUB_CONFIG || window.CLUB_CONFIG.SUPABASE_URL.includes('YO
    nothing in the app signs anyone out on its own. This records the auth events
    and the decisions route() makes, so the next report can be read rather than
    guessed at. Kept in localStorage, last 40 entries, no personal data. */
+/* "Failed to fetch" is what fetch throws when the request never reached the
+   server at all — blocked DNS, no data, a captive portal, or a device clock so
+   far off that the TLS certificate looks invalid. None of that is a wrong
+   password, and none of it is worth showing a member verbatim. */
+function friendlyAuthError(err){
+  const raw=String((err&&err.message)||err||'');
+  if(/failed to fetch|networkerror|load failed|network request failed/i.test(raw))
+    return "Couldn't reach the server. Your password is probably fine — this is the connection. "+
+           "Try mobile data instead of Wi-Fi (or the other way round), then tap Check connection below.";
+  return raw;
+}
+/* Probes the server and reports in plain words. The clock check matters: a
+   phone whose date is wrong fails every HTTPS request with exactly this error,
+   and nobody ever suspects it. */
+async function checkConnection(into){
+  const say=t=>{ if(into){ into.style.color=''; into.textContent=t; } };
+  if(!navigator.onLine){ say('Your phone says it is offline. Turn on Wi-Fi or mobile data and try again.'); return; }
+  say('Checking…');
+  const base=(window.CLUB_CONFIG||{}).SUPABASE_URL||'';
+  try{
+    const started=Date.now();
+    const res=await fetch(base+'/auth/v1/health',{headers:{apikey:(window.CLUB_CONFIG||{}).SUPABASE_ANON_KEY||''}});
+    const took=Date.now()-started;
+    const hdr=res.headers.get('date');
+    let skew=null;
+    if(hdr){ const server=new Date(hdr).getTime(); if(!isNaN(server))skew=Math.abs(server-Date.now())/60000; }
+    authLog('probe:ok',{status:res.status,ms:took,skewMin:skew==null?null:Math.round(skew)});
+    if(skew!=null&&skew>5){
+      say("Reached the server, but this phone's clock is "+Math.round(skew)+
+          " minutes out. That alone breaks secure connections. Set date and time to automatic, then sign in again.");
+      return;
+    }
+    say('Connection to the server is fine ('+took+' ms). If sign-in still fails, it is the email or password.');
+  }catch(e){
+    authLog('probe:failed',{msg:String(e&&e.message||e)});
+    say('Could not reach the server at all. Most often this is the mobile network blocking it — '+
+        'try the other network, or a different browser. If it works elsewhere, tell an officer.');
+  }
+}
 function authLog(ev,extra){
   try{
     const log=JSON.parse(localStorage.getItem('authLog')||'[]');
@@ -3847,9 +3886,10 @@ function bindAuth(){
         await api.signUp(email,pass,name,(bm&&bd)?bm+'-'+bd:null);
       } else await api.signIn(email,pass);
       await route();
-    }catch(err){ errEl.textContent=err.message||String(err); }
+    }catch(err){ errEl.textContent=friendlyAuthError(err); }
   });
   bindPwEyes();
+  document.getElementById('authCheck').addEventListener('click',()=>checkConnection(errEl));
   document.getElementById('authForgot').addEventListener('click',async()=>{
     const email=document.getElementById('authEmail').value.trim();
     if(!email){ errEl.textContent='Type your email address above first, then tap this again.'; return; }
@@ -3858,7 +3898,7 @@ function bindAuth(){
       await api.resetPassword(email);
       errEl.style.color='var(--accent)';
       errEl.textContent='Reset link sent to '+email+'. Check your inbox (and spam), then tap the link.';
-    }catch(err){ errEl.style.color=''; errEl.textContent=err.message||String(err); }
+    }catch(err){ errEl.style.color=''; errEl.textContent=friendlyAuthError(err); }
   });
   const resetForm=document.getElementById('resetForm'),resetErr=document.getElementById('resetErr');
   resetForm.addEventListener('submit',async e=>{
