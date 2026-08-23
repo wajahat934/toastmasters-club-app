@@ -109,6 +109,17 @@ function defaultSettings(){ return {clubName:'Rawalpindi Toastmasters Club',meet
    DATA LAYER — two implementations of the same api surface
    ============================================================ */
 let api=null, sb=null;
+/* why the last token refresh failed, so route() can log it and tell a stale
+   login apart from a dropped connection */
+let lastRefreshError=null, lastRefreshStatus=null;
+/* A rejected refresh token never becomes valid again — the browser is holding
+   a login that the server has already retired. A dead connection is the
+   opposite: the token is fine and will work once the network comes back. */
+function refreshRejected(){
+  if(!lastRefreshError)return false;
+  if(/failed to fetch|networkerror|load failed|network request failed/i.test(lastRefreshError))return false;
+  return /refresh|token|jwt|session|not found|expired|revoked/i.test(lastRefreshError)||lastRefreshStatus===400||lastRefreshStatus===401;
+}
 
 const SupabaseApi={
   async init(){
@@ -124,8 +135,17 @@ const SupabaseApi={
   },
   async session(){ return (await sb.auth.getSession()).data.session; },
   async refresh(){
-    try{ const {data}=await sb.auth.refreshSession(); return data.session||null; }
-    catch(e){ return null; }
+    /* refreshSession reports failure two ways: an {error} for a rejected token
+       and a throw for a dead connection. Both used to be flattened to null, so
+       the session diary said "refresh-failed" and nothing else — which is the
+       one question worth answering when a member says the app logged them out. */
+    try{
+      const {data,error}=await sb.auth.refreshSession();
+      lastRefreshError=error?(error.message||String(error)):null;
+      lastRefreshStatus=error&&error.status||null;
+      return data.session||null;
+    }
+    catch(e){ lastRefreshError=String(e&&e.message||e); lastRefreshStatus=null; return null; }
   },
   async signUp(email,pass,name,birthday){
     const {data,error}=await sb.auth.signUp({email,password:pass});
@@ -1783,6 +1803,8 @@ function freeSlotFor(m,rid){
   }
   return null;
 }
+function slotCountFor(m,rid){ return slotListFor(m).filter(s=>ridOf(s.key)===rid).length; }
+function slotTaken(m,key){ const a=(m.assignments||{})[key]; return !!(a&&a.memberId); }
 /* every deferrable booking on a meeting, grouped give-way-first within its role */
 function allDeferrable(m){
   const rids=[...new Set(slotListFor(m).map(s=>ridOf(s.key)))].filter(deferrable);
@@ -1801,13 +1823,20 @@ function holdsRole(m,rid,memberId){
    mutate S, and the derived `state` only catches up on rebuild(). Holding object
    references across a placement meant the next speaker read a stale slot map and
    overwrote the one just placed. */
-function pushInto(chainIds,rid,memberId,at,hops){
+function pushInto(chainIds,rid,memberId,at,hops,preferKey){
   if(!chainIds.length||hops>ADMIN_HORIZON)return null;
   const target=state.meetings.find(x=>x.id===chainIds[0]);
-  if(!target)return pushInto(chainIds.slice(1),rid,memberId,at,hops+1);
+  const next=()=>pushInto(chainIds.slice(1),rid,memberId,at,hops+1,preferKey);
+  if(!target)return next();
   /* never stack someone twice on the same role — carry them to the next instead */
-  if(holdsRole(target,rid,memberId))return pushInto(chainIds.slice(1),rid,memberId,at,hops+1);
-  let slot=freeSlotFor(target,rid);
+  if(holdsRole(target,rid,memberId))return next();
+  /* A meeting with no slot for this role at all is skipped, not treated as a
+     dead end. An Urdu night with zero prepared speeches used to strand a
+     speaker who could have sat on the meeting after it. */
+  if(!slotCountFor(target,rid))return next();
+  /* preferKey keeps a speech evaluator opposite their own speaker */
+  let slot=(preferKey&&!slotTaken(target,preferKey)&&slotCountFor(target,rid)>Number(preferKey.split('|')[1]))
+    ?preferKey:freeSlotFor(target,rid);
   if(!slot){
     const give=bookingsByGiveWay(target,rid)[0];
     if(!give)return null;
@@ -1816,7 +1845,7 @@ function pushInto(chainIds,rid,memberId,at,hops){
     slot=give.key;
   }
   bookLocal(target.id,slot,memberId,at);
-  return state.meetings.find(x=>x.id===chainIds[0]);
+  return {m:state.meetings.find(x=>x.id===chainIds[0]),key:slot};
 }
 function bookLocal(mid,key,memberId,at){
   const had=S.assignments.find(a=>a.meeting_id===mid&&a.slot_key===key);
@@ -1841,9 +1870,9 @@ function snapshotBookings(label){
   lastMove={label,rows:S.assignments.map(a=>({...a})),
             cancelled:S.meetings.map(m=>({id:m.id,cancelled:!!m.cancelled}))};
 }
-function undoMove(){
-  if(!lastMove){ toast('Nothing to undo'); return; }
-  for(const c of lastMove.cancelled||[]){
+function applySnapshot(snap){
+  if(!snap)return;
+  for(const c of snap.cancelled||[]){
     const row=S.meetings.find(m=>m.id===c.id);
     if(row&&!!row.cancelled!==c.cancelled){
       row.cancelled=c.cancelled;
@@ -1851,32 +1880,67 @@ function undoMove(){
     }
   }
   rebuild();
-  const want=new Map(lastMove.rows.map(a=>[asgKey(a),a]));
+  const want=new Map(snap.rows.map(a=>[asgKey(a),a]));
   const have=new Map(S.assignments.map(a=>[asgKey(a),a]));
   for(const [k,a] of have)if(!want.has(k))unbookLocal(a.meeting_id,a.slot_key);
   for(const [k,a] of want){
     const cur=have.get(k);
     if(!cur||cur.profile_id!==a.profile_id)bookLocal(a.meeting_id,a.slot_key,a.profile_id,a.booked_at);
   }
+}
+function undoMove(){
+  if(!lastMove){ toast('Nothing to undo'); return; }
+  applySnapshot(lastMove);
   const label=lastMove.label; lastMove=null;
   render(); toast(`Undone — ${label} put back`);
+}
+/* Move one booking to a later meeting. Returns where it landed, or null when
+   there was nowhere to put it — in which case nothing has changed, because the
+   source slot is given straight back. Never renders or toasts, so callers can
+   move a speaker and their evaluator as one action. */
+function moveForward(mid,key,preferKey){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return null;
+  const a=(m.assignments||{})[key]; if(!a||!a.memberId)return null;
+  const rid=ridOf(key);
+  if(!deferrable(rid))return null;
+  const memberId=a.memberId, at=bookedAt(mid,key);
+  const chain=laterMeetingIds(m);
+  if(!chain.length)return null;
+  /* free the source slot first, or a full-meeting cascade can bounce them
+     straight back into the seat they are leaving */
+  unbookLocal(mid,key);
+  const landed=pushInto(chain,rid,memberId,at,0,preferKey);
+  if(!landed){ bookLocal(mid,key,memberId,at); return null; }
+  return landed;
+}
+/* A speech evaluator belongs to their speaker, so when the speaker moves the
+   evaluator goes too, into the matching slot on the same meeting. Returns the
+   evaluator's name if one travelled. */
+function moveEvaluatorWith(mid,spkKey,landed){
+  if(ridOf(spkKey)!=='spk'||!landed)return null;
+  const evKey='eval|'+spkKey.split('|')[1];
+  const src=state.meetings.find(x=>x.id===mid); if(!src)return null;
+  const ea=(src.assignments||{})[evKey];
+  if(!ea||!ea.memberId)return null;
+  const who=memberById(ea.memberId);
+  const want='eval|'+landed.key.split('|')[1];
+  /* the evaluator moves to their speaker's meeting, or as near to it as there
+     is room for — never nowhere, which is what used to happen */
+  return moveForward(mid,evKey,want)?(who?who.name:'their evaluator'):null;
 }
 function deferBooking(mid,key){
   const m=state.meetings.find(x=>x.id===mid); if(!m)return;
   const a=(m.assignments||{})[key]; if(!a||!a.memberId)return;
   const rid=ridOf(key);
   if(!deferrable(rid)){ toast('Standing roles stay put'); return; }
-  const who=memberById(a.memberId), at=bookedAt(mid,key);
-  const chain=laterMeetingIds(m);
-  if(!chain.length){ toast('No later meeting to move them to'); return; }
+  const who=memberById(a.memberId);
+  if(!laterMeetingIds(m).length){ toast('No later meeting to move them to'); return; }
   snapshotBookings(`${who?who.name:'that booking'}`);
-  /* free the source slot first, or a full-meeting cascade can bounce them
-     straight back into the seat they are leaving */
-  unbookLocal(mid,key);
-  const landed=pushInto(chain,rid,a.memberId,at,0);
-  if(!landed){ bookLocal(mid,key,a.memberId,at); render(); toast(`Every later meeting's ${roleNameById(rid)} is taken — free one first`); return; }
+  const landed=moveForward(mid,key);
+  if(!landed){ render(); toast(`Every later meeting's ${roleNameById(rid)} is taken — free one first`); return; }
+  const ev=moveEvaluatorWith(mid,key,landed);
   render();
-  toast(`${who?who.name:'Booking'} moved to ${fmtDate(landed.date)}`);
+  toast(`${who?who.name:'Booking'}${ev?` and ${ev}`:''} moved to ${fmtDate(landed.m.date)}`);
 }
 /* every member-picked booking on a meeting moves on, give-way order preserved */
 function deferAllBookings(mid){
@@ -1968,14 +2032,27 @@ async function spkDelta(mid,d){
       bookLocal(mid,give.key,occupant);
       rebuild();
     }
-    const dropped=[`spk|${cur-1}`,`eval|${cur-1}`].filter(k=>m.assignments[k]&&m.assignments[k].memberId);
+    const spkKey=`spk|${cur-1}`, evKey=`eval|${cur-1}`;
+    const dropped=[spkKey,evKey].filter(k=>m.assignments[k]&&m.assignments[k].memberId);
     if(dropped.length){
       const names=dropped.map(k=>memberById(m.assignments[k].memberId)?.name).filter(Boolean).join(', ');
       const move=confirm(`${names} gives way.\n\nOK = move them forward to the next meeting.\nCancel = leave the slot count alone.`);
       if(!move)return;
-      for(const k of dropped){
-        if(/^spk\|/.test(k))deferBooking(mid,k);
-        else await unbookSlots(m,[k]);
+      /* Both the speaker and their evaluator are moved forward. The evaluator
+         used to be deleted here while the dialog promised they would be moved,
+         so the club lost a booking every time the speaker count came down.
+         Either both find a seat or the meeting is put back as it was — a half
+         done move leaves a speaker with no evaluator and nobody notices. */
+      const hasSpk=!!(m.assignments[spkKey]&&m.assignments[spkKey].memberId);
+      const hasEv=!!(m.assignments[evKey]&&m.assignments[evKey].memberId);
+      snapshotBookings(names);
+      const bail=rid=>{ applySnapshot(lastMove); lastMove=null; render();
+        toast(`No later meeting has a free ${roleNameById(rid)} — slot count left alone`); };
+      let landed=null;
+      if(hasSpk){ landed=moveForward(mid,spkKey); if(!landed){ bail('spk'); return; } }
+      if(hasEv){
+        const want=landed?'eval|'+landed.key.split('|')[1]:null;
+        if(!moveForward(mid,evKey,want)){ bail('eval'); return; }
       }
     }
   }
@@ -2067,7 +2144,40 @@ function creditSpeech(mid,slotKey,pathName){
   saveMeetingConfig(m);
   rebuild(); render();
 }
-function setReviewed(id,v){
+/* A delivered speech is a Pathways project, and the credit dropdown was easy to
+   walk straight past — a meeting could be marked reviewed with three speeches
+   uncounted and nobody would know until an award was missed. Marking a meeting
+   reviewed now asks about every completed speech with no project against it.
+   The dropdown stays for corrections and for crediting after the fact. */
+async function creditPending(mid){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  const credited=(m.config||{}).credited||{};
+  const todo=Object.entries(m.assignments||{})
+    .filter(([k,a])=>/^spk\|/.test(k)&&a&&a.memberId&&(a.status||'done')==='done'&&!credited[k])
+    .map(([k,a])=>({k,memberId:a.memberId}));
+  const NL=String.fromCharCode(10);
+  for(const item of todo){
+    const mem=memberById(item.memberId);
+    /* guests have no pathway, and neither does a brand-new member */
+    if(!mem||mem.external)continue;
+    const paths=activePaths(mem);
+    if(!paths.length)continue;
+    let pick=null;
+    if(paths.length===1){
+      if(confirm(`Count ${mem.name}'s speech as a project on ${paths[0].name}?`+NL+NL+
+                 `OK = credit it.`+NL+`Cancel = leave it uncounted.`))pick=paths[0].name;
+    }else{
+      const list=paths.map((p,i)=>`${i+1}. ${p.name}`).join(NL);
+      const ans=prompt(`Which pathway does ${mem.name}'s speech count towards?`+NL+NL+list+NL+NL+
+                       `Type a number, or leave it blank to skip.`,'1');
+      const n=Number(ans);
+      if(n>=1&&n<=paths.length)pick=paths[n-1].name;
+    }
+    if(pick)creditSpeech(mid,item.k,pick);
+  }
+}
+async function setReviewed(id,v){
+  if(v)await creditPending(id);
   const row=S.meetings.find(x=>x.id===id); if(row)row.reviewed=v;
   sync(api.updateMeeting(id,{reviewed:v}));
   rebuild(); render();
@@ -2613,11 +2723,18 @@ function setAgHeader(k,v){
   saveSettingsRemote();
 }
 function authLogText(){
+  /* Everything except the timestamp and the online flag used to be dropped on
+     the floor, so a member could send in a diary saying "refresh-failed" and
+     nothing else. The reason is the whole value of the diary: "Invalid Refresh
+     Token" and "Failed to fetch" need completely different answers. */
+  const skip={t:1,ev:1,online:1};
   return authLogRead().map(e=>{
     const t=new Date(e.t);
     const when=isNaN(t)?e.t:t.toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
     const extra=e.online===undefined?'':(e.online?' (online)':' (OFFLINE)');
-    return when+'  '+e.ev+extra;
+    const rest=Object.keys(e).filter(k=>!skip[k]&&e[k]!==null&&e[k]!==undefined)
+      .map(k=>k+'='+e[k]).join(' ');
+    return when+'  '+e.ev+extra+(rest?'  '+rest:'');
   }).join(String.fromCharCode(10));
 }
 function urduNames(){ return state.settings.urduNames||{}; }
@@ -2730,6 +2847,15 @@ const AG_UR={
   /* generated labels */
   l_speaker:'تیار شدہ مقرر', l_evaluator:'تقریر کے تجزیہ کار',
   l_break:'☕ وقفہ و باہمی ملاقات', l_min:'منٹ',
+  /* the changeover note under the table: the printed times leave room for
+     people to walk to and from the lectern, which does not show in the Min
+     column and made the sheet look as if it did not add up */
+  l_bufNote:'ان اوقات میں منتقلی کا وقفہ شامل ہے',
+  l_bufSpk:'ہر تقریر کے بعد {n} منٹ',
+  l_bufEval:'ہر تجزیے کے بعد {n} منٹ',
+  l_bufOpen:'افتتاحی نشست کے ہر جز کے بعد {n} منٹ',
+  l_bufTotal:'مجموعی طور پر {n} منٹ',
+  l_bufSep:'، ', l_bufEnd:'۔',
   /* sheet furniture */
   h_activity:'سرگرمی', h_role:'کردار', h_from:'سے', h_to:'تک', h_min:'منٹ',
   h_timer:'وقت', h_lights:'سبز · زرد · سرخ',
@@ -2837,6 +2963,10 @@ const AG_EN={};
     r_eduQa:'Q&amp;A &amp; Vote of Thanks',
     l_speaker:'Prepared Speaker',l_evaluator:'Speech Evaluator',
     l_break:'☕ Networking Break',l_min:'min',
+    l_bufNote:'Changeover time is built into these timings',
+    l_bufSpk:'{n} min after each speech',l_bufEval:'{n} min after each evaluation',
+    l_bufOpen:'{n} min after each opening item',l_bufTotal:'{n} min in total',
+    l_bufSep:', ',l_bufEnd:'.',
     h_activity:'Activity',h_role:'Role Player',h_from:'From',h_to:'To',h_min:'Min',
     h_timer:'Timer',h_lights:'G · Y · R',h_theme:'Theme of the Meeting',h_wod:'Word of the Day',
     h_meaning:'Meaning',h_eg:'e.g.',h_support:'Supporting Roles',h_planner:'Forward Planner',
@@ -2874,25 +3004,38 @@ const AgendaApp=(function(){
     return out;
   }
   const one=(m,re)=>bookedNames(m,re).find(Boolean)||null;
-  /* Speakers, optionally reordered most junior first. Only the filled slots are
-     sorted — empty slots stay at the end so the blanks don't shuffle about. */
-  function speakerNames(m){
-    const booked=[];
+  /* Speakers, optionally reordered most junior first, with each speech
+     evaluator travelling alongside their own speaker — evaluator 2 stays
+     opposite speaker 2 wherever the reorder puts them. Speaker and evaluator
+     slots always exist in equal numbers (slotListFor gives both
+     speakersFor(m)), so pairing them by position is safe. Only filled speaker
+     slots are sorted — empty ones stay at the end so the blanks don't shuffle
+     about, and an evaluator whose speaker is unbooked goes with them. */
+  function speechOrder(m){
+    const spk=[],ev=[];
     for(const s of slotListFor(m)){
-      if(!/^speaker$/i.test(s.role.name.trim()))continue;
+      const nm=s.role.name.trim();
       const a=(m.assignments||{})[s.key];
-      booked.push(a&&a.memberId?memberById(a.memberId):null);
+      const who=(a&&a.memberId&&memberById(a.memberId))||null;
+      if(/^speaker$/i.test(nm))spk.push(who);
+      else if(/^(speech )?evaluator$/i.test(nm))ev.push(who);
     }
-    const filled=booked.filter(Boolean),blanks=booked.length-filled.length;
-    if(juniorFirstOn)filled.sort(juniorFirst);
-    return [...filled.map(tmName),...Array(blanks).fill(null)];
+    const pairs=spk.map((sp,i)=>({sp,ev:i<ev.length?ev[i]:null}));
+    const filled=pairs.filter(p=>p.sp),blanks=pairs.filter(p=>!p.sp);
+    if(juniorFirstOn)filled.sort((a,b)=>juniorFirst(a.sp,b.sp));
+    const ordered=[...filled,...blanks];
+    const nameOf=x=>x?tmName(x):null;
+    /* any evaluator slot past the last speaker slot keeps its own place */
+    return {spk:ordered.map(p=>nameOf(p.sp)),
+            ev:[...ordered.map(p=>nameOf(p.ev)),...ev.slice(spk.length).map(nameOf)]};
   }
   function roleMap(m){
+    const speech=speechOrder(m);
     return {
       saa:one(m,/sergeant|saa/i),po:one(m,/presiding|president/i),
       tmod:one(m,/toastmaster of the day|^tmod$/i),ttm:one(m,/table topics master/i),
       ge:one(m,/general evaluator/i),tte:one(m,/table topics evaluator/i),
-      spk:speakerNames(m),eval:bookedNames(m,/^(speech )?evaluator$/i),
+      spk:speech.spk,eval:speech.ev,
       timer:one(m,/^timer$/i),vc:one(m,/vote counter/i),gram:one(m,/grammarian/i),
       al:one(m,/active listener/i),ah:one(m,/ah[- ]?counter/i),jm:one(m,/joke/i)
     };
@@ -2982,6 +3125,7 @@ const AgendaApp=(function(){
         </tr></thead>
         <tbody id="agBody"></tbody>
       </table>
+      <div class="bufnote" id="agBufNote"></div>
       <div class="bottom">
         <div class="panel bluehead" style="flex:1.15">
           <h3 data-k="h_support">Supporting Roles</h3>
@@ -3447,7 +3591,7 @@ const AgendaApp=(function(){
   }
   function updateTimes(){
     if(!g('agBody'))return;
-    let cur=startMins(); const start=cur;
+    let cur=startMins(), changeover=0; const start=cur;
     const bufS=parseFloat(g('agBuf').value)||0,bufE=parseFloat(g('agBufE').value)||0,
           bufO=parseFloat(g('agBufO').value)||0;
     /* the block matters for the opening — its rows carry no kind of their own */
@@ -3471,10 +3615,30 @@ const AgendaApp=(function(){
         if(row._fromEl)row._fromEl.innerText=fmtT(cur);
         cur+=(row.dur||0);
         if(row._toEl)row._toEl.innerText=fmtT(cur);
-        cur+=extra(row,block);
+        const gap=extra(row,block);
+        cur+=gap; changeover+=gap;
       });
     });
     g('agChipTime').innerText=`${fmtT(start)} – ${fmtT(cur)} ${ampm(cur)}`;
+    /* Say out loud that the gaps are there. Without this the To of one row and
+       the From of the next differ by a minute nobody can account for, and the
+       Min column adds up to less than the meeting actually runs. */
+    const note=g('agBufNote');
+    if(note){
+      /* the number sits before the phrase in English and after it in Urdu, so
+         each language carries its own template rather than a glued-up sentence */
+      const put=(key,en,n)=>agT(key,en).replace('{n}',n);
+      const bits=[];
+      if(bufS)bits.push(put('l_bufSpk','{n} min after each speech',bufS));
+      if(bufE)bits.push(put('l_bufEval','{n} min after each evaluation',bufE));
+      if(bufO)bits.push(put('l_bufOpen','{n} min after each opening item',bufO));
+      const total=put('l_bufTotal','{n} min in total',Math.round(changeover*10)/10);
+      note.innerText=bits.length
+        ? `⏱ ${agT('l_bufNote','Changeover time is built into these timings')}: `
+          +bits.join(agT('l_bufSep',', '))+` — ${total}`+agT('l_bufEnd','.')
+        : '';
+      note.style.display=bits.length?'':'none';
+    }
   }
   function agFmtDate(d){ return `${String(d.getDate()).padStart(2,'0')} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`; }
   function updateDates(){
@@ -3820,7 +3984,14 @@ async function route(){
     if(!session&&hasStoredSession()){
       authLog('route:no-session-but-token-stored',{online:navigator.onLine});
       session=await api.refresh();
-      authLog(session?'route:refresh-ok':'route:refresh-failed',{online:navigator.onLine});
+      authLog(session?'route:refresh-ok':'route:refresh-failed',
+        {online:navigator.onLine,why:session?null:(lastRefreshError||'no reason given'),status:lastRefreshStatus});
+      /* Clear a token the server has retired, or every load repeats this dance
+         and the member is asked to sign in over a login that can never work. */
+      if(!session&&refreshRejected()){
+        authLog('route:stale-login-cleared');
+        try{ await api.signOut(); }catch(e){}
+      }
       if(!session&&!navigator.onLine){
         /* offline with a stored session: hold, do not send them to sign in */
         authLog('route:offline-hold');
@@ -3946,8 +4117,27 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});
 Object.defineProperty(window,'dcpSelYear',{get:()=>dcpSelYear,set:v=>{dcpSelYear=v;}});
 
+/* Assignment writes are put in a queue instead of being fired off together.
+   A move-forward cascade sends a DELETE and an UPSERT for the same row in the
+   same tick. Sent in parallel the DELETE can arrive last and wipe the booking
+   that was just written, so on the next reload the member has vanished instead
+   of moved. Ordering them costs nothing and removes the race. */
+function serialiseWrites(a){
+  let q=Promise.resolve();
+  for(const name of ['book','adminAssign','unbook','setAsg']){
+    const fn=a[name];
+    if(typeof fn!=='function')continue;
+    a[name]=function(...args){
+      const run=()=>fn.apply(a,args);
+      q=q.then(run,run);
+      return q;
+    };
+  }
+  return a;
+}
+
 (async function boot(){
-  api=DEMO?DemoApi:SupabaseApi;
+  api=serialiseWrites(DEMO?DemoApi:SupabaseApi);
   bindAuth();
   await api.init();
   await route();

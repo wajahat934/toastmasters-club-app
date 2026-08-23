@@ -206,6 +206,10 @@ details.mem .body{padding:12px 16px}
 #agSheet select.preset{font-size:8.5px;margin-left:6px;border:1px solid var(--pline);border-radius:4px;font-family:inherit;color:#33424f;padding:0 2px;width:auto;background:#fff}
 #agWrap .del{color:#fff;background:#c0392b;font-weight:800;cursor:pointer;border:none;border-radius:4px;font-size:9px;padding:0 5px;margin-left:6px;line-height:14px}
 #agWrap .del:hover{background:#96281b}
+/* the changeover note: quiet, but on the printed sheet, because the whole
+   point of it is to answer the member who adds the Min column up */
+#agSheet .bufnote{margin-top:4px;font-size:8.2px;color:#5a6b78;font-style:italic;line-height:1.35}
+#agSheet.urdu .bufnote{font-style:normal;font-size:9px;line-height:1.8}
 #agSheet .bottom{display:flex;gap:8px;margin-top:8px}
 #agSheet .panel{border:1.5px solid var(--pline);border-radius:8px;overflow:hidden;flex:1;display:flex;flex-direction:column}
 #agSheet .panel h3{background:var(--tmmaroon);color:#fff;font-size:8.5px;letter-spacing:1.2px;text-transform:uppercase;padding:4px 10px;margin:0}

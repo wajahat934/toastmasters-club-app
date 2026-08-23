@@ -9,7 +9,7 @@
 
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs. Bump it on every
    deploy or browsers serve the old `app.js`. There is no service worker; that bump is the only
-   cache control. Currently **v=68**.
+   cache control. Currently **v=69**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -22,22 +22,27 @@
 
 ## Outstanding — needs the user, not code
 
-- **Supabase → Auth → URL Configuration.** Site URL *and* Redirect URLs must both list the Pages
-  URL, or password-reset emails land nowhere. **Still not confirmed done.**
-- **Booking-time migration**, never run:
-  `alter table assignments add column booked_at timestamptz not null default now();`
-  Until then the move-forward fairness rule falls back to slot order instead of real booking time.
+- ~~**Supabase → Auth → URL Configuration.**~~ **Done** (2026-08-23). Site URL and Redirect URLs
+  both carry the Pages URL with its trailing slash, matching `APP_URL` in app.js. Password reset
+  was tested end to end and reaches the set-a-new-password screen.
+- ~~**Booking-time migration.**~~ **Done** (confirmed 2026-08-23: the column already exists).
+  The move-forward fairness rule uses real booking times.
 - **Urdu wording review.** The Urdu is machine-written. Least trustworthy: ناظمِ انتظامات (SAA),
   صدرِ اجلاس (Presiding Officer), مجموعی تجزیہ کار (General Evaluator). The sheet is click-to-edit,
   and `AG_UR_RETIRED` + `healRetiredWording()` migrate saved sheets when a wording changes —
   that is how Table Topics became فی البدیہہ تقاریر.
 
-## Open questions the user never answered
+## Answered 2026-08-23 — all three now built
 
-- Should evaluators follow their speaker when junior-first reorders the speakers?
-- Should the speech→project credit prompt automatically at review instead of relying on the dropdown?
-- Confirm the move-forward rule direction: built as **last to book gives way**, inferred from the
-  user's wording, never confirmed.
+- **Evaluators follow their speaker.** True in both places: the junior-first reorder on the agenda
+  (`speechOrder()` sorts speaker/evaluator pairs, not speakers alone) and every move-forward
+  (`moveEvaluatorWith()`), which aims the evaluator at the matching slot on the speaker's new meeting.
+- **The project credit is asked for at review.** `creditPending()` runs when a meeting is marked
+  reviewed and asks about every completed speech with nothing credited against it. One active
+  pathway gets a yes/no; several get a numbered prompt. Already-credited speeches are never asked
+  about twice — that guard is what stops a project being double counted.
+- **Move-forward direction confirmed: last to book gives way.** The rule itself was right; what was
+  broken was the speaker-count path (see below).
 
 ---
 
@@ -65,8 +70,29 @@
   fresh copies from `orderedBlocks()` and the per-session minute totals silently stop updating.
 - **Base table CSS hard-codes `text-align:left`**, which beats `dir=rtl`. Urdu cells need explicit
   right alignment.
+- **`sync()` used to fire writes in parallel.** A cascade sends a DELETE and an UPSERT for the same
+  row in one tick; unordered, the DELETE could land last and wipe the booking just written — a
+  member who looked moved on screen was gone after a reload. `serialiseWrites()` now queues
+  book/adminAssign/unbook/setAsg. Demo mode is synchronous, so it can never reproduce this: any
+  future change to the write path has to be reasoned about, not just demo-tested.
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Fixed 2026-08-23
+
+- **Reducing the speaker count deleted the evaluator.** `spkDelta` moved the dropped speaker forward
+  but called `unbookSlots` on `eval|N` — while the confirm dialog promised both would be moved. The
+  club silently lost an evaluator booking every time the speaker count came down. Now both move, and
+  the whole thing rolls back (`applySnapshot`) if either has nowhere to go.
+- **A meeting with no slots for a role broke the chain.** `pushInto` treated it as a dead end rather
+  than skipping it, so one Urdu night with zero speeches stranded everyone behind it.
+- **The session diary threw away its own detail.** `authLogText` printed only the event and the
+  online flag, and `api.refresh()` discarded the error entirely — so a member could send in a log
+  saying `refresh-failed` and nothing more. Both now carry the reason, and a token the server has
+  retired is cleared instead of being retried on every load.
+- **The agenda now says the changeover time is there** (`#agBufNote`, under the table, prints on the
+  PDF, both languages). Without it the To of one row and the From of the next differed by a minute
+  nobody could account for.
 
 ## Recently added, worth knowing
 
