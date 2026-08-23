@@ -7,6 +7,31 @@
    ============================================================ */
 
 const DEMO = !window.CLUB_CONFIG || window.CLUB_CONFIG.SUPABASE_URL.includes('YOUR-');
+/* ---- session diary -------------------------------------------------------
+   A member reporting "it logged me out" has no way to say what happened, and
+   nothing in the app signs anyone out on its own. This records the auth events
+   and the decisions route() makes, so the next report can be read rather than
+   guessed at. Kept in localStorage, last 40 entries, no personal data. */
+function authLog(ev,extra){
+  try{
+    const log=JSON.parse(localStorage.getItem('authLog')||'[]');
+    log.push({t:new Date().toISOString(),ev,...(extra||{})});
+    localStorage.setItem('authLog',JSON.stringify(log.slice(-40)));
+  }catch(e){}
+}
+function authLogRead(){
+  try{ return JSON.parse(localStorage.getItem('authLog')||'[]'); }catch(e){ return []; }
+}
+/* is there a Supabase session sitting in storage, whatever getSession says? */
+function hasStoredSession(){
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(/^sb-.*-auth-token$/.test(k)&&/refresh_token/.test(localStorage.getItem(k)||''))return true;
+    }
+  }catch(e){}
+  return false;
+}
 
 /* ---------- small helpers ---------- */
 const PATHS=['Presentation Mastery','Dynamic Leadership','Leadership Development','Effective Coaching','Engaging Humor','Innovative Planning','Motivational Strategies','Persuasive Influence','Strategic Relationships','Team Collaboration','Visionary Communication'];
@@ -53,11 +78,16 @@ const SupabaseApi={
     /* re-route only on sign-out or the first sign-in; routine token
        refreshes must NOT re-enter the app (it would reset the current tab) */
     sb.auth.onAuthStateChange((ev,_s)=>{
+      authLog('auth:'+ev,{online:navigator.onLine});
       if(ev==='PASSWORD_RECOVERY')recoveryMode=true;   /* belt-and-braces: the hash sniff already caught it */
       if(ev==='SIGNED_OUT'||ev==='PASSWORD_RECOVERY'||!entered)route();
     });
   },
   async session(){ return (await sb.auth.getSession()).data.session; },
+  async refresh(){
+    try{ const {data}=await sb.auth.refreshSession(); return data.session||null; }
+    catch(e){ return null; }
+  },
   async signUp(email,pass,name,birthday){
     const {data,error}=await sb.auth.signUp({email,password:pass});
     if(error)throw error;
@@ -222,6 +252,7 @@ const DemoApi=(function(){
     demo:true,
     async init(){},
     async session(){ return auth?{user:{id:auth}}:null; },
+    async refresh(){ return auth?{user:{id:auth}}:null; },
     demoEnter(kind){ auth=kind==='admin'?'demo-admin':'demo-member'; route(); },
     async signUp(email,pass,name){ profiles.push(P(name,{auth_id:'demo-'+uid(),email,approved:false})); throw {message:'Demo: account created as pending — sign in as admin to see the approval flow.'}; },
     async signIn(email){ if(email==='admin@demo')auth='demo-admin'; else if(email==='member@demo')auth='demo-member'; else throw {message:'Demo mode: use the buttons above, or admin@demo / member@demo.'}; },
@@ -1353,6 +1384,12 @@ function viewMe(){
         <button class="btn small" onclick="sugAdd()">Send to officers</button>
       </div>
       ${mySuggestionsHtml(mem.id)}
+    </div>
+    <div class="sect"><details><summary class="small muted" style="cursor:pointer">🩺 Session activity — open this if the app signed you out</summary>
+      <p class="small muted" style="margin:6px 0">Nothing here is shared automatically. If you were signed out unexpectedly,
+        copy this and send it to an officer — it says whether you were signed out or just lost connection.</p>
+      <pre class="small" style="max-height:180px;overflow:auto;background:var(--surface2);padding:8px;border-radius:6px;white-space:pre-wrap">${esc(authLogText())||'nothing recorded yet'}</pre>
+      <button class="btn ghost small" onclick="copyText(authLogText(),'Session activity copied')">Copy</button>
     </div>
     <div class="sect"><h3>🔑 Password</h3>
       <div class="row">
@@ -2536,6 +2573,14 @@ function setAgHeader(k,v){
   state.settings.agendaHeader=h; S.settings=state.settings;
   saveSettingsRemote();
 }
+function authLogText(){
+  return authLogRead().map(e=>{
+    const t=new Date(e.t);
+    const when=isNaN(t)?e.t:t.toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+    const extra=e.online===undefined?'':(e.online?' (online)':' (OFFLINE)');
+    return when+'  '+e.ev+extra;
+  }).join(String.fromCharCode(10));
+}
 function urduNames(){ return state.settings.urduNames||{}; }
 function urduNameOf(id){ return (urduNames()[id]||'').trim(); }
 function setUrduName(id,v){
@@ -3714,6 +3759,8 @@ async function enterApp(profile){
     entered=true;
     api.subscribe(async(table,p)=>{ await reload(); if(['book','schedule','voting'].includes(tab))renderLive(); });
     setInterval(dateRollCheck,60000);
+    window.addEventListener('online',()=>{ authLog('browser:online'); route(); });
+    window.addEventListener('offline',()=>authLog('browser:offline'));
     document.addEventListener('visibilitychange',()=>{ if(!document.hidden)dateRollCheck(); });
   }
 }
@@ -3726,14 +3773,29 @@ async function dateRollCheck(){
 }
 async function route(){
   try{
-    const session=await api.session();
+    let session=await api.session();
+    /* getSession returns null when the access token has expired and the refresh
+       could not be made — a sleeping phone or a dropped connection is enough.
+       Dropping straight to the sign-in screen is what members read as "it
+       logged me out", so try once more before believing it. */
+    if(!session&&hasStoredSession()){
+      authLog('route:no-session-but-token-stored',{online:navigator.onLine});
+      session=await api.refresh();
+      authLog(session?'route:refresh-ok':'route:refresh-failed',{online:navigator.onLine});
+      if(!session&&!navigator.onLine){
+        /* offline with a stored session: hold, do not send them to sign in */
+        authLog('route:offline-hold');
+        toast('Offline — you are still signed in, reconnecting…');
+        if(entered)return;
+      }
+    }
     /* the emailed link signs them in for real, so this check must come before
        the session check — otherwise they land straight in the app and the
        wrong password is never replaced */
     if(recoveryMode&&session){ show('resetWrap'); document.getElementById('resetPass').focus(); return; }
-    if(!session){ show('authWrap'); return; }
+    if(!session){ authLog('route:signed-out-screen',{online:navigator.onLine}); show('authWrap'); return; }
     const profile=await api.myProfile();
-    if(!profile){ show('authWrap'); return; }
+    if(!profile){ authLog('route:no-profile'); show('authWrap'); return; }
     if(!profile.approved||!profile.active){ show('pendingWrap'); return; }
     await enterApp(profile);
   }catch(e){ console.error(e); toast('Error: '+(e.message||e)); }
@@ -3811,11 +3873,11 @@ function bindAuth(){
     }catch(err){ resetErr.textContent=err.message||String(err); }
   });
   document.getElementById('resetCancel').addEventListener('click',async()=>{
-    recoveryMode=false; await api.signOut(); route();
+    recoveryMode=false; authLog('signout:reset-cancel'); await api.signOut(); route();
   });
   document.getElementById('pendingRefresh').addEventListener('click',route);
-  document.getElementById('pendingOut').addEventListener('click',async()=>{ await api.signOut(); route(); });
-  document.getElementById('signOut').addEventListener('click',async()=>{ await api.signOut(); entered=false; route(); });
+  document.getElementById('pendingOut').addEventListener('click',async()=>{ authLog('signout:pending-screen'); await api.signOut(); route(); });
+  document.getElementById('signOut').addEventListener('click',async()=>{ authLog('signout:button'); await api.signOut(); entered=false; route(); });
   document.getElementById('viewAs').addEventListener('click',()=>{
     viewAsMember=!viewAsMember;
     tab=viewAsMember?'book':'schedule';
@@ -3832,6 +3894,7 @@ function bindAuth(){
 Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
+  authLogText,
   releaseOrphans,
   spkDelta,setMeetingTT,setMeetingOrder,setPresent,markAllPresent,creditSpeech,deferBooking,deferAllBookings,undoMove,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   vcPick,startPoll,addCandidate,removeCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
