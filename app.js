@@ -837,9 +837,9 @@ function canOpenVoting(m){
   if(actingAdmin())return true;
   return m.date===todayStr()&&new Date().getHours()>=5;
 }
-function prefillCandidates(m,cat){
+function prefillCandidates(m,cat,lookup=memberById){
   const list=[];
-  const add=pid=>{ const mem=memberById(pid); if(mem&&!list.some(c=>c.key===pid))list.push({key:pid,name:mem.name,profileId:pid}); };
+  const add=pid=>{ const mem=lookup(pid); if(mem&&!list.some(c=>c.key===pid))list.push({key:pid,name:mem.name,profileId:pid}); };
   const addSlots=re=>{ for(const [k,a] of Object.entries(m.assignments))if(re.test(k)&&a.memberId)add(a.memberId); };
   if(/big ?3/i.test(cat)) addSlots(/^(tmod|ttm|ge)\|/);
   else if(/facilitator/i.test(cat)) addSlots(/^(timer|vc|gram|al|ah|jm)\|/);
@@ -1101,11 +1101,28 @@ const PRACTICE_NAMES=['John Carter','David Mills','Sarah Bennett','Emily Hayes',
   'Olivia Grant','James Whitfield','Sophia Reynolds','Daniel Foster','Grace Sullivan',
   'Christopher Anderson','Ruth Bell'];
 let pMembers=null,pPolls=[],pVotes=[],pTie={},pTrickle=null;
+/* the trainee's own ballot on the "what members see" card — not in the roster,
+   so the trickle of random votes never overwrites their choice */
+const P_ME='pme';
 function pRoster(){
   if(!pMembers)pMembers=PRACTICE_NAMES.map((n,i)=>({id:'pm'+i,name:n}));
   return pMembers;
 }
-function pMemberById(id){ return pRoster().find(m=>m.id===id)||null; }
+function pMemberById(id){
+  if(id===P_ME)return {id:P_ME,name:'You (practice)'};
+  return pRoster().find(m=>m.id===id)||null;
+}
+/* a made-up meeting with booked roles, so standard categories prefill their
+   candidates from bookings through the SAME prefillCandidates as the live app */
+function pMeeting(){
+  const r=pRoster(),a={},set=(k,i)=>a[k]={memberId:r[i].id};
+  set('tmod|0',0);set('ttm|0',1);set('ge|0',2);
+  set('spk|0',3);set('spk|1',4);set('spk|2',5);
+  set('eval|0',6);set('eval|1',7);set('eval|2',8);
+  set('tte|0',9);set('timer|0',10);set('gram|0',11);
+  set('al|0',0);set('ah|0',1);set('jm|0',2);set('vc|0',3);
+  return {assignments:a};
+}
 function pAppVotes(p){
   const t={}; for(const c of p.candidates)t[c.key]=0;
   const paper=new Set(p.paper_voters||[]);
@@ -1122,10 +1139,10 @@ function pStart(cat){
   if(pPolls.some(p=>p.category.trim().toLowerCase()===cat.toLowerCase())){
     toast('There is already a “'+cat+'” vote in this practice run'); return;
   }
-  /* three random practice members so there is something to count straight away */
-  const pool=[...pRoster()].sort(()=>Math.random()-0.5).slice(0,3);
+  /* candidates come from the practice meeting's bookings, same rules as the
+     live app; a custom category starts empty and the VC adds names, as live */
   pPolls.push({id:'pp'+uid(),category:cat,status:'open',winner_key:null,adjust:{},paper_voters:[],
-    candidates:pool.map(m=>({key:m.id,name:m.name}))});
+    candidates:prefillCandidates(pMeeting(),cat,pMemberById)});
   render();
 }
 function pAdd(pollId,v){
@@ -1173,6 +1190,26 @@ function pCastOne(pollId){
   return true;
 }
 function pVote(pollId){ if(pCastOne(pollId))render(); }
+/* the trainee's own vote, cast from the "what members see" card — mirrors
+   castMyVote: change until close, blocked while marked as a paper voter */
+function pMyVote(p){ const v=pVotes.find(v=>v.poll_id===p.id&&v.voter===P_ME); return v?v.key:null; }
+function pCastMine(pollId,key){
+  const p=pPolls.find(x=>x.id===pollId); if(!p||p.status!=='open')return;
+  if((p.paper_voters||[]).includes(P_ME)){toast('You voted on paper for this one — thanks!');return;}
+  const ex=pVotes.find(v=>v.poll_id===p.id&&v.voter===P_ME);
+  if(ex)ex.key=key; else pVotes.push({poll_id:p.id,voter:P_ME,key:key});
+  render(); toast('Vote recorded ✓');
+}
+function pBallotCard(p){
+  const mine=pMyVote(p), onPaper=(p.paper_voters||[]).includes(P_ME);
+  return `<div class="card" style="border-color:var(--accent)">
+    <h3 style="margin:0 0 6px">📱 What members see — 🗳 Vote: ${esc(p.category)}</h3>
+    <div class="row">
+      ${p.candidates.map(c=>`<button class="btn ${mine===c.key?'good':'ghost'} small" ${onPaper?'disabled':''} onclick="pCastMine('${p.id}','${c.key}')">${mine===c.key?'✓ ':''}${esc(c.name)}</button>`).join('')||'<span class="muted small">No candidates yet — add some on the count card below.</span>'}
+    </div>
+    <div class="small muted" style="margin-top:6px">${onPaper?'🧾 You voted on paper for this one — thanks!':(mine?'You can change your vote until voting closes.':'Tap to vote — secret ballot.')} This card is the ballot every member gets on their phone; your tap lands in the count below as one app vote.</div>
+  </div>`;
+}
 function pTrickleToggle(pollId){
   if(pTrickle){ clearInterval(pTrickle); pTrickle=null; render(); return; }
   pTrickle=setInterval(()=>{
@@ -1245,36 +1282,50 @@ function pPollCard(p){
       </select>
       <span class="muted" style="margin-left:10px">🧾 Voted on paper:</span>
       ${(p.paper_voters||[]).map(pid=>{const mm=pMemberById(pid);return `<span class="chip bad" title="${esc(mm?mm.name:'?')}">${esc(vcShortName(mm?mm.name:'?'))} <a style="cursor:pointer" onclick="pPaper('${p.id}','${pid}',false)">✕</a></span>`;}).join('')||'<span class="muted small">none</span>'}
-      <select style="width:auto" onchange="if(this.value){pPaper('${p.id}',this.value,true);}">
+      <select style="width:auto" onchange="if(this.value){pPaper('${p.id}',this.value,true);}" title="Marked members can't vote in the app for this poll (their app vote, if any, is set aside)">
         <option value="">＋ Mark member…</option>
-        ${pRoster().filter(m=>!(p.paper_voters||[]).includes(m.id)).map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}
+        ${[pMemberById(P_ME),...pRoster()].filter(m=>!(p.paper_voters||[]).includes(m.id)).map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}
       </select></div>`:''}
   </div>`;
 }
 function viewPractice(){
+  const open=new Set(pPolls.map(p=>p.category));
+  const starters=STANDARD_CATS.filter(c=>!open.has(c));
+  const nm=i=>pRoster()[i].name;
   return `<h2>🧪 Practice — Vote Counter</h2>
   <div class="banner practice-banner">
     <strong>Practice mode.</strong> Made-up names, made-up votes. Nothing here is saved, nothing
     is shared with the club, and no real vote is affected. Rehearse as often as you like —
     a refresh clears it.
   </div>
+  <p class="small muted">This screen works exactly like the real Vote Counter tab. Start a category
+  below and its candidates fill in from the practice meeting's bookings — the same way the live app
+  fills them from the night's bookings. The <b>📱 What members see</b> card is the ballot members get
+  on their phones; try it yourself. <b>Votes rolling in</b> trickles votes in the way phones do on the
+  night. Close the voting to get the winner — keep the totals level before closing and you'll
+  rehearse the tie-break too.</p>
   <div class="card sub">
-    <p class="small muted" style="margin:0 0 8px">Open a category, then either tap <b>Cast a vote</b> yourself or
-    let <b>Votes rolling in</b> trickle them in the way phones do on the night. Close the voting to see
-    the winner — force a tie by keeping the totals level and you'll get the tie-break too.</p>
-    <div class="row">
-      ${STANDARD_CATS.filter(c=>!pPolls.some(p=>p.category===c))
-        .map(c=>`<button class="btn small" onclick="pStart('${c}')">＋ ${c}</button>`).join('')
-        ||'<span class="muted small">All five categories are running — close or clear one to start it again.</span>'}
+    <b>Practice meeting bookings</b> <span class="muted small">— where the candidates come from</span>
+    <div class="small" style="margin-top:6px">
+      🎤 Speakers: ${nm(3)}, ${nm(4)}, ${nm(5)}<br>
+      🧐 Evaluators: ${nm(6)}, ${nm(7)}, ${nm(8)} · Table Topics Evaluator: ${nm(9)}<br>
+      🎩 Big 3: TMOD ${nm(0)} · Table Topics Master ${nm(1)} · General Evaluator ${nm(2)}<br>
+      🛠 Facilitators: Timer ${nm(10)} · Grammarian ${nm(11)} · Vote Counter ${nm(3)} · Active Listener ${nm(0)} · Ah-Counter ${nm(1)} · Joke Master ${nm(2)}
     </div>
-    <div class="row" style="margin-top:8px">
-      <input type="text" id="pCat" class="grow" placeholder="Custom category" style="max-width:260px">
-      <button class="btn small" onclick="pStart(document.getElementById('pCat').value)">＋ Start</button>
+  </div>
+  ${pPolls.filter(p=>p.status==='open').map(pBallotCard).join('')}
+  ${pPolls.map(pPollCard).join('')||'<div class="empty">No practice votes yet — start a category below.</div>'}
+  <div class="card sub"><div class="row">
+      ${starters.map(c=>`<button class="btn small" onclick="pStart('${c}')">＋ ${c} vote</button>`).join('')}
+      <input type="text" id="pCat" placeholder="Custom category" style="max-width:180px">
+      <button class="btn ghost small" onclick="pStart(document.getElementById('pCat').value)">＋ Start</button>
       <span class="grow"></span>
       <button class="btn ghost small" onclick="pReset()">↺ Clear practice run</button>
     </div>
-  </div>
-  ${pPolls.map(pPollCard).join('')||'<div class="empty">No practice votes yet — start a category above.</div>'}`;
+    <p class="small muted" style="margin:6px 0 0">⏰ On the real night the Vote Counter can open voting
+    only on the meeting day, from 5:00 am (officers can open it any time). A custom category starts
+    with no candidates — add them yourself, exactly as in the live app.</p>
+  </div>`;
 }
 
 /* ================= MEMBER: booking ================= */
@@ -4109,7 +4160,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   releaseOrphans,
   spkDelta,setMeetingTT,setMeetingOrder,setPresent,markAllPresent,creditSpeech,deferBooking,deferAllBookings,undoMove,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   vcPick,startPoll,addCandidate,removeCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
-  pStart,pAdd,pRemove,pAdjust,pPaper,pVote,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
+  pStart,pAdd,pRemove,pAdjust,pPaper,pVote,pCastMine,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
   bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
   sugAdd,sugStatus,sugNote,sugAnnounce,sugDel,copyInvite,copyNudge,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,

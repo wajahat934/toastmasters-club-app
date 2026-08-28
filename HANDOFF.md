@@ -9,7 +9,7 @@
 
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs. Bump it on every
    deploy or browsers serve the old `app.js`. There is no service worker; that bump is the only
-   cache control. Currently **v=70**.
+   cache control. Currently **v=71**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -106,5 +106,9 @@
 Urdu agenda (per-meeting toggle, RTL, name inventory under Members → اردو نام) · Independence Day
 green theme + one-click layout · movable/removable sessions, rows and the break; rows cross session
 boundaries · Joke Master one-minute line · speakers can go to 0 · practice tab · password reset ·
-move-forward with undo · attendance register · speech→project credit.
+move-forward with undo · attendance register · speech→project credit · Practice tab now mirrors
+the live Vote Counter (candidates prefill from a fake meeting's bookings through the real
+`prefillCandidates`, a "what members see" ballot card the trainee can vote on as `P_ME`, custom
+categories start empty, 5 am rule explained). PARITY RULE: any change to the real Vote Counter
+tab must be mirrored in the practice functions (`p*`) — it has drifted before.
 
