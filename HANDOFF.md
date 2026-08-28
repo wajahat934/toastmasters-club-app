@@ -24,6 +24,11 @@
    backslash. `\b` in a patch became a literal backspace byte inside three regexes once, and the
    file still parsed. After any scripted edit: `node --check app.js` **and** grep for control
    characters.
+5. **Never rewrite files through PowerShell text commands.** PS 5.1 `Get-Content` reads BOM-less
+   UTF-8 as ANSI, so a `-replace` + `Set-Content` round-trip double-encodes every non-ASCII byte.
+   The v=71 cache bump did exactly that to index.html and shipped "Â·" garbage to the whole club
+   (fixed in v=72 by restoring from git). Bump `?v=NN` with a proper editor/Edit tool, and after
+   any scripted rewrite: `grep -c 'Â' <file>` must be 0.
 
 ---
 
