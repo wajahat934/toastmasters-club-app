@@ -2348,12 +2348,12 @@ function openRolesMessage(mid){
   /* nudge the booked role owners for whatever is still unset */
   const tmod=firstName('tmod|0'), gram=firstName('gram|0');
   const asks=[];
-  if(!m.theme&&tmod)asks.push(`🎯 ${tmod}, please pick the meeting theme in the app.`);
-  if(!wod&&gram)asks.push(`📖 ${gram}, please choose the Word of the Day in the app.`);
+  if(!m.theme&&tmod)asks.push(`🎯 Our TMOD TM ${tmod} is requested to pick the theme of the meeting in the app.`);
+  if(!wod&&gram)asks.push(`📖 Our Grammarian TM ${gram} is requested to choose the Word of the Day in the app.`);
   const nudges=asks.length?`\n\n`+asks.join('\n'):'';
   if(!open.length)return head+`\n\nEvery role is booked — see you there! 🎉`+nudges;
   return head+`\n\nThese roles are still open:\n`+open.map(s=>`• ${s.label}`).join('\n')+nudges
-    +`\n\nFirst come, first served — book yours in the app 👇\n${APP_URL}`;
+    +`\n\nFirst come, first served — book yours in the app or via the link attached 👇\n${APP_URL}`;
 }
 function copyOpenRoles(mid){ copyText(openRolesMessage(mid),'Open-roles message copied — paste it in WhatsApp'); }
 
