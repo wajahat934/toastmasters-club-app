@@ -1371,7 +1371,20 @@ function viewBook(){
   }
   return html;
 }
+/* Fair-use rule: no speeches in back-to-back meetings. Enforced only on member
+   self-booking — admins can still place anyone from the schedule tab (contest
+   prep, schedule fixes). Returns the clashing meeting, or null if clear. */
+function consecutiveSpeech(mid,pid){
+  const ms=state.meetings.filter(x=>!x.cancelled).sort((a,b)=>a.date<b.date?-1:1);
+  const i=ms.findIndex(x=>x.id===mid); if(i<0)return null;
+  const speaks=m=>m&&Object.entries(m.assignments||{}).some(([k,a])=>k.startsWith('spk|')&&a&&a.memberId===pid);
+  return [ms[i-1],ms[i+1]].find(speaks)||null;
+}
 async function myBook(mid,key){
+  if(key.startsWith('spk|')){
+    const clash=consecutiveSpeech(mid,me.profileId);
+    if(clash){ toast(`You're speaking on ${fmtDate(clash.date)} — back-to-back speeches are off so more members get a turn. Pick a later meeting 🙏`); return; }
+  }
   try{
     await api.book(mid,key,me.profileId);
     /* stamped locally too, so give-way order is right straight away rather than
