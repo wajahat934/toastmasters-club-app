@@ -1641,6 +1641,7 @@ function meetingBookingCard(m){
       <div class="grow"><h3 style="margin:0">${fmtDate(m.date)}</h3>
         <span class="small muted">${filled}/${slots.length} roles filled${ttOn(m)?'':' · <b>Speakathon (no Table Topics)</b>'}</span></div>
       <input type="text" style="max-width:220px" placeholder="Meeting theme (optional)" value="${esc(m.theme)}" onchange="setTheme('${m.id}',this.value)">
+      <button class="btn ghost small" onclick="copyOpenRoles('${m.id}')" title="Copy a WhatsApp message listing this meeting's open roles">📋 Open roles</button>
       <button class="btn ghost small" onclick="cancelMeeting('${m.id}')">Cancel meeting</button>
     </div>
     <div class="row small" style="margin-top:8px;padding:6px 10px;background:var(--surface2);border:1px solid var(--line);border-radius:8px">
@@ -2335,6 +2336,16 @@ function copyNudge(name){
   const first=String(name).split(' ')[0];
   copyText(`Hi ${first}! 👋 We've moved role booking to the club app — your past roles and Pathways progress are already in there waiting for you.\n\n👉 ${APP_URL}\n\nTap *Create an account* (takes 30 seconds) and I'll approve you right away. Want me to do it with you before the next meeting?`,'Personal nudge copied');
 }
+function openRolesMessage(mid){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return '';
+  const open=slotListFor(m).filter(s=>{const a=(m.assignments||{})[s.key]; return !(a&&a.memberId);});
+  const head=`🎤 *RTC Meeting — ${fmtDate(m.date)}*`+(m.theme?`\nTheme: *${m.theme}*`:'')
+    +(ttOn(m)?'':'\n⭐ Speakathon meeting');
+  if(!open.length)return head+`\n\nEvery role is booked — see you there! 🎉`;
+  return head+`\n\nThese roles are still open:\n`+open.map(s=>`• ${s.label}`).join('\n')
+    +`\n\nFirst come, first served — book yours in the app 👇\n${APP_URL}`;
+}
+function copyOpenRoles(mid){ copyText(openRolesMessage(mid),'Open-roles message copied — paste it in WhatsApp'); }
 
 /* ================= ADMIN: members & accounts ================= */
 let memView='roster';
@@ -4162,7 +4173,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   vcPick,startPoll,addCandidate,removeCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
   pStart,pAdd,pRemove,pAdjust,pPaper,pVote,pCastMine,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
   bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
-  sugAdd,sugStatus,sugNote,sugAnnounce,sugDel,copyInvite,copyNudge,
+  sugAdd,sugStatus,sugNote,sugAnnounce,sugDel,copyInvite,copyNudge,copyOpenRoles,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meChangePw,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});
