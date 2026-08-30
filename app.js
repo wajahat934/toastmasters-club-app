@@ -1707,6 +1707,7 @@ function meetingBookingCard(m){
         <span class="small muted">${filled}/${slots.length} roles filled${ttOn(m)?'':' · <b>Speakathon (no Table Topics)</b>'}</span></div>
       <input type="text" style="max-width:220px" placeholder="Meeting theme (optional)" value="${esc(m.theme)}" onchange="setTheme('${m.id}',this.value)">
       <button class="btn ghost small" onclick="copyOpenRoles('${m.id}')" title="Copy a WhatsApp message listing this meeting's open roles">📋 Open roles</button>
+      <button class="btn ghost small" onclick="copyRolePlayers('${m.id}')" title="Copy a WhatsApp message listing who has which role, with speakers asked to send their evaluation forms">📣 Role list</button>
       <button class="btn ghost small" onclick="cancelMeeting('${m.id}')">Cancel meeting</button>
     </div>
     <div class="row small" style="margin-top:8px;padding:6px 10px;background:var(--surface2);border:1px solid var(--line);border-radius:8px">
@@ -2423,6 +2424,35 @@ function openRolesMessage(mid){
     +`\n\nFirst come, first served — book yours in the app or via the link attached 👇\n${APP_URL}`;
 }
 function copyOpenRoles(mid){ copyText(openRolesMessage(mid),'Open-roles message copied — paste it in WhatsApp'); }
+/* who-has-which-role roster + each speaker asked to send project details and
+   evaluation form to their evaluator (Speaker N pairs with Evaluator N) */
+function rolePlayersMessage(mid){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return '';
+  const asg=m.assignments||{};
+  const nameAt=k=>{const a=asg[k]; const p=a&&a.memberId&&memberById(a.memberId); return p?p.name:null;};
+  const wod=(m.wod||{}).word||'';
+  let out=`🎤 *RTC Meeting — ${fmtDate(m.date)}*`+(m.theme?`\nTheme: *${m.theme}*`:'')
+    +(wod?`\nWord of the Day: *${wod}*`:'')+(ttOn(m)?'':'\n⭐ Speakathon meeting');
+  const filled=[],stillOpen=[];
+  for(const s of slotListFor(m)){
+    const n=nameAt(s.key);
+    if(n){
+      const a=asg[s.key];
+      filled.push(`• ${s.label}: TM ${n}${(a.durationMin||0)>=LONG_MIN?` (⏱ ${a.durationMin} min)`:''}`);
+    }else if(!slotReserved(m,s.key))stillOpen.push(s.label);
+  }
+  if(filled.length)out+=`\n\n*Role players:*\n`+filled.join('\n');
+  const asks=[];
+  for(let i=0;i<speakersFor(m);i++){
+    const spk=nameAt('spk|'+i), ev=nameAt('eval|'+i);
+    if(spk)asks.push(ev?`• TM ${spk.split(' ')[0]} → please share your project details and evaluation form with TM ${ev}`
+                       :`• TM ${spk.split(' ')[0]} → your evaluator slot is still open; share your project details once it's booked`);
+  }
+  if(asks.length)out+=`\n\n*Speakers, before the meeting:*\n`+asks.join('\n');
+  if(stillOpen.length)out+=`\n\nStill open: ${stillOpen.join(', ')} — book in the app 👇\n${APP_URL}`;
+  return out;
+}
+function copyRolePlayers(mid){ copyText(rolePlayersMessage(mid),'Role list copied — paste it in WhatsApp'); }
 
 /* ================= ADMIN: members & accounts ================= */
 let memView='roster';
@@ -4250,7 +4280,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   vcPick,startPoll,addCandidate,removeCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
   pStart,pAdd,pRemove,pAdjust,pPaper,pVote,pCastMine,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
   bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
-  sugAdd,sugStatus,sugNote,sugAnnounce,sugDel,copyInvite,copyNudge,copyOpenRoles,
+  sugAdd,sugStatus,sugNote,sugAnnounce,sugDel,copyInvite,copyNudge,copyOpenRoles,copyRolePlayers,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meChangePw,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});
