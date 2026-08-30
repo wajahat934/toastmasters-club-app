@@ -2338,11 +2338,21 @@ function copyNudge(name){
 }
 function openRolesMessage(mid){
   const m=state.meetings.find(x=>x.id===mid); if(!m)return '';
-  const open=slotListFor(m).filter(s=>{const a=(m.assignments||{})[s.key]; return !(a&&a.memberId);});
+  const asg=m.assignments||{};
+  const open=slotListFor(m).filter(s=>{const a=asg[s.key]; return !(a&&a.memberId);});
+  const firstName=k=>{const a=asg[k]; const p=a&&a.memberId&&memberById(a.memberId); return p?p.name.split(' ')[0]:null;};
+  const wod=(m.wod||{}).word||'';
   const head=`🎤 *RTC Meeting — ${fmtDate(m.date)}*`+(m.theme?`\nTheme: *${m.theme}*`:'')
+    +(wod?`\nWord of the Day: *${wod}*`:'')
     +(ttOn(m)?'':'\n⭐ Speakathon meeting');
-  if(!open.length)return head+`\n\nEvery role is booked — see you there! 🎉`;
-  return head+`\n\nThese roles are still open:\n`+open.map(s=>`• ${s.label}`).join('\n')
+  /* nudge the booked role owners for whatever is still unset */
+  const tmod=firstName('tmod|0'), gram=firstName('gram|0');
+  const asks=[];
+  if(!m.theme&&tmod)asks.push(`🎯 ${tmod}, please pick the meeting theme in the app.`);
+  if(!wod&&gram)asks.push(`📖 ${gram}, please choose the Word of the Day in the app.`);
+  const nudges=asks.length?`\n\n`+asks.join('\n'):'';
+  if(!open.length)return head+`\n\nEvery role is booked — see you there! 🎉`+nudges;
+  return head+`\n\nThese roles are still open:\n`+open.map(s=>`• ${s.label}`).join('\n')+nudges
     +`\n\nFirst come, first served — book yours in the app 👇\n${APP_URL}`;
 }
 function copyOpenRoles(mid){ copyText(openRolesMessage(mid),'Open-roles message copied — paste it in WhatsApp'); }
