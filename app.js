@@ -215,8 +215,12 @@ const SupabaseApi={
   async saveSettings(data){ const {error}=await sb.from('settings').upsert({id:1,data}); if(error)throw error; },
   async insertMeeting(m){ const {data,error}=await sb.from('meetings').insert(m).select().single(); if(error)throw error; return data; },
   async updateMeeting(id,fields){ const {error}=await sb.from('meetings').update(fields).eq('id',id); if(error)throw error; },
-  async book(meeting_id,slot_key,profile_id){
-    const {error}=await sb.from('assignments').insert({meeting_id,slot_key,profile_id});
+  async book(meeting_id,slot_key,profile_id,duration_min){
+    const row={meeting_id,slot_key,profile_id};
+    /* only sent when the long-speech flow is active, which itself requires the
+       duration_min column to exist — so pre-migration inserts stay untouched */
+    if(duration_min!=null)row.duration_min=duration_min;
+    const {error}=await sb.from('assignments').insert(row);
     if(error)throw error;
   },
   async adminAssign(meeting_id,slot_key,profile_id,booked_at){
@@ -348,9 +352,9 @@ const DemoApi=(function(){
     async saveSettings(data){ settingsRows=[{id:1,data}]; },
     async insertMeeting(m){ const row={id:uid(),theme:'',cancelled:false,reviewed:false,...m}; meetings.push(row); return row; },
     async updateMeeting(id,f){ Object.assign(meetings.find(m=>m.id===id)||{},f); },
-    async book(mid,key,pid){
+    async book(mid,key,pid,dur){
       if(assignments.some(a=>a.meeting_id===mid&&a.slot_key===key))throw {message:'duplicate key value'};
-      assignments.push({meeting_id:mid,slot_key:key,profile_id:pid,status:'booked',actual_role:null});
+      assignments.push({meeting_id:mid,slot_key:key,profile_id:pid,status:'booked',actual_role:null,duration_min:dur||null});
     },
     async adminAssign(mid,key,pid,booked_at){
       const at=booked_at||new Date().toISOString();
@@ -399,7 +403,7 @@ function rebuild(){
   for(const g of S.goals)(goalsBy[g.profile_id]=goalsBy[g.profile_id]||[]).push(g);
   const asgBy={};
   for(const a of S.assignments)
-    (asgBy[a.meeting_id]=asgBy[a.meeting_id]||{})[a.slot_key]={memberId:a.profile_id,status:a.status==='booked'?undefined:a.status,actualRole:a.actual_role||undefined};
+    (asgBy[a.meeting_id]=asgBy[a.meeting_id]||{})[a.slot_key]={memberId:a.profile_id,status:a.status==='booked'?undefined:a.status,actualRole:a.actual_role||undefined,durationMin:a.duration_min||undefined};
   state={
     settings:S.settings,
     members:S.profiles.map(p=>({id:p.id,name:p.name,external:!!p.home_club,homeClub:p.home_club||'',path:p.path||'',baseLevel:p.base_level||0,projectsDone:p.projects_done||0,
@@ -1357,13 +1361,16 @@ function viewBook(){
       <div class="bookgrid">
       ${slots.map(s=>{
         const a=(m.assignments||{})[s.key];
+        const durChip=(a&&(a.durationMin||0)>=LONG_MIN)?` <span class="chip gold" title="long-format speech">⏱ ${a.durationMin} min</span>`:'';
         if(a&&a.memberId===me.profileId)
-          return `<div class="bookslot mine"><div><div class="rname">${esc(s.label)}</div><div class="holder">You</div></div>
+          return `<div class="bookslot mine"><div><div class="rname">${esc(s.label)}</div><div class="holder">You${durChip}</div></div>
             <button class="btn ghost small" onclick="myUnbook('${m.id}','${s.key}')">Release</button></div>`;
         if(a&&a.memberId){
           const holder=memberById(a.memberId);
-          return `<div class="bookslot"><div><div class="rname">${esc(s.label)}</div><div class="holder">${esc(holder?holder.name:'…')}</div></div></div>`;
+          return `<div class="bookslot"><div><div class="rname">${esc(s.label)}</div><div class="holder">${esc(holder?holder.name:'…')}${durChip}</div></div></div>`;
         }
+        if(slotReserved(m,s.key))
+          return `<div class="bookslot"><div><div class="rname">${esc(s.label)}</div><div class="holder muted">⏱ reserved — long-format speech this week</div></div></div>`;
         return `<div class="bookslot open"><div><div class="rname">${esc(s.label)}</div><div class="holder muted">open</div></div>
           <button class="btn small" onclick="myBook('${m.id}','${s.key}')">Book</button></div>`;
       }).join('')}
@@ -1380,17 +1387,62 @@ function consecutiveSpeech(mid,pid){
   const speaks=m=>m&&Object.entries(m.assignments||{}).some(([k,a])=>k.startsWith('spk|')&&a&&a.memberId===pid);
   return [ms[i-1],ms[i+1]].find(speaks)||null;
 }
+/* ---- long-format speeches (13+ min advanced projects) take a double slot ----
+   Active only once `alter table assignments add column duration_min int;` has
+   been run (auto-detected off the loaded rows; demo mode always on). A meeting
+   hosting one long speech keeps its last speaker+evaluator slot free so the
+   agenda still fits 2 hours. Admin assignment ignores all of this. */
+const LONG_MIN=13;
+function durTracked(){ return DEMO||('duration_min' in ((S.assignments&&S.assignments[0])||{})); }
+function bookedCount(m,pre){ return Object.entries(m.assignments||{}).filter(([k,a])=>k.startsWith(pre)&&a&&a.memberId).length; }
+function longSpeechIn(m){
+  for(const [k,a] of Object.entries(m.assignments||{}))
+    if(k.startsWith('spk|')&&a&&a.memberId&&(a.durationMin||0)>=LONG_MIN)return a;
+  return null;
+}
+function openSpkKey(m){
+  const s=slotListFor(m).find(s=>s.key.startsWith('spk|')&&!((m.assignments||{})[s.key]||{}).memberId);
+  return s?s.key:null;
+}
+function longRoomIn(m){ return !longSpeechIn(m)&&bookedCount(m,'spk|')<=speakersFor(m)-2&&!!openSpkKey(m); }
+/* one open slot stays blocked for members once the long speech's double time is claimed */
+function slotReserved(m,slotKey){
+  if(!longSpeechIn(m))return false;
+  const pre=slotKey.startsWith('spk|')?'spk|':slotKey.startsWith('eval|')?'eval|':null;
+  return !!pre&&bookedCount(m,pre)>=speakersFor(m)-1;
+}
 async function myBook(mid,key){
+  let dur=null;
   if(key.startsWith('spk|')){
     const clash=consecutiveSpeech(mid,me.profileId);
     if(clash){ toast(`You're speaking on ${fmtDate(clash.date)} — back-to-back speeches are off so more members get a turn. Pick a later meeting 🙏`); return; }
+    const mem=memberById(me.profileId);
+    if(durTracked()&&mem&&currentLevel(mem)>=3
+       &&confirm('Is this a long-format project speech — longer than the standard 5–7 minutes?')){
+      const v=parseInt(prompt('Planned length in minutes (e.g. 15):','15'),10);
+      if(v&&v>=8&&v<=40)dur=v;
+      else toast('Length not recognised — booking as a standard speech');
+    }
+    const m=state.meetings.find(x=>x.id===mid);
+    if(m&&(dur||0)>=LONG_MIN&&!longRoomIn(m)){
+      /* the visible window plus one: a long speech may jump to the 4th meeting
+         even though members only see 3 ahead */
+      const alt=upcomingMeetings(MEMBER_HORIZON+1)
+        .find(x=>x.id!==mid&&longRoomIn(x)&&!consecutiveSpeech(x.id,me.profileId));
+      if(alt&&confirm(`A ${dur}-minute speech needs a double slot and ${fmtDate(m.date)} has no room for one. Book it for ${fmtDate(alt.date)} instead?`)){
+        mid=alt.id; key=openSpkKey(alt);
+      }else{ toast('No room for a long-format speech in the coming meetings — ask an officer to fit you in.'); return; }
+    }else if(m&&(dur||0)<LONG_MIN&&slotReserved(m,key)){
+      toast(`${fmtDate(m.date)} hosts a long-format speech, so one slot stays free for the extra time — please pick another meeting.`);
+      return;
+    }
   }
   try{
-    await api.book(mid,key,me.profileId);
+    await api.book(mid,key,me.profileId,dur);
     /* stamped locally too, so give-way order is right straight away rather than
        only after the next full load (the DB default is authoritative) */
-    S.assignments.push({meeting_id:mid,slot_key:key,profile_id:me.profileId,status:'booked',actual_role:null,booked_at:new Date().toISOString()});
-    rebuild();render();toast('Booked ✓');
+    S.assignments.push({meeting_id:mid,slot_key:key,profile_id:me.profileId,status:'booked',actual_role:null,booked_at:new Date().toISOString(),duration_min:dur});
+    rebuild();render();toast((dur||0)>=LONG_MIN?`Booked ✓ — ${dur} min long-format`:'Booked ✓');
   }catch(e){
     if(String(e.message||'').includes('duplicate')){ toast('Someone just took that slot'); await reload(); }
     else toast('Could not book: '+(e.message||e));
@@ -1689,7 +1741,7 @@ function meetingBookingCard(m){
         const at=canDefer?bookedAt(m.id,s.key):null;
         const when=at?`booked ${new Date(at).toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}`
                      :'booking time not recorded yet';
-        return `<div class="slot"><label>${esc(s.label)}${isNext?` <span class="pill other" title="Booked last of the ${esc(roleNameById(rid))}s — gives way first">gives way</span>`:''}${canDefer?`
+        return `<div class="slot"><label>${esc(s.label)}${(a&&(a.durationMin||0)>=LONG_MIN)?` <span class="pill other" title="long-format speech — one speaker/evaluator slot fewer this meeting">⏱ ${a.durationMin}m</span>`:''}${isNext?` <span class="pill other" title="Booked last of the ${esc(roleNameById(rid))}s — gives way first">gives way</span>`:''}${canDefer?`
             <button class="btn ghost small" style="float:right;padding:0 6px"
               title="Move to a later meeting — ${esc(when)}" onclick="deferBooking('${m.id}','${s.key}')">⏩</button>`:''}</label>
           <select ${canDefer?`title="${esc(when)}"`:''} onchange="assign('${m.id}','${s.key}',this)">${memberOptions(a&&a.memberId)}</select></div>`;
@@ -2352,12 +2404,14 @@ function copyNudge(name){
 function openRolesMessage(mid){
   const m=state.meetings.find(x=>x.id===mid); if(!m)return '';
   const asg=m.assignments||{};
-  const open=slotListFor(m).filter(s=>{const a=asg[s.key]; return !(a&&a.memberId);});
+  /* reserved slots (double time for a long-format speech) are not offered */
+  const open=slotListFor(m).filter(s=>{const a=asg[s.key]; return !(a&&a.memberId)&&!slotReserved(m,s.key);});
   const firstName=k=>{const a=asg[k]; const p=a&&a.memberId&&memberById(a.memberId); return p?p.name.split(' ')[0]:null;};
   const wod=(m.wod||{}).word||'';
   const head=`🎤 *RTC Meeting — ${fmtDate(m.date)}*`+(m.theme?`\nTheme: *${m.theme}*`:'')
     +(wod?`\nWord of the Day: *${wod}*`:'')
-    +(ttOn(m)?'':'\n⭐ Speakathon meeting');
+    +(ttOn(m)?'':'\n⭐ Speakathon meeting')
+    +(longSpeechIn(m)?'\n⏱ Long-format speech this week — one speech slot fewer':'');
   /* nudge the booked role owners for whatever is still unset */
   const tmod=firstName('tmod|0'), gram=firstName('gram|0');
   const asks=[];
