@@ -272,16 +272,37 @@ const DemoApi=(function(){
   let auth=null;
   const P=(n,extra)=>({id:uid(),auth_id:null,email:'',name:n,home_club:null,role:'member',approved:true,active:true,path:'',birthday:null,base_level:0,projects_done:0,...extra});
   const mdOf=n=>{const d=new Date();d.setDate(d.getDate()+n);return dstr(d).slice(5);};
+  /* the roster mirrors the real club (names + rough Pathways standing as of
+     Aug 2026) so training videos look like the app members actually see; the
+     two "(you)" identities are the sandbox logins */
   const profiles=[
     P('Demo Admin (you)',{auth_id:'demo-admin',role:'admin',email:'admin@demo',path:'Presentation Mastery',base_level:2,projects_done:1}),
     P('Demo Member (you)',{auth_id:'demo-member',email:'member@demo',path:'Dynamic Leadership',base_level:0,projects_done:3,birthday:mdOf(0)}),
-    P('Ayesha',{paths:[{name:'Engaging Humor',baseLevel:1,projectsDone:2,done:false},
-                       {name:'Presentation Mastery',baseLevel:5,projectsDone:0,done:true}]}),
-    P('Bilal',{path:'Innovative Planning',base_level:1,birthday:mdOf(2)}),
-    P('Danish',{path:'Presentation Mastery',base_level:3,projects_done:1}),
-    P('Fatima',{path:'Team Collaboration'}),
-    P('Hassan',{path:'Motivational Strategies',base_level:2}),
-    P('Guest from City Club',{home_club:'City Speakers'}),
+    P('Adeel Ahmed',{path:'Dynamic Leadership',base_level:0,projects_done:1}),
+    P('Almas Hosain Ali',{path:'Dynamic Leadership',base_level:1,projects_done:2}),
+    P('Amir Mahmood',{path:'Presentation Mastery',base_level:1}),
+    P('Ejaz ul Haq',{paths:[{name:'Presentation Mastery',baseLevel:5,projectsDone:0,done:true},
+                            {name:'Dynamic Leadership',baseLevel:0,projectsDone:3,done:false}]}),
+    P('Erum Burhan'),
+    P('Haadiyah Haque'),
+    P('Laiba Abaidullah',{path:'Presentation Mastery',base_level:0,projects_done:3}),
+    P('Madiha Imtiaz',{path:'Presentation Mastery',base_level:0,projects_done:2}),
+    P('Muhammad Ahsan Waheed',{path:'Presentation Mastery',base_level:0,projects_done:5}),
+    P('Muhammad Bilal Khan',{path:'Dynamic Leadership',base_level:0,projects_done:1}),
+    P('Muhammad Hammad',{path:'Presentation Mastery',base_level:3,projects_done:2}),
+    P('Muhammad Noor ud din',{path:'Innovative Planning',base_level:2}),
+    P('Osama Majeed',{path:'Presentation Mastery',base_level:0,projects_done:1}),
+    P('Salman',{path:'Presentation Mastery',base_level:2,projects_done:1}),
+    P('Shahnawaz Ali',{path:'Dynamic Leadership',base_level:1,projects_done:5}),
+    P('Shaique Ahmed Rizwan',{path:'Presentation Mastery',base_level:2,projects_done:1}),
+    P('Sundas Sarfraz',{path:'Presentation Mastery',base_level:4,projects_done:1}),
+    P('Syed Zameer',{path:'Presentation Mastery',base_level:3}),
+    P('Taifoor Ahmad',{path:'Dynamic Leadership',base_level:1,projects_done:2}),
+    P('Tamseela',{path:'Presentation Mastery',base_level:0,projects_done:2}),
+    P('Umer Rasheed',{path:'Presentation Mastery',base_level:0,projects_done:2}),
+    P('Fazal Akbar',{home_club:'ICMAP'}),
+    P('Mesum Haider',{home_club:'Contour'}),
+    P('Muhammad Bilal Rana',{home_club:'ITC'}),
     P('Pending Signup',{auth_id:'demo-x',email:'new@demo',approved:false})
   ];
   const day=n=>{const d=new Date();d.setDate(d.getDate()+n);return dstr(d);};
@@ -297,17 +318,17 @@ const DemoApi=(function(){
     {meeting_id:'mtPast',slot_key:'timer|0',profile_id:profiles[3].id,status:'absent',actual_role:null},
     {meeting_id:'mt1',slot_key:'tmod|0',profile_id:profiles[4].id,status:'booked',actual_role:null},
     {meeting_id:'mt1',slot_key:'spk|0',profile_id:profiles[2].id,status:'booked',actual_role:null},
-    {meeting_id:'mt1',slot_key:'ge|0',profile_id:profiles[6].id,status:'booked',actual_role:null}
+    {meeting_id:'mt1',slot_key:'ge|0',profile_id:profiles[5].id,status:'booked',actual_role:null}
   ];
-  const awards=[{id:uid(),profile_id:profiles[2].id,level:'1',path:'Engaging Humor',date:day(-20)}];
+  const awards=[{id:uid(),profile_id:profiles[4].id,level:'1',path:'Presentation Mastery',date:day(-22)}];
   const goals=[{id:uid(),profile_id:profiles[1].id,text:'Give my Ice Breaker before September',done:false}];
   const polls=[{id:'pollPast',meeting_id:'mtPast',category:'Best Speaker',status:'closed',
-    candidates:[{key:profiles[1].id,name:profiles[1].name,profileId:profiles[1].id},{key:profiles[2].id,name:'Ayesha',profileId:profiles[2].id}],
+    candidates:[{key:profiles[1].id,name:profiles[1].name,profileId:profiles[1].id},{key:profiles[0].id,name:profiles[0].name,profileId:profiles[0].id}],
     adjust:{},winner_key:profiles[1].id}];
   const votes=[];
-  const announcements=[{id:'annDemo',text:'Our own TM Danish has been appointed Area Director — congratulations! 🎊',created_at:new Date().toISOString()}];
+  const announcements=[{id:'annDemo',text:'🧪 Welcome to the training sandbox — everything here is sample data. Play any role freely!',created_at:new Date().toISOString()}];
   const birthdayChanges=[];
-  const suggestions=[{id:'sug1',profile_id:profiles[2].id,text:'Can we start meetings 10 minutes earlier?',hide_name:false,status:'new',admin_note:null,created_at:new Date().toISOString()}];
+  const suggestions=[{id:'sug1',profile_id:profiles[1].id,text:'Can we start meetings 10 minutes earlier?',hide_name:false,status:'new',admin_note:null,created_at:new Date().toISOString()}];
   const dcpRows=[],agendaRows=[];
   let settingsRows=[{id:1,data:defaultSettings()}];
   const T={profiles,meetings,assignments,awards,goals};
@@ -837,7 +858,11 @@ function congratsHtml(){
 const STANDARD_CATS=['Best Table Topics','Best Speaker','Best Evaluator','Best Facilitator','Best of Big 3'];
 let vcSelMeeting=null, tieState={};
 /* VC may open voting only on the meeting day, from 5:00 AM (admins any time) */
+/* sandbox only: lets the recorder show the meeting-day gate, then step past it */
+let demoVoteBypass=false;
+function demoOpenVoting(){ demoVoteBypass=true; toast('🧪 Sandbox: voting gate bypassed'); render(); }
 function canOpenVoting(m){
+  if(DEMO&&demoVoteBypass)return true;
   if(actingAdmin())return true;
   return m.date===todayStr()&&new Date().getHours()>=5;
 }
@@ -887,7 +912,9 @@ function viewVoting(){
       <button class="btn ghost small" onclick="startPoll('${m.id}',document.getElementById('customCat').value.trim())">＋ Start</button>
     </div>${isAdmin&&!viewAsMember&&m.date!==todayStr()?'<p class="small muted" style="margin:6px 0 0">Admins can open voting any time; the Vote Counter can only open it on the meeting day, from 5:00 am.</p>':''}</div>`;
   }else{
-    html+=`<div class="card sub"><span class="muted">🕔 Voting can be opened on the meeting day (${fmtDate(m.date)}), starting 5:00 am. Come back then!</span></div>`;
+    html+=`<div class="card sub"><span class="muted">🕔 Voting can be opened on the meeting day (${fmtDate(m.date)}), starting 5:00 am. Come back then!</span>${DEMO?`
+      <div class="row" style="margin-top:8px"><button class="btn small" onclick="demoOpenVoting()">🧪 Sandbox: open voting anyway</button>
+      <span class="small muted">— this button only exists in the sandbox; the gate above is what members really see.</span></div>`:''}</div>`;
   }
   return html;
 }
@@ -4289,7 +4316,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   vcPick,startPoll,addCandidate,removeCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
   pStart,pAdd,pRemove,pAdjust,pPaper,pVote,pCastMine,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
   bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
-  sugAdd,sugStatus,sugNote,sugAnnounce,sugDel,copyInvite,copyNudge,copyOpenRoles,copyRolePlayers,
+  sugAdd,sugStatus,sugNote,sugAnnounce,sugDel,copyInvite,copyNudge,copyOpenRoles,copyRolePlayers,demoOpenVoting,
   toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meChangePw,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});
