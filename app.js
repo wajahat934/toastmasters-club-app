@@ -846,7 +846,14 @@ function prefillCandidates(m,cat,lookup=memberById){
   const add=pid=>{ const mem=lookup(pid); if(mem&&!list.some(c=>c.key===pid))list.push({key:pid,name:mem.name,profileId:pid}); };
   const addSlots=re=>{ for(const [k,a] of Object.entries(m.assignments))if(re.test(k)&&a.memberId)add(a.memberId); };
   if(/big ?3/i.test(cat)) addSlots(/^(tmod|ttm|ge)\|/);
-  else if(/facilitator/i.test(cat)) addSlots(/^(timer|vc|gram|al|ah|jm)\|/);
+  else if(/facilitator/i.test(cat)){
+    addSlots(/^(timer|vc|gram|al|ah|jm)\|/);
+    /* roles added later in Settings (e.g. Camera Master) have uid slot keys —
+       any booked role outside the core set counts as a facilitator candidate */
+    const CORE=['saa','po','tmod','ttm','ge','tte','spk','eval','timer','vc','gram','al','ah','jm'];
+    for(const [k,a] of Object.entries(m.assignments))
+      if(a&&a.memberId&&!CORE.includes(k.split('|')[0]))add(a.memberId);
+  }
   else{
     if(/speaker/i.test(cat)&&!/table/i.test(cat)) addSlots(/^spk\|/);
     if(/evaluator/i.test(cat)) addSlots(/^(eval|tte)\|/);
@@ -3032,7 +3039,7 @@ const AG_UR={
   h_support:'معاون کردار', h_planner:'آئندہ اجلاس کی منصوبہ بندی', h_mission:'کلب کا مشن',
   h_meeting:'اجلاس', h_inperson:'بالمشافہ', h_speakathon:'تقریری میلہ',
   sup_timer:'وقت نگار', sup_vc:'ووٹ شمار کنندہ', sup_gram:'ماہرِ قواعد',
-  sup_al:'متوجہ سامع', sup_ah:'’آہ‘ شمار کنندہ', sup_jm:'لطیفہ گو',
+  sup_al:'متوجہ سامع', sup_ah:'’آہ‘ شمار کنندہ', sup_jm:'لطیفہ گو', sup_cam:'کیمرہ ماسٹر',
   fp_tmod:'میزبانِ اجلاس', fp_ttm:'فی البدیہہ تقاریر کے میزبان',
   fp_spk:'مقررین', fp_ge:'مجموعی تجزیہ کار',
   h_club:'راولپنڈی ٹوسٹ ماسٹرز کلب',
@@ -3141,7 +3148,7 @@ const AG_EN={};
     h_meaning:'Meaning',h_eg:'e.g.',h_support:'Supporting Roles',h_planner:'Forward Planner',
     h_mission:'Club Mission',h_meeting:'Meeting',h_inperson:'In-Person',h_speakathon:'SPEAKATHON',
     sup_timer:'Timer',sup_vc:'Vote Counter',sup_gram:'Grammarian',sup_al:'Active Listener',
-    sup_ah:'Ah Counter',sup_jm:'Joke Master',
+    sup_ah:'Ah Counter',sup_jm:'Joke Master',sup_cam:'Camera Master',
     fp_tmod:'TMOD',fp_ttm:'TT Master',fp_spk:'Speakers',fp_ge:'General Evaluator',
     h_club:'Rawalpindi Toastmasters Club',
     wod_blank:'“____”', wod_def:'<b>Meaning:</b> ____ &nbsp;·&nbsp; <i>e.g. “____.”</i>',
@@ -3206,7 +3213,8 @@ const AgendaApp=(function(){
       ge:one(m,/general evaluator/i),tte:one(m,/table topics evaluator/i),
       spk:speech.spk,eval:speech.ev,
       timer:one(m,/^timer$/i),vc:one(m,/vote counter/i),gram:one(m,/grammarian/i),
-      al:one(m,/active listener/i),ah:one(m,/ah[- ]?counter/i),jm:one(m,/joke/i)
+      al:one(m,/active listener/i),ah:one(m,/ah[- ]?counter/i),jm:one(m,/joke/i),
+      cam:one(m,/camera/i)
     };
   }
   function nextMeetingAfter(dateS){
@@ -3305,6 +3313,7 @@ const AgendaApp=(function(){
             <div><b data-k="sup_al">Active Listener</b><br><span contenteditable="true" data-sup="al">TM ____________</span></div>
             <div><b data-k="sup_ah">Ah Counter</b><br><span contenteditable="true" data-sup="ah">TM ____________</span></div>
             <div><b data-k="sup_jm">Joke Master</b><br><span contenteditable="true" data-sup="jm">TM ____________</span></div>
+            <div><b data-k="sup_cam">Camera Master</b><br><span contenteditable="true" data-sup="cam">TM ____________</span></div>
           </div>
         </div>
         <div class="panel">
