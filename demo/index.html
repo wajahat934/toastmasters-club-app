@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RTC App — Training Sandbox</title>
+
+<meta name="theme-color" content="#004165">
+<link rel="icon" type="image/png" href="../icon-192.png">
+<link rel="apple-touch-icon" href="../icon-192.png">
+<link rel="stylesheet" href="../styles.css?v=79">
+</head>
+<body>
+
+<!-- auth screen -->
+<div id="authWrap" style="display:none">
+  <div class="card">
+    <h1 id="authClub">Rawalpindi Toastmasters Club</h1>
+    <div class="sub">Roles · Pathways · DCP</div>
+    <div id="demoBanner" class="banner demo" style="display:none">
+      <b>Training sandbox</b> — sample data only; nothing here touches the real club. Enter and book yourself any role:
+      <div class="row" style="margin-top:8px">
+        <button class="btn small" id="demoAdmin">Enter as admin</button>
+        <button class="btn ghost small" id="demoMember">Enter as member</button>
+      </div>
+    </div>
+    <form id="authForm">
+      <div id="nameRow" style="display:none">
+        <label for="authName">Full name (as it should appear on agendas)</label>
+        <input type="text" id="authName" autocomplete="name">
+        <label>Birthday (optional — the club will wish you 🎂)</label>
+        <div style="display:flex;gap:8px">
+          <select id="authBm" style="flex:1"><option value="">— month —</option></select>
+          <select id="authBd" style="flex:1"><option value="">— day —</option></select>
+        </div>
+      </div>
+      <label for="authEmail">Email</label>
+      <input type="email" id="authEmail" autocomplete="email" required>
+      <label for="authPass">Password</label>
+      <div class="pwwrap">
+        <input type="password" id="authPass" autocomplete="current-password" required minlength="6">
+        <button type="button" class="pweye" id="authPassEye" aria-label="Show password" aria-pressed="false" title="Show password">👁</button>
+      </div>
+      <div class="err" id="authErr"></div>
+      <button class="btn" id="authGo" style="width:100%;margin-top:6px">Sign in</button>
+    </form>
+    <div class="authswitch" id="authSwitch">
+      New here? <a id="authToggle">Create an account</a>
+    </div>
+    <div class="authswitch" id="forgotRow">
+      <a id="authForgot">Forgot your password?</a>
+    </div>
+    <div class="authswitch"><a id="authCheck">Check connection</a></div>
+  </div>
+</div>
+
+<!-- set a new password (arrived from the emailed reset link) -->
+<div id="resetWrap" style="display:none">
+  <div class="card">
+    <h1>Choose a new password</h1>
+    <div class="sub">Rawalpindi Toastmasters Club</div>
+    <form id="resetForm">
+      <label for="resetPass">New password</label>
+      <div class="pwwrap">
+        <input type="password" id="resetPass" autocomplete="new-password" required minlength="6">
+        <button type="button" class="pweye" id="resetPassEye" aria-label="Show password" aria-pressed="false" title="Show password">👁</button>
+      </div>
+      <p class="small muted" style="margin:6px 0 0">At least 6 characters. Tap the eye to check what you typed.</p>
+      <div class="err" id="resetErr"></div>
+      <button class="btn" id="resetGo" style="width:100%;margin-top:6px">Save new password</button>
+    </form>
+    <div class="authswitch"><a id="resetCancel">Cancel</a></div>
+  </div>
+</div>
+
+<!-- pending approval screen -->
+<div id="pendingWrap" style="display:none">
+  <div id="authWrapInner" class="card" style="max-width:420px;margin:60px auto;text-align:center;padding:24px">
+    <h1 style="font-family:var(--serif);font-size:1.3rem">Almost there</h1>
+    <p class="muted">Your account is waiting for approval by a club officer.
+       You'll be able to book roles once an admin approves you.</p>
+    <button class="btn ghost" id="pendingRefresh">Check again</button>
+    <button class="btn ghost" id="pendingOut">Sign out</button>
+  </div>
+</div>
+
+<!-- main app -->
+<div id="appWrap" style="display:none">
+  <header class="app"><div class="wrap">
+    <h1 id="hClub">Toastmasters Club</h1>
+    <div class="sub">Roles · Pathways · Distinguished Club Program</div>
+    <div class="userline"><span id="uName"></span><button id="viewAs" style="display:none"></button><button id="signOut">Sign out</button></div>
+    <nav class="tabs" id="tabs"></nav>
+  </div></header>
+  <main class="wrap" id="main"></main>
+</div>
+
+<div id="toast" role="status"></div>
+
+<!-- offer to add the app to the home screen. Chrome decides whether the site
+     qualifies and tells the page; iPhones have no such event and get the
+     manual steps instead. Hidden until one of those happens. -->
+<div id="installBar" style="display:none">
+  <span id="installMsg"></span>
+  <span class="grow"></span>
+  <button class="btn small" id="installGo">Install</button>
+  <button class="btn ghost small" id="installNo">Not now</button>
+</div>
+
+<script src="config.js"></script>
+<script src="../assets.js?v=79"></script>
+<script type="module" src="../app.js?v=79"></script>
+</body>
+</html>
