@@ -3082,7 +3082,7 @@ const AG_UR={
    recognised and brought up to date on the next language switch — otherwise it
    matches neither language's current default and sticks. */
 const AG_UR_RETIRED={
-  p_blank:'ٹی ایم ____________',
+  p_blank:'طے ہونا باقی',
   s_tt:'موضوعاتی تقاریر کی نشست',
   r_ttm:'موضوعاتی تقاریر کے میزبان',
   r_tt:'موضوعاتی تقاریر <span class="role-note">(فی مقرر ۱–۲ منٹ)</span>',
@@ -3112,7 +3112,7 @@ function agKeyOf(text){
   return AG_BY_TEXT[n]||null;
 }
 function agDefaultBlocks(){
-  const P=agT('p_blank','TM ____________');
+  const P=agT('p_blank','TBD');
   return [
     {type:'session',id:'opening',k:'s_opening',title:agT('s_opening','Opening Session'),rows:[
       {k:'r_call',act:agT('r_call','Call to Order by SAA'),fill:'saa',who:P,dur:2},
@@ -3158,7 +3158,7 @@ const AG_EN={};
     for(const r of (b.rows||[]))if(r.k&&AG_EN[r.k]==null)AG_EN[r.k]=r.act;
   }
   Object.assign(AG_EN,{
-    p_blank:'TM ____________',p_guests:'Non-Role Players &amp; Guests',
+    p_blank:'TBD',p_guests:'Non-Role Players &amp; Guests',
     p_timerVc:'Timer &amp; Vote Counter',p_rolePlayers:'Role Players',p_everyone:'Everyone',
     p_tmod:'TMOD',p_guestSpk:'Guest Speaker — ____________',p_guestTmod:'Guest Speaker &amp; TMOD',
     s_edu:'Educational Session',r_eduIntro:'Introduction of Guest Speaker',
@@ -3334,13 +3334,13 @@ const AgendaApp=(function(){
         <div class="panel bluehead" style="flex:1.15">
           <h3 data-k="h_support">Supporting Roles</h3>
           <div class="pbody roles2">
-            <div><b data-k="sup_timer">Timer</b><br><span contenteditable="true" data-sup="timer">TM ____________</span></div>
-            <div><b data-k="sup_vc">Vote Counter</b><br><span contenteditable="true" data-sup="vc">TM ____________</span></div>
-            <div><b data-k="sup_gram">Grammarian</b><br><span contenteditable="true" data-sup="gram">TM ____________</span></div>
-            <div><b data-k="sup_al">Active Listener</b><br><span contenteditable="true" data-sup="al">TM ____________</span></div>
-            <div><b data-k="sup_ah">Ah Counter</b><br><span contenteditable="true" data-sup="ah">TM ____________</span></div>
-            <div><b data-k="sup_jm">Joke Master</b><br><span contenteditable="true" data-sup="jm">TM ____________</span></div>
-            <div><b data-k="sup_cam">Camera Master</b><br><span contenteditable="true" data-sup="cam">TM ____________</span></div>
+            <div><b data-k="sup_timer">Timer</b><br><span contenteditable="true" data-sup="timer">TBD</span></div>
+            <div><b data-k="sup_vc">Vote Counter</b><br><span contenteditable="true" data-sup="vc">TBD</span></div>
+            <div><b data-k="sup_gram">Grammarian</b><br><span contenteditable="true" data-sup="gram">TBD</span></div>
+            <div><b data-k="sup_al">Active Listener</b><br><span contenteditable="true" data-sup="al">TBD</span></div>
+            <div><b data-k="sup_ah">Ah Counter</b><br><span contenteditable="true" data-sup="ah">TBD</span></div>
+            <div><b data-k="sup_jm">Joke Master</b><br><span contenteditable="true" data-sup="jm">TBD</span></div>
+            <div><b data-k="sup_cam">Camera Master</b><br><span contenteditable="true" data-sup="cam">TBD</span></div>
           </div>
         </div>
         <div class="panel">
@@ -3537,7 +3537,7 @@ const AgendaApp=(function(){
   function addPkKit(){
     if(blocks.some(b=>b._pk)){ toast('Those sessions are already on this agenda'); return; }
     if(!confirm('Add National Anthem, Milli Naghma and Quiz sessions to this agenda?'))return;
-    const P=agT('p_blank','TM ____________');
+    const P=agT('p_blank','TBD');
     const EV=agT('p_everyone','Everyone');
     /* keyed like the standard rows, so these follow the Urdu switch too */
     const anthem={type:'session',removable:true,_pk:1,k:'s_anthem',title:agT('s_anthem','National Anthem'),rows:[
@@ -3565,6 +3565,8 @@ const AgendaApp=(function(){
   function healRetiredWording(){
     const pairs=Object.keys(AG_UR_RETIRED).map(k=>[AG_UR_RETIRED[k],AG_UR[k]])
       .filter(([o,n])=>o&&n&&o!==n);
+    /* unbooked slots used to read "TM ____" in both languages; they now say TBD */
+    pairs.push(['TM ____________',AG_EN.p_blank],['ٹی ایم ____________',AG_UR.p_blank]);
     const fix=t=>{
       if(!t)return t;
       let out=String(t);
@@ -3622,7 +3624,7 @@ const AgendaApp=(function(){
     while(diff>0){
       const lastIdx=rows.map(r=>r.kind).lastIndexOf('evaluator');
       const insertAt=lastIdx>=0?lastIdx+1:rows.findIndex(r=>r.kind==='tteval')+1;
-      rows.splice(insertAt,0,{kind:'evaluator',fill:'eval',who:'TM ____________',dur:3});
+      rows.splice(insertAt,0,{kind:'evaluator',fill:'eval',who:'TBD',dur:3});
       diff--;
     }
     while(diff<0){ rows.splice(rows.map(r=>r.kind).lastIndexOf('evaluator'),1); diff++; }
@@ -3673,7 +3675,7 @@ const AgendaApp=(function(){
         mk('↑','Move this session earlier',()=>moveBlock(block,-1));
         mk('↓','Move this session later',()=>moveBlock(block,1));
         mk('＋','Add a line to this session',()=>{
-          block.rows.push({act:'New item',who:agT('p_blank','TM ____________'),dur:2});
+          block.rows.push({act:'New item',who:agT('p_blank','TBD'),dur:2});
           agRender();
         });
         headTd.appendChild(del);
@@ -3864,7 +3866,7 @@ const AgendaApp=(function(){
     const spkSlots=Math.max(0,speakersFor(m));
     const rows=speechBlock().rows;
     let cur=rows.filter(r=>r.kind==='speaker').length;
-    while(cur<spkSlots){ rows.splice(rows.length-1,0,{kind:'speaker',fill:'spk',who:'TM ____________',preset:'std',dur:7}); cur++; }
+    while(cur<spkSlots){ rows.splice(rows.length-1,0,{kind:'speaker',fill:'spk',who:'TBD',preset:'std',dur:7}); cur++; }
     while(cur>spkSlots){ rows.splice(rows.map(r=>r.kind).lastIndexOf('speaker'),1); cur--; }
     syncEvaluators();
     let si=0,ei=0;
@@ -3918,6 +3920,16 @@ const AgendaApp=(function(){
   function applyAgState(st){
     if(!st)return;
     try{
+      /* Agendas saved while v79-80 shipped carry an extra cam entry that
+         shifted the whole static-text array, and that save also lost the
+         mission (the forward-planner autofill had pushed everything one place
+         along before saving). Drop the stray entry and blank the mission slot
+         so the template default — the real club mission — shows instead.
+         Pre-v81 saves are recognised by the missing camText key. */
+      if(st.camText===undefined&&Array.isArray(st.texts)&&st.texts.length===staticEditables().length+1){
+        st.texts.splice(6,1);
+        st.texts[10]=null;
+      }
       if(st.blocks&&st.blocks.length)blocks=st.blocks;
       const i=st.inputs||{};
       if(i.date)g('agDate').value=i.date;
@@ -3935,6 +3947,14 @@ const AgendaApp=(function(){
       const els=staticEditables();
       (st.texts||[]).forEach((h,idx)=>{ if(els[idx]!=null&&h!=null)els[idx].innerHTML=h; });
       if(st.camText!=null){ const c=document.querySelector('#agSheet [data-sup="cam"]'); if(c)c.innerHTML=st.camText; }
+      /* safety net: a mission box holding a member name or the ExCom line is
+         shift damage, never a real mission — put the club mission back */
+      const mis=document.querySelector('#agSheet [data-k="mission"]');
+      if(mis){
+        const mt=mis.innerText.trim();
+        if(mt===''||/^(TM|DTM)\s+\S/.test(mt)||/ExCom/i.test(mt))
+          mis.innerHTML=agT('mission','We provide a supportive and positive learning experience in which members are empowered to develop communication and leadership skills, resulting in greater self-confidence and personal growth.');
+      }
       if(st.excom){
         g('agExcomSec').classList.toggle('nobar',!!st.excom[0]);
         g('agExcomSec').classList.toggle('nosec',!!st.excom[1]);
@@ -4060,7 +4080,7 @@ const AgendaApp=(function(){
     g('agUr').addEventListener('change',()=>{ agUrdu=g('agUr').checked; applyLanguage(); agRender(); queueAgSave(); });
     g('agAdd').addEventListener('click',()=>{
       const rows=speechBlock().rows;
-      rows.splice(rows.length-1,0,{kind:'speaker',fill:'spk',who:'TM ____________',preset:'std',dur:7});
+      rows.splice(rows.length-1,0,{kind:'speaker',fill:'spk',who:'TBD',preset:'std',dur:7});
       syncEvaluators(); agRender();
     });
     g('agJoke').addEventListener('click',()=>{
@@ -4072,7 +4092,7 @@ const AgendaApp=(function(){
          applyBookings has run, so it would otherwise sit blank until the next
          "Fill from bookings" */
       const mt=state.meetings.find(x=>x.id===mid);
-      const who=(mt?roleMap(mt).jm:null)||agT('p_blank','TM ____________');
+      const who=(mt?roleMap(mt).jm:null)||agT('p_blank','TBD');
       host.rows.push({k:'r_joke',act:agT('r_joke','Joke Master'),fill:'jm',who,dur:1});
       agRender();
       toast('Added to the Opening — move it anywhere with ↑ ↓');
@@ -4080,7 +4100,7 @@ const AgendaApp=(function(){
     g('agAddSession').addEventListener('click',()=>{
       const idx=blocks.findIndex(b=>b.id==='eval');
       blocks.splice(idx<0?blocks.length:idx,0,{type:'session',title:'New Session',removable:true,rows:[
-        {act:'New item',who:agT('p_blank','TM ____________'),dur:5}
+        {act:'New item',who:agT('p_blank','TBD'),dur:5}
       ]});
       agRender();
     });
