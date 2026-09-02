@@ -3893,7 +3893,13 @@ const AgendaApp=(function(){
     }
   }
   function staticEditables(){
-    return [...document.querySelectorAll('#agSheet [contenteditable]')].filter(el=>!el.closest('#agBody'));
+    /* saved as a POSITIONAL array — inserting a new editable mid-order shifts
+       every older agenda's restore by one (the Camera Master field did exactly
+       that: missions showed the ExCom line). So fields added after the format
+       shipped are excluded here and persisted under their own keys instead.
+       Any future editable must do the same, never join this list. */
+    return [...document.querySelectorAll('#agSheet [contenteditable]')]
+      .filter(el=>!el.closest('#agBody')&&el.dataset.sup!=='cam');
   }
   function collectAgState(){
     return {
@@ -3905,6 +3911,7 @@ const AgendaApp=(function(){
               tt:g('agTT').checked,sp:g('agSp').checked,
               swap:g('agSwap').checked,jr:g('agJr').checked,urdu:g('agUr').checked,theme:g('agTheme2').value},
       texts:staticEditables().map(el=>el.innerHTML),
+      camText:(document.querySelector('#agSheet [data-sup="cam"]')||{innerHTML:null}).innerHTML,
       excom:[g('agExcomSec').classList.contains('nobar'),g('agExcomSec').classList.contains('nosec')]
     };
   }
@@ -3927,6 +3934,7 @@ const AgendaApp=(function(){
       if(i.theme!=null){ g('agTheme2').value=i.theme; sheetTheme=i.theme||''; }
       const els=staticEditables();
       (st.texts||[]).forEach((h,idx)=>{ if(els[idx]!=null&&h!=null)els[idx].innerHTML=h; });
+      if(st.camText!=null){ const c=document.querySelector('#agSheet [data-sup="cam"]'); if(c)c.innerHTML=st.camText; }
       if(st.excom){
         g('agExcomSec').classList.toggle('nobar',!!st.excom[0]);
         g('agExcomSec').classList.toggle('nosec',!!st.excom[1]);
