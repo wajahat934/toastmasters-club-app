@@ -1529,6 +1529,8 @@ function viewBook(){
           const holder=memberById(a.memberId);
           return `<div class="bookslot"><div><div class="rname">${esc(s.label)}</div><div class="holder">${esc(holder?holder.name:'…')}${durChip}</div></div></div>`;
         }
+        if(slotBlocked(m,s.key))
+          return `<div class="bookslot"><div><div class="rname">${esc(s.label)}</div><div class="holder muted">🚫 reserved — the officers will assign this role</div></div></div>`;
         if(slotReserved(m,s.key))
           return `<div class="bookslot"><div><div class="rname">${esc(s.label)}</div><div class="holder muted">⏱ reserved — long-format speech this week</div></div></div>`;
         /* open to others, but inside this member's fair-use gap: say so instead
@@ -1621,8 +1623,20 @@ function longSpeechIn(m){
   return null;
 }
 function openSpkKey(m){
-  const s=slotListFor(m).find(s=>s.key.startsWith('spk|')&&!((m.assignments||{})[s.key]||{}).memberId);
+  const s=slotListFor(m).find(s=>s.key.startsWith('spk|')&&!((m.assignments||{})[s.key]||{}).memberId&&!slotBlocked(m,s.key));
   return s?s.key:null;
+}
+/* Officer-reserved slots (special meetings): members can't book one — the
+   officers hand it to someone of their choice from the schedule. Kept in
+   meetings.config.blockedSlots, so no migration and it syncs like any other
+   meeting change. Blocking only matters while the slot is empty. */
+function slotBlocked(m,key){ return ((((m||{}).config||{}).blockedSlots)||[]).includes(key); }
+function toggleSlotBlock(mid,key){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  const list=new Set((m.config||{}).blockedSlots||[]);
+  if(list.has(key))list.delete(key); else list.add(key);
+  m.config={...(m.config||{}),blockedSlots:[...list]};
+  saveMeetingConfig(m);
 }
 function longRoomIn(m){ return !longSpeechIn(m)&&bookedCount(m,'spk|')<=speakersFor(m)-2&&!!openSpkKey(m); }
 /* one open slot stays blocked for members once the long speech's double time is claimed */
@@ -1635,6 +1649,7 @@ async function myBook(mid,key){
   let dur=null;
   {
     const mT=state.meetings.find(x=>x.id===mid);
+    if(mT&&slotBlocked(mT,key)){ toast('This role is reserved for this meeting — the officers will assign it.'); return; }
     const gclash=mT?gapConflict(me.profileId,key.split('|')[0],mT.date,mid):null;
     if(gclash){ toast(gapMessage(key.split('|')[0],gclash,mT.date)); return; }
   }
@@ -1972,9 +1987,13 @@ function meetingBookingCard(m){
         const at=canDefer?bookedAt(m.id,s.key):null;
         const when=at?`booked ${new Date(at).toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}`
                      :'booking time not recorded yet';
-        return `<div class="slot"><label>${esc(s.label)}${(a&&(a.durationMin||0)>=LONG_MIN)?` <span class="pill other" title="long-format speech — one speaker/evaluator slot fewer this meeting">⏱ ${a.durationMin}m</span>`:''}${isNext?` <span class="pill other" title="Booked last of the ${esc(roleNameById(rid))}s — gives way first">gives way</span>`:''}${canDefer?`
+        const blocked=slotBlocked(m,s.key);
+        return `<div class="slot"><label>${esc(s.label)}${(a&&(a.durationMin||0)>=LONG_MIN)?` <span class="pill other" title="long-format speech — one speaker/evaluator slot fewer this meeting">⏱ ${a.durationMin}m</span>`:''}${blocked?` <span class="pill absent" title="Members cannot book this slot — you assign it from the dropdown">🚫 reserved</span>`:''}${isNext?` <span class="pill other" title="Booked last of the ${esc(roleNameById(rid))}s — gives way first">gives way</span>`:''}${canDefer?`
             <button class="btn ghost small" style="float:right;padding:0 6px"
-              title="Move to a later meeting — ${esc(when)}" onclick="deferBooking('${m.id}','${s.key}')">⏩</button>`:''}</label>
+              title="Move to a later meeting — ${esc(when)}" onclick="deferBooking('${m.id}','${s.key}')">⏩</button>`:''}${!(a&&a.memberId)?`
+            <button class="btn ghost small" style="float:right;padding:0 6px"
+              title="${blocked?'Unreserve — members can book it again':'Reserve for a special meeting — members cannot book it; you assign it from the dropdown'}"
+              onclick="toggleSlotBlock('${m.id}','${s.key}')">${blocked?'🔓':'🚫'}</button>`:''}</label>
           <select ${canDefer?`title="${esc(when)}"`:''} onchange="assign('${m.id}','${s.key}',this)">${memberOptions(a&&a.memberId)}</select></div>`;
       }).join('')}
     </div>
@@ -2146,6 +2165,7 @@ function bookingsByGiveWay(m,rid){
 function freeSlotFor(m,rid){
   for(const s of slotListFor(m)){
     if(ridOf(s.key)!==rid)continue;
+    if(slotBlocked(m,s.key))continue;   /* officer-reserved: a cascade must not fill it */
     const a=(m.assignments||{})[s.key];
     if(!a||!a.memberId)return s.key;
   }
@@ -2646,7 +2666,7 @@ function openRolesMessage(mid){
   const m=state.meetings.find(x=>x.id===mid); if(!m)return '';
   const asg=m.assignments||{};
   /* reserved slots (double time for a long-format speech) are not offered */
-  const open=slotListFor(m).filter(s=>{const a=asg[s.key]; return !(a&&a.memberId)&&!slotReserved(m,s.key);});
+  const open=slotListFor(m).filter(s=>{const a=asg[s.key]; return !(a&&a.memberId)&&!slotReserved(m,s.key)&&!slotBlocked(m,s.key);});
   const firstName=k=>{const a=asg[k]; const p=a&&a.memberId&&memberById(a.memberId); return p?p.name.split(' ')[0]:null;};
   const wod=(m.wod||{}).word||'';
   const head=`🎤 *RTC Meeting — ${fmtDate(m.date)}*`+(m.theme?`\nTheme: *${m.theme}*`:'')
@@ -2683,7 +2703,7 @@ function rolePlayersMessage(mid){
     if(n){
       const a=asg[s.key];
       filled.push(`• ${s.label}: TM ${n}${(a.durationMin||0)>=LONG_MIN?` (⏱ ${a.durationMin} min)`:''}`);
-    }else if(!slotReserved(m,s.key))stillOpen.push(s.label);
+    }else if(!slotReserved(m,s.key)&&!slotBlocked(m,s.key))stillOpen.push(s.label);
   }
   if(filled.length)out+=`\n\n*Role players:*\n`+filled.join('\n');
   const asks=[];
@@ -4671,7 +4691,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   authLogText,
   releaseOrphans,
   spkDelta,setMeetingTT,setMeetingOrder,setPresent,markAllPresent,creditSpeech,deferBooking,deferAllBookings,undoMove,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
-  vcPick,startPoll,addCandidate,removeCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,
+  vcPick,startPoll,addCandidate,removeCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,toggleSlotBlock,
   pStart,pAdd,pRemove,pAdjust,pPaper,pVote,pCastMine,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
   bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
   sugAdd,sugStatus,sugNote,sugAnnounce,sugDel,copyInvite,copyNudge,copyOpenRoles,copyRolePlayers,demoOpenVoting,

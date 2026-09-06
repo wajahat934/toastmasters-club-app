@@ -119,6 +119,12 @@
 - `settingsDirty` now clears when the last outstanding settings save lands (was sticky until
   the Settings tab was reopened, which would have blocked incoming settings realtime on the
   device that last edited).
+- **Officer-reserved slots** (special meetings): 🚫 toggle on any EMPTY slot of the admin
+  meeting card reserves it — members see "reserved, officers will assign", `myBook` refuses,
+  the open-roles message stops offering it, and `freeSlotFor`/`openSpkKey` skip it so
+  move-forward cascades and long-speech rebooking never land on one. Officers assign into it
+  from the same dropdown as always. Lives in `meetings.config.blockedSlots` (no migration);
+  blocking only matters while the slot is empty.
 
 ## Fixed 2026-09-06 — voting resilience (v83)
 
