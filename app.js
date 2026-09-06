@@ -255,7 +255,8 @@ const SupabaseApi={
   async delGoal(id){ const {error}=await sb.from('goals').delete().eq('id',id); if(error)throw error; },
   async saveDcp(year,data){ const {error}=await sb.from('dcp').upsert({year,data}); if(error)throw error; },
   async saveAgenda(meeting_id,data){ const {error}=await sb.from('agendas').upsert({meeting_id,data}); if(error)throw error; },
-  subscribe(onChange){
+  subscribe(onChange,onStatus){
+    let joined=false;
     sb.channel('live')
       .on('postgres_changes',{event:'*',schema:'public',table:'assignments'},p=>onChange('assignments',p))
       .on('postgres_changes',{event:'*',schema:'public',table:'meetings'},p=>onChange('meetings',p))
@@ -263,13 +264,24 @@ const SupabaseApi={
       .on('postgres_changes',{event:'*',schema:'public',table:'votes'},p=>onChange('votes',p))
       .on('postgres_changes',{event:'*',schema:'public',table:'announcements'},p=>onChange('announcements',p))
       .on('postgres_changes',{event:'*',schema:'public',table:'birthday_changes'},p=>onChange('birthday_changes',p))
-      .subscribe();
+      .subscribe(status=>{
+        /* the first SUBSCRIBED is the normal join (we just loaded everything);
+           a later one means the connection dropped and came back, and events
+           were missed in between — the caller must catch up with a reload */
+        if(status==='SUBSCRIBED'){ if(joined&&onStatus)onStatus('rejoined'); joined=true; }
+        else if(onStatus&&(status==='CHANNEL_ERROR'||status==='TIMED_OUT'))onStatus('dropped');
+      });
   }
 };
 
 /* ---------- demo backend: in-memory sample data ---------- */
 const DemoApi=(function(){
   let auth=null;
+  /* demo realtime: writes emit the same postgres_changes-shaped events the
+     live backend broadcasts, so the delta-update path runs (and can be
+     rehearsed, with demoLag) against the fake backend too */
+  let onEvt=null;
+  const emit=(table,eventType,n,o)=>{ if(onEvt)setTimeout(()=>onEvt(table,{eventType,new:n?{...n}:{},old:o?{...o}:{}}),0); };
   const P=(n,extra)=>({id:uid(),auth_id:null,email:'',name:n,home_club:null,role:'member',approved:true,active:true,path:'',birthday:null,base_level:0,projects_done:0,...extra});
   const mdOf=n=>{const d=new Date();d.setDate(d.getDate()+n);return dstr(d).slice(5);};
   /* the roster mirrors the real club (names + rough Pathways standing as of
@@ -357,34 +369,37 @@ const DemoApi=(function(){
     async updSuggestion(id,f){ Object.assign(suggestions.find(s=>s.id===id)||{},f); },
     async delSuggestion(id){ const i=suggestions.findIndex(s=>s.id===id); if(i>=0)suggestions.splice(i,1); },
     async markBcSeen(id){ const r=birthdayChanges.find(b=>b.id===id); if(r)r.seen=true; },
-    async addAnnouncement(text){ const row={id:uid(),text,created_at:new Date().toISOString()}; announcements.push(row); return row; },
-    async delAnnouncement(id){ const i=announcements.findIndex(a=>a.id===id); if(i>=0)announcements.splice(i,1); },
-    async createPoll(f){ const row={id:uid(),status:'open',candidates:[],adjust:{},paper_voters:[],winner_key:null,...f}; polls.push(row); return row; },
-    async updatePoll(id,f){ Object.assign(polls.find(p=>p.id===id)||{},f); },
-    async deletePoll(id){ const i=polls.findIndex(p=>p.id===id); if(i>=0)polls.splice(i,1); },
+    async addAnnouncement(text){ const row={id:uid(),text,created_at:new Date().toISOString()}; announcements.push(row); emit('announcements','INSERT',row); return row; },
+    async delAnnouncement(id){ const i=announcements.findIndex(a=>a.id===id); if(i>=0)announcements.splice(i,1); emit('announcements','DELETE',null,{id}); },
+    async createPoll(f){ const row={id:uid(),status:'open',candidates:[],adjust:{},paper_voters:[],winner_key:null,...f}; polls.push(row); emit('polls','INSERT',row); return row; },
+    async updatePoll(id,f){ const p=polls.find(p=>p.id===id); Object.assign(p||{},f); if(p)emit('polls','UPDATE',p); },
+    async deletePoll(id){ const i=polls.findIndex(p=>p.id===id); if(i>=0)polls.splice(i,1); emit('polls','DELETE',null,{id}); },
     async castVote(poll_id,voter,candidate_key){
       const ex=votes.find(v=>v.poll_id===poll_id&&v.voter===voter);
       if(ex)ex.candidate_key=candidate_key; else votes.push({poll_id,voter,candidate_key});
+      emit('votes',ex?'UPDATE':'INSERT',{poll_id,voter,candidate_key});
     },
     async delVote(poll_id,voter){
       const i=votes.findIndex(v=>v.poll_id===poll_id&&v.voter===voter);
       if(i>=0)votes.splice(i,1);
+      emit('votes','DELETE',null,{poll_id,voter});
     },
     async saveSettings(data){ settingsRows=[{id:1,data}]; },
-    async insertMeeting(m){ const row={id:uid(),theme:'',cancelled:false,reviewed:false,...m}; meetings.push(row); return row; },
-    async updateMeeting(id,f){ Object.assign(meetings.find(m=>m.id===id)||{},f); },
+    async insertMeeting(m){ const row={id:uid(),theme:'',cancelled:false,reviewed:false,...m}; meetings.push(row); emit('meetings','INSERT',row); return row; },
+    async updateMeeting(id,f){ const m=meetings.find(m=>m.id===id); Object.assign(m||{},f); if(m)emit('meetings','UPDATE',m); },
     async book(mid,key,pid,dur){
       if(assignments.some(a=>a.meeting_id===mid&&a.slot_key===key))throw {message:'duplicate key value'};
-      assignments.push({meeting_id:mid,slot_key:key,profile_id:pid,status:'booked',actual_role:null,duration_min:dur||null});
+      const row={meeting_id:mid,slot_key:key,profile_id:pid,status:'booked',actual_role:null,duration_min:dur||null};
+      assignments.push(row); emit('assignments','INSERT',row);
     },
     async adminAssign(mid,key,pid,booked_at){
       const at=booked_at||new Date().toISOString();
       const ex=assignments.find(a=>a.meeting_id===mid&&a.slot_key===key);
-      if(ex){ex.profile_id=pid;ex.status='booked';ex.actual_role=null;ex.booked_at=at;}
-      else assignments.push({meeting_id:mid,slot_key:key,profile_id:pid,status:'booked',actual_role:null,booked_at:at});
+      if(ex){ex.profile_id=pid;ex.status='booked';ex.actual_role=null;ex.booked_at=at;emit('assignments','UPDATE',ex);}
+      else{ const row={meeting_id:mid,slot_key:key,profile_id:pid,status:'booked',actual_role:null,booked_at:at}; assignments.push(row); emit('assignments','INSERT',row); }
     },
-    async unbook(mid,key){ const i=assignments.findIndex(a=>a.meeting_id===mid&&a.slot_key===key); if(i>=0)assignments.splice(i,1); },
-    async setAsg(mid,key,f){ Object.assign(assignments.find(a=>a.meeting_id===mid&&a.slot_key===key)||{},f); },
+    async unbook(mid,key){ const i=assignments.findIndex(a=>a.meeting_id===mid&&a.slot_key===key); if(i>=0)assignments.splice(i,1); emit('assignments','DELETE',null,{meeting_id:mid,slot_key:key}); },
+    async setAsg(mid,key,f){ const a=assignments.find(a=>a.meeting_id===mid&&a.slot_key===key); Object.assign(a||{},f); if(a)emit('assignments','UPDATE',a); },
     async insertProfile(f){ const row=P(f.name,f); profiles.push(row); return row; },
     async reassignData(fromId,intoId){
       for(const arr of [assignments,awards,goals])
@@ -406,7 +421,7 @@ const DemoApi=(function(){
     async delGoal(id){ const i=goals.findIndex(g=>g.id===id); if(i>=0)goals.splice(i,1); },
     async saveDcp(year,data){ const ex=dcpRows.find(r=>r.year===year); if(ex)ex.data=data; else dcpRows.push({year,data}); },
     async saveAgenda(mid,data){ const ex=agendaRows.find(r=>r.meeting_id===mid); if(ex)ex.data=data; else agendaRows.push({meeting_id:mid,data}); },
-    subscribe(){},
+    subscribe(onChange){ onEvt=onChange; },
     _tables:T
   };
 })();
@@ -4277,6 +4292,36 @@ function show(id){
   for(const x of ['authWrap','pendingWrap','appWrap','resetWrap'])
     document.getElementById(x).style.display=(x===id)?'':'none';
 }
+/* Delta updates: a realtime event already carries the changed row, so apply
+   just that row instead of re-downloading the whole database. This is what
+   makes voting night cheap — 25 phones each receive ~1 KB per vote instead of
+   each pulling every table. Anything unrecognised falls back to a full reload,
+   and a reconnect (missed events) forces one. */
+const DELTA_KEYS={
+  votes:{col:'votes',pk:r=>r.poll_id+'|'+r.voter},
+  polls:{col:'polls',pk:r=>r.id},
+  assignments:{col:'assignments',pk:r=>r.meeting_id+'|'+r.slot_key},
+  meetings:{col:'meetings',pk:r=>r.id},
+  announcements:{col:'announcements',pk:r=>r.id},
+  birthday_changes:{col:'birthdayChanges',pk:r=>r.id},
+};
+function applyDelta(table,p){
+  const d=DELTA_KEYS[table]; if(!d||!S[d.col])return false;
+  const type=p&&p.eventType;
+  const nrow=p&&p.new&&Object.keys(p.new).length?p.new:null;
+  const orow=p&&p.old&&Object.keys(p.old).length?p.old:null;
+  if(type==='DELETE'){
+    if(!orow)return false;
+    S[d.col]=S[d.col].filter(r=>d.pk(r)!==d.pk(orow));
+    return true;
+  }
+  if((type==='INSERT'||type==='UPDATE')&&nrow){
+    const arr=S[d.col], i=arr.findIndex(r=>d.pk(r)===d.pk(nrow));
+    if(i>=0)arr[i]={...arr[i],...nrow}; else arr.push(nrow);
+    return true;
+  }
+  return false;
+}
 /* Reloads are sequenced: a slow response from an OLDER reload must never be
    applied over a newer one — on a laggy night that is exactly how fresh local
    state (a vote, a booking) got wound back to a stale snapshot. */
@@ -4316,10 +4361,13 @@ async function enterApp(profile){
     entered=true;
     /* One realtime event used to mean one FULL loadAll on every connected
        phone — on a voting night each cast vote made the whole room re-download
-       the whole database, and the app choked on its own traffic. Events are
-       now coalesced: a short debounce folds a burst into one reload, and only
-       one reload runs at a time (a burst arriving mid-reload queues exactly
-       one more). */
+       the whole database, and the app choked on its own traffic. Now a
+       recognised event applies just its own row (applyDelta) and redraws,
+       debounced — the full reload survives as the fallback for anything
+       unrecognised, as the catch-up after a reconnect (events were missed),
+       and as a slow safety net for the tables with no realtime (settings,
+       agendas). Reload bursts are still coalesced: a short debounce folds
+       them into one, and only one runs at a time. */
     let rlTimer=null,rlRunning=false,rlAgain=false;
     const scheduleReload=()=>{
       clearTimeout(rlTimer);
@@ -4331,7 +4379,19 @@ async function enterApp(profile){
         finally{ rlRunning=false; if(rlAgain){ rlAgain=false; scheduleReload(); } }
       },400);
     };
-    api.subscribe(()=>scheduleReload());
+    let dtTimer=null;
+    const renderSoon=()=>{   /* fold a burst of deltas into one redraw */
+      clearTimeout(dtTimer);
+      dtTimer=setTimeout(()=>{
+        overlayPendingVotes(); rebuild();
+        if(['book','schedule','voting'].includes(tab))renderLive();
+      },250);
+    };
+    api.subscribe(
+      (table,p)=>{ if(applyDelta(table,p))renderSoon(); else scheduleReload(); },
+      why=>{ authLog('realtime:'+why); if(why==='rejoined')scheduleReload(); }
+    );
+    setInterval(()=>{ if(!document.hidden)scheduleReload(); },300000);
     setInterval(dateRollCheck,60000);
     window.addEventListener('online',()=>{ authLog('browser:online'); flushVotes(); route(); });
     window.addEventListener('offline',()=>authLog('browser:offline'));

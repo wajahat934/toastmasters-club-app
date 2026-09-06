@@ -97,10 +97,15 @@ The club voted manually one week because the app choked under lag. Two causes, b
 (Supabase also had a platform incident Aug 27–31, which amplified them):
 
 - **Every realtime event ran a full `loadAll()` on every connected phone.** On voting night each
-  cast vote made the whole room re-download the whole database — a self-made traffic storm. Now
-  events are debounced (400 ms) into one reload, only one reload runs at a time, and `reloadSeq`
-  drops any reload response that was superseded while in flight (a stale snapshot must never be
-  applied over newer state).
+  cast vote made the whole room re-download the whole database — a self-made traffic storm. Now a
+  recognised event applies just its own ~1 KB row (`applyDelta` + `DELTA_KEYS`, all six subscribed
+  tables) and redraws on a 250 ms debounce; sized for 25+ simultaneous voters on weak internet.
+  Full reloads still exist but only as: fallback for an unrecognised payload, catch-up when the
+  realtime channel REJOINS after a drop (events were missed — `subscribe`'s status callback), and
+  a 5-minute safety net for the unsubscribed tables (settings, agendas — an agenda edit by a
+  second device shows within 5 min, it used to piggyback on other events). Reloads are debounced
+  (400 ms), single-flight, and `reloadSeq` drops any response superseded while in flight.
+  DemoApi now EMITS these events from its own writes, so the delta path runs in demo too.
 - **`castMyVote` waited on the server before showing anything.** Under lag the tap looked dead,
   the member tapped again, and a stale reload made the vote appear and then vanish. Votes are now
   optimistic: `pendingVotes` queue + `flushVotes()` retries with backoff (and on `online`),
