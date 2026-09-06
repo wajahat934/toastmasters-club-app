@@ -9,7 +9,7 @@
 
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs. Bump it on every
    deploy or browsers serve the old `app.js`. There is no service worker; that bump is the only
-   cache control. Currently **v=71**.
+   cache control. Currently **v=83**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -85,10 +85,29 @@
 - **`sync()` used to fire writes in parallel.** A cascade sends a DELETE and an UPSERT for the same
   row in one tick; unordered, the DELETE could land last and wipe the booking just written — a
   member who looked moved on screen was gone after a reload. `serialiseWrites()` now queues
-  book/adminAssign/unbook/setAsg. Demo mode is synchronous, so it can never reproduce this: any
-  future change to the write path has to be reasoned about, not just demo-tested.
+  book/adminAssign/unbook/setAsg. Demo mode used to answer instantly and couldn't reproduce
+  races; now `localStorage.demoLag = <ms>` adds that much fake latency to every demo api call —
+  set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Fixed 2026-09-06 — voting resilience (v83)
+
+The club voted manually one week because the app choked under lag. Two causes, both in the build
+(Supabase also had a platform incident Aug 27–31, which amplified them):
+
+- **Every realtime event ran a full `loadAll()` on every connected phone.** On voting night each
+  cast vote made the whole room re-download the whole database — a self-made traffic storm. Now
+  events are debounced (400 ms) into one reload, only one reload runs at a time, and `reloadSeq`
+  drops any reload response that was superseded while in flight (a stale snapshot must never be
+  applied over newer state).
+- **`castMyVote` waited on the server before showing anything.** Under lag the tap looked dead,
+  the member tapped again, and a stale reload made the vote appear and then vanish. Votes are now
+  optimistic: `pendingVotes` queue + `flushVotes()` retries with backoff (and on `online`),
+  `overlayPendingVotes()` re-asserts unconfirmed votes after every reload, a definitive server
+  refusal (RLS / voting closed) drops the vote with an honest toast instead of retrying forever,
+  and `beforeunload` warns if a vote is still unsent. RULE: a tap the member saw acknowledged
+  must never silently reverse — anything new in this area keeps that property.
 
 ## Fixed 2026-08-23
 

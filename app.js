@@ -1073,15 +1073,63 @@ async function paperVoter(pollId,pid,add){
   sync(api.updatePoll(pollId,{paper_voters:p.paper_voters}));
   render();
 }
-async function castMyVote(pollId,key){
+/* Voting is optimistic: the tap lands on screen immediately and the server
+   write is queued behind it. Waiting on the network here caused real harm on
+   a slow night — the tap looked dead, the member tapped again, and a stale
+   full reload racing the write made the vote appear and then vanish. The
+   screen is now the truth for YOUR OWN vote until the queue confirms it;
+   overlayPendingVotes() re-asserts it over anything a reload brings in. */
+const pendingVotes=new Map();   /* poll_id -> {key, tries} */
+let voteFlushing=false, voteRetryTimer=null;
+function castMyVote(pollId,key){
   const p=S.polls.find(p=>p.id===pollId); if(!p||p.status!=='open')return;
   if((p.paper_voters||[]).includes(me.profileId)){toast('You voted on paper for this one — thanks!');return;}
+  const ex=S.votes.find(v=>v.poll_id===pollId&&v.voter===me.profileId);
+  if(ex)ex.candidate_key=key; else S.votes.push({poll_id:pollId,voter:me.profileId,candidate_key:key});
+  pendingVotes.set(pollId,{key,tries:0});
+  render(); toast('Vote recorded ✓');
+  flushVotes();
+}
+async function flushVotes(){
+  if(voteFlushing)return;
+  voteFlushing=true; clearTimeout(voteRetryTimer);
   try{
-    await api.castVote(pollId,me.profileId,key);
+    while(pendingVotes.size){
+      const [pollId,pv]=pendingVotes.entries().next().value;
+      try{
+        await api.castVote(pollId,me.profileId,pv.key);
+        /* drop only if the member hasn't tapped a different candidate since */
+        const cur=pendingVotes.get(pollId);
+        if(cur&&cur.key===pv.key)pendingVotes.delete(pollId);
+      }catch(e){
+        const msg=String(e&&e.message||e);
+        /* a definitive refusal (voting closed, no permission) is not a network
+           problem — retrying it forever would be lying to the member */
+        if(/row-level security|permission|42501|403/i.test(msg)){
+          pendingVotes.delete(pollId);
+          authLog('vote-rejected',{err:msg});
+          S.votes=S.votes.filter(v=>!(v.poll_id===pollId&&v.voter===me.profileId));
+          render(); toast('That vote could not be counted — voting may already be closed.');
+          continue;
+        }
+        pv.tries++;
+        authLog('vote-retry',{tries:pv.tries,err:msg});
+        if(pv.tries===3)toast('Connection is slow — your vote is kept on this screen and will be sent as soon as the connection allows.');
+        voteRetryTimer=setTimeout(flushVotes,Math.min(15000,1000*2**Math.min(4,pv.tries)));
+        return;
+      }
+    }
+  }finally{ voteFlushing=false; }
+}
+/* After any reload replaces S.votes wholesale, put my not-yet-confirmed votes
+   back on top — a snapshot read before the write committed must not undo a
+   tap the member already saw acknowledged. */
+function overlayPendingVotes(){
+  if(!me)return;
+  for(const [pollId,pv] of pendingVotes){
     const ex=S.votes.find(v=>v.poll_id===pollId&&v.voter===me.profileId);
-    if(ex)ex.candidate_key=key; else S.votes.push({poll_id:pollId,voter:me.profileId,candidate_key:key});
-    render(); toast('Vote recorded ✓');
-  }catch(e){ toast('Could not vote: '+(e.message||e)); }
+    if(ex)ex.candidate_key=pv.key; else S.votes.push({poll_id:pollId,voter:me.profileId,candidate_key:pv.key});
+  }
 }
 /* Record a winner directly on a (past) meeting — stored as a closed poll so
    the winners board, congratulations and records all use one mechanism. */
@@ -4163,8 +4211,14 @@ function show(id){
   for(const x of ['authWrap','pendingWrap','appWrap','resetWrap'])
     document.getElementById(x).style.display=(x===id)?'':'none';
 }
+/* Reloads are sequenced: a slow response from an OLDER reload must never be
+   applied over a newer one — on a laggy night that is exactly how fresh local
+   state (a vote, a booking) got wound back to a stale snapshot. */
+let reloadSeq=0;
 async function reload(){
+  const seq=++reloadSeq;
   const raw=await api.loadAll();
+  if(seq!==reloadSeq)return;   /* superseded while in flight — drop the stale snapshot */
   S.profiles=raw.profiles; S.meetings=raw.meetings; S.assignments=raw.assignments;
   S.awards=raw.awards; S.goals=raw.goals;
   S.polls=raw.polls||[]; S.votes=raw.votes||[]; S.announcements=raw.announcements||[];
@@ -4173,6 +4227,7 @@ async function reload(){
   S.settings=S._hadSettings?raw.settingsRows[0].data:defaultSettings();
   S.dcp={}; for(const r of raw.dcpRows)S.dcp[r.year]=r.data;
   S.agendas={}; for(const r of raw.agendaRows)S.agendas[r.meeting_id]=r.data;
+  overlayPendingVotes();
   rebuild();
 }
 let entered=false;
@@ -4193,10 +4248,29 @@ async function enterApp(profile){
   show('appWrap'); render();
   if(!entered){
     entered=true;
-    api.subscribe(async(table,p)=>{ await reload(); if(['book','schedule','voting'].includes(tab))renderLive(); });
+    /* One realtime event used to mean one FULL loadAll on every connected
+       phone — on a voting night each cast vote made the whole room re-download
+       the whole database, and the app choked on its own traffic. Events are
+       now coalesced: a short debounce folds a burst into one reload, and only
+       one reload runs at a time (a burst arriving mid-reload queues exactly
+       one more). */
+    let rlTimer=null,rlRunning=false,rlAgain=false;
+    const scheduleReload=()=>{
+      clearTimeout(rlTimer);
+      rlTimer=setTimeout(async()=>{
+        if(rlRunning){ rlAgain=true; return; }
+        rlRunning=true;
+        try{ await reload(); if(['book','schedule','voting'].includes(tab))renderLive(); }
+        catch(e){ authLog('reload-failed',{err:String(e&&e.message||e)}); }
+        finally{ rlRunning=false; if(rlAgain){ rlAgain=false; scheduleReload(); } }
+      },400);
+    };
+    api.subscribe(()=>scheduleReload());
     setInterval(dateRollCheck,60000);
-    window.addEventListener('online',()=>{ authLog('browser:online'); route(); });
+    window.addEventListener('online',()=>{ authLog('browser:online'); flushVotes(); route(); });
     window.addEventListener('offline',()=>authLog('browser:offline'));
+    /* an unsent vote dies with the page — warn before the tab closes on one */
+    window.addEventListener('beforeunload',e=>{ if(pendingVotes.size){ e.preventDefault(); e.returnValue=''; } });
     document.addEventListener('visibilitychange',()=>{ if(!document.hidden)dateRollCheck(); });
   }
 }
@@ -4439,8 +4513,22 @@ function initInstall(){
     setTimeout(()=>showInstallBar('To install: tap Share, then Add to Home Screen',false),4000);
 }
 
+/* Demo-only test knob: localStorage.demoLag = milliseconds of fake latency on
+   every api call. The demo backend used to answer instantly, which is why
+   slow-network races (double-tap voting, stale reloads) could never be
+   reproduced against it — set a lag and rehearse the messy case. */
+function withLag(a){
+  const out={};
+  for(const k of Object.keys(a)){
+    const v=a[k];
+    out[k]=typeof v==='function'
+      ?async(...args)=>{ const d=Number(localStorage.getItem('demoLag')||0); if(d)await new Promise(r=>setTimeout(r,d)); return v.apply(a,args); }
+      :v;
+  }
+  return out;
+}
 (async function boot(){
-  api=serialiseWrites(DEMO?DemoApi:SupabaseApi);
+  api=serialiseWrites(DEMO?withLag(DemoApi):SupabaseApi);
   bindAuth();
   initInstall();
   await api.init();
