@@ -9,7 +9,7 @@
 
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs. Bump it on every
    deploy or browsers serve the old `app.js`. There is no service worker; that bump is the only
-   cache control. Currently **v=83**.
+   cache control. Currently **v=84**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -116,11 +116,16 @@ The club voted manually one week because the app choked under lag. Two causes, b
 
 Also added (same day): **fair-use booking gaps** — at most one booking of a role per member per
 N weeks, counted both ways from the meeting date, skipping cancelled meetings and 'absent'
-outcomes. Defaults live in `ROLE_GAP_DEFAULTS` (speeches 3, TTM 6), overridable per role in
-Settings → "Fair-use booking gaps" (`settings.roleGaps`, jsonb — no migration). Members get a
-greyed slot + reason and a hard stop in `myBook`; officers get a confirm in `assign()` and can
-override. `gapConflict()`/`gapMessage()` next to `consecutiveSpeech()` (which still exists and
-only matters if a gap is set to 0).
+outcomes. Every role maps to a gap GROUP (`GAP_GROUPS`/`gapGroupOf`): spk 3wk and ttm 6wk by
+default; eval (speaker evaluators AND the TT Evaluator count as one evaluator turn), tmod, ge
+each have their own dial defaulting to 0; every other role (Timer, Camera Master, whatever gets
+added) shares the single 'tag' dial (default 0) — one number, but a tag role only limits itself
+(Timer doesn't block Grammarian). SAA/PO exempt (standing auto-fill). Stored in
+`settings.roleGaps` keyed by GROUP (jsonb — no migration). Members get a greyed slot + reason
+and a hard stop in `myBook`; officers get a confirm in `assign()` and can override.
+`consecutiveSpeech()` still exists and only matters if the speech gap is set to 0. The
+open-roles WhatsApp message (`openRolesMessage`) now also lists who has booked what
+("Already booked — your reminder").
 
 ## Fixed 2026-08-23
 

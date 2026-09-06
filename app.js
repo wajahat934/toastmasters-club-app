@@ -1485,25 +1485,38 @@ function viewBook(){
    both changeable in Settings as enthusiasm allows (0 = no limit). A member
    self-booking is blocked with the reason; an officer assigning gets a confirm
    and can override. An 'absent' outcome doesn't count — they didn't do it. */
-const ROLE_GAP_DEFAULTS={spk:3,ttm:6};
-const ROLE_GAP_NAMES={spk:'speech',ttm:'Table Topics Master turn'};
+/* Every role belongs to a gap GROUP. The named groups get their own dial in
+   Settings; every unlisted role (Timer, Grammarian, Camera Master, whatever
+   the club adds next) shares the single 'tag' dial. SAA and the Presiding
+   Officer are standing appointments that auto-fill weekly — no gap ever.
+   Speaker evaluators and the TT Evaluator count as one 'evaluator turn'. */
+const GAP_GROUPS={spk:'spk',ttm:'ttm',eval:'eval',tte:'eval',tmod:'tmod',ge:'ge'};
+const GAP_EXEMPT=['saa','po'];
+function gapGroupOf(role){ return GAP_EXEMPT.includes(role)?null:(GAP_GROUPS[role]||'tag'); }
+const ROLE_GAP_DEFAULTS={spk:3,ttm:6,eval:0,tmod:0,ge:0,tag:0};
+const ROLE_GAP_NAMES={spk:'speech',ttm:'Table Topics Master turn',eval:'evaluator turn',tmod:'TMOD turn',ge:'General Evaluator turn'};
 function roleGapWeeks(role){
+  const grp=gapGroupOf(role); if(!grp)return 0;
   const g=state.settings.roleGaps||{};
-  return Math.max(0,Number(role in g?g[role]:(ROLE_GAP_DEFAULTS[role]||0))||0);
+  return Math.max(0,Number(grp in g?g[grp]:ROLE_GAP_DEFAULTS[grp])||0);
 }
 function gapConflict(pid,role,date,exceptMid){
   const weeks=roleGapWeeks(role); if(!weeks)return null;
+  const grp=gapGroupOf(role);
+  /* the shared tag dial sets ONE number, but Timer doesn't block Grammarian —
+     within the tag group only the same role conflicts with itself */
+  const sameSet=r=>grp==='tag'?r===role:gapGroupOf(r)===grp;
   const win=weeks*7*864e5, want=+new Date(date);
   for(const m of state.meetings){
     if(m.cancelled||m.id===exceptMid)continue;
     if(Math.abs(+new Date(m.date)-want)>=win)continue;
     for(const [k,a] of Object.entries(m.assignments||{}))
-      if(k.split('|')[0]===role&&a&&a.memberId===pid&&a.status!=='absent')return m;
+      if(sameSet(k.split('|')[0])&&a&&a.memberId===pid&&a.status!=='absent')return m;
   }
   return null;
 }
 function gapMessage(role,clash,date){
-  const weeks=roleGapWeeks(role), what=ROLE_GAP_NAMES[role]||'booking';
+  const weeks=roleGapWeeks(role), what=ROLE_GAP_NAMES[gapGroupOf(role)]||'turn at this role';
   const from=dstr(new Date(+new Date(clash.date)+weeks*7*864e5));
   return +new Date(clash.date)<=+new Date(date)
     ?`You have a ${what} on ${fmtDate(clash.date)} — the club spaces these ${weeks} weeks apart, so your next one can be from ${fmtDate(from)}. An officer can make an exception.`
@@ -2229,7 +2242,7 @@ async function assign(mid,key,sel){
     const gclash=mT?gapConflict(v,grole,mT.date,mid):null;
     if(gclash){
       const mem=memberById(v);
-      if(!confirm(`${mem?mem.name:'This member'} has a ${ROLE_GAP_NAMES[grole]||grole} on ${fmtDate(gclash.date)} — inside the club's ${roleGapWeeks(grole)}-week gap for this role.\n\nAssign anyway?`)){ render(); return; }
+      if(!confirm(`${mem?mem.name:'This member'} has a ${ROLE_GAP_NAMES[gapGroupOf(grole)]||'turn at this role'} on ${fmtDate(gclash.date)} — inside the club's ${roleGapWeeks(grole)}-week gap for this role.\n\nAssign anyway?`)){ render(); return; }
     }
   }
   const had=S.assignments.find(a=>a.meeting_id===mid&&a.slot_key===key);
@@ -2565,8 +2578,12 @@ function openRolesMessage(mid){
   if(!m.theme&&tmod)asks.push(`🎯 Our TMOD TM ${tmod} is requested to pick the theme of the meeting in the app.`);
   if(!wod&&gram)asks.push(`📖 Our Grammarian TM ${gram} is requested to choose the Word of the Day in the app.`);
   const nudges=asks.length?`\n\n`+asks.join('\n'):'';
-  if(!open.length)return head+`\n\nEvery role is booked — see you there! 🎉`+nudges;
-  return head+`\n\nThese roles are still open:\n`+open.map(s=>`• ${s.label}`).join('\n')+nudges
+  /* the booked list doubles as a reminder to everyone who already has a role */
+  const filled=slotListFor(m).filter(s=>{const a=asg[s.key];return a&&a.memberId&&memberById(a.memberId);})
+    .map(s=>{const a=asg[s.key];return `• ${s.label}: TM ${memberById(a.memberId).name}${(a.durationMin||0)>=LONG_MIN?` (⏱ ${a.durationMin} min)`:''}`;});
+  const booked=filled.length?`\n\n*Already booked — your reminder:*\n`+filled.join('\n'):'';
+  if(!open.length)return head+`\n\nEvery role is booked — see you there! 🎉`+booked+nudges;
+  return head+`\n\nThese roles are still open:\n`+open.map(s=>`• ${s.label}`).join('\n')+booked+nudges
     +`\n\nFirst come, first served — book yours in the app or via the link attached 👇\n${APP_URL}`;
 }
 function copyOpenRoles(mid){ copyText(openRolesMessage(mid),'Open-roles message copied — paste it in WhatsApp'); }
@@ -2986,19 +3003,20 @@ function viewSettings(){
   </div>
   <h2>Fair-use booking gaps</h2>
   <div class="card">
-    <p class="small muted">At most one booking of these roles per member in the given number of
-    weeks (counted both ways from the meeting date). Members are blocked with the reason; officers
-    assigning from the schedule get a confirm and can override. 0 = no limit.</p>
+    <p class="small muted">At most one booking of a role per member in the given number of weeks
+    (counted both ways from the meeting date). Members are blocked with the reason; officers
+    assigning from the schedule get a confirm and can override. 0 = no limit. SAA and the
+    Presiding Officer are standing appointments and never limited. Under "all other roles" the
+    number is shared but each role only limits itself — a Timer turn doesn't block a Grammarian
+    turn.</p>
+    ${[['spk','Speeches'],['ttm','Table Topics Master'],['eval','Evaluators (incl. TT Evaluator)'],
+       ['tmod','Toastmaster of the Day'],['ge','General Evaluator'],
+       ['tag','All other roles (Timer, Grammarian, Camera Master…)']].map(([k,label])=>`
     <div class="row">
-      <label>Speeches — one per</label>
-      <input type="number" min="0" max="26" style="width:70px" value="${roleGapWeeks('spk')}" onchange="setRoleGap('spk',this.value)">
+      <label>${label} — one per</label>
+      <input type="number" min="0" max="26" style="width:70px" value="${roleGapWeeks(k)}" onchange="setRoleGap('${k}',this.value)">
       <label class="small muted">weeks</label>
-    </div>
-    <div class="row">
-      <label>Table Topics Master — one per</label>
-      <input type="number" min="0" max="26" style="width:70px" value="${roleGapWeeks('ttm')}" onchange="setRoleGap('ttm',this.value)">
-      <label class="small muted">weeks</label>
-    </div>
+    </div>`).join('')}
   </div>
   <h2>Getting members on board</h2>
   <div class="card">
