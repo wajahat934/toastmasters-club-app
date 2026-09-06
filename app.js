@@ -188,6 +188,10 @@ const SupabaseApi={
     }
     return data;
   },
+  async loadSettings(){
+    const {data,error}=await sb.from('settings').select('*').eq('id',1).maybeSingle();
+    if(error)throw error; return data;
+  },
   async loadAll(){
     const q=async(t,optional)=>{ const {data,error}=await sb.from(t).select('*'); if(error){ if(optional)return []; throw error; } return data; };
     const [settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes,announcements,birthdayChanges,suggestions]=await Promise.all(
@@ -264,6 +268,10 @@ const SupabaseApi={
       .on('postgres_changes',{event:'*',schema:'public',table:'votes'},p=>onChange('votes',p))
       .on('postgres_changes',{event:'*',schema:'public',table:'announcements'},p=>onChange('announcements',p))
       .on('postgres_changes',{event:'*',schema:'public',table:'birthday_changes'},p=>onChange('birthday_changes',p))
+      /* these two only deliver once the publication carries them:
+         alter publication supabase_realtime add table settings, agendas; */
+      .on('postgres_changes',{event:'*',schema:'public',table:'settings'},p=>onChange('settings',p))
+      .on('postgres_changes',{event:'*',schema:'public',table:'agendas'},p=>onChange('agendas',p))
       .subscribe(status=>{
         /* the first SUBSCRIBED is the normal join (we just loaded everything);
            a later one means the connection dropped and came back, and events
@@ -384,7 +392,8 @@ const DemoApi=(function(){
       if(i>=0)votes.splice(i,1);
       emit('votes','DELETE',null,{poll_id,voter});
     },
-    async saveSettings(data){ settingsRows=[{id:1,data}]; },
+    async saveSettings(data){ settingsRows=[{id:1,data}]; emit('settings','UPDATE',{id:1,data}); },
+    async loadSettings(){ return settingsRows[0]?{...settingsRows[0]}:null; },
     async insertMeeting(m){ const row={id:uid(),theme:'',cancelled:false,reviewed:false,...m}; meetings.push(row); emit('meetings','INSERT',row); return row; },
     async updateMeeting(id,f){ const m=meetings.find(m=>m.id===id); Object.assign(m||{},f); if(m)emit('meetings','UPDATE',m); },
     async book(mid,key,pid,dur){
@@ -717,7 +726,23 @@ function render(){
   else if(tab==='practice')main.innerHTML=viewPractice();
   putScroll(keepScroll);
 }
-function setTab(t){ tab=t; try{localStorage.setItem('lastTab',t);}catch(e){} render(); window.scrollTo(0,0); }
+function setTab(t){ tab=t; try{localStorage.setItem('lastTab',t);}catch(e){} render(); window.scrollTo(0,0); if(t==='settings')refreshSettings(); }
+/* Settings is saved as ONE whole row, so a save from a stale tab silently
+   undoes every settings change made elsewhere since that tab last loaded —
+   that is how the Camera Master role vanished club-wide. Opening the Settings
+   tab therefore always fetches the server's copy first, and any edit marks
+   this device dirty so a slower fetch (or live update) can't clobber it. */
+let settingsDirty=false;
+async function refreshSettings(){
+  settingsDirty=false;
+  try{
+    const row=await api.loadSettings();
+    if(row&&row.data&&row.data.roles&&!settingsDirty){
+      S.settings=row.data; rebuild();
+      if(tab==='settings')render();
+    }
+  }catch(e){ authLog('settings-refresh-failed',{err:String(e&&e.message||e)}); }
+}
 
 /* ================= NOTICES: birthdays + announcements ================= */
 function fmtMD(v){ return v?`${MD_MONTHS[Number(v.slice(0,2))-1]} ${Number(v.slice(3))}`:'not set'; }
@@ -3133,16 +3158,18 @@ function urduNamesHtml(){
   </div>`;
 }
 function saveSettingsRemote(){ sync(api.saveSettings(state.settings)); }
-function s_set(k,v){ state.settings[k]=typeof v==='string'?v.trim():v; S.settings=state.settings; saveSettingsRemote(); render(); }
+function s_set(k,v){ settingsDirty=true; state.settings[k]=typeof v==='string'?v.trim():v; S.settings=state.settings; saveSettingsRemote(); render(); }
 function setRoleGap(role,v){ s_set('roleGaps',{...(state.settings.roleGaps||{}),[role]:Math.max(0,Number(v)||0)}); }
-function roleEdit(i,k,v){ state.settings.roles[i][k]=typeof v==='string'?v.trim():v; saveSettingsRemote(); render(); }
+function roleEdit(i,k,v){ settingsDirty=true; state.settings.roles[i][k]=typeof v==='string'?v.trim():v; saveSettingsRemote(); render(); }
 function roleDel(i){
   const r=state.settings.roles[i];
   if(!confirm('Remove the role "'+r.name+'" from all meetings?'))return;
+  settingsDirty=true;
   state.settings.roles.splice(i,1); saveSettingsRemote(); render();
 }
 function roleAdd(){
   const v=document.getElementById('newRole').value.trim(); if(!v)return;
+  settingsDirty=true;
   state.settings.roles.push({id:uid(),name:v,count:1}); saveSettingsRemote(); render();
 }
 function exportData(){
@@ -4324,6 +4351,19 @@ const DELTA_KEYS={
   birthday_changes:{col:'birthdayChanges',pk:r=>r.id},
 };
 function applyDelta(table,p){
+  /* settings is one whole-blob row: take the server's copy unless this device
+     is mid-edit on the Settings tab (settingsDirty) — a live update must not
+     wipe the field the admin is typing in. agendas is a map by meeting. */
+  if(table==='settings'){
+    const d=p&&p.new&&p.new.data;
+    if(d&&d.roles&&!settingsDirty)S.settings=d;
+    return true;
+  }
+  if(table==='agendas'){
+    if(p&&p.eventType==='DELETE'){ if(p.old&&p.old.meeting_id)delete S.agendas[p.old.meeting_id]; }
+    else if(p&&p.new&&p.new.meeting_id)S.agendas[p.new.meeting_id]=p.new.data;
+    return true;
+  }
   const d=DELTA_KEYS[table]; if(!d||!S[d.col])return false;
   const type=p&&p.eventType;
   const nrow=p&&p.new&&Object.keys(p.new).length?p.new:null;

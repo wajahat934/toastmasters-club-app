@@ -9,7 +9,7 @@
 
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs. Bump it on every
    deploy or browsers serve the old `app.js`. There is no service worker; that bump is the only
-   cache control. Currently **v=84**.
+   cache control. Currently **v=85**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -71,6 +71,14 @@
 | `authLog()` / `checkConnection()` | Session diary and the sign-in connection probe. |
 
 ## Traps that have already bitten
+
+- **Settings is ONE whole-blob row; a save from a stale tab erases everyone else's settings
+  changes.** That is how the club's Camera Master role vanished (2026-09-06): a long-open tab
+  saved its old roles list over the new one — and the v83 delta-realtime change makes tabs
+  stale for LONGER. Mitigations since v85: opening the Settings tab always re-fetches the row
+  first (`refreshSettings`, guarded by `settingsDirty`), and settings+agendas are wired into the
+  realtime channel — but they only deliver once the user runs
+  `alter publication supabase_realtime add table settings, agendas;` in the SQL editor.
 
 - **`state` goes stale after writing to `S`.** `bookLocal`/`unbookLocal` mutate `S`; helpers that read
   the derived `state` are stale until `rebuild()`. Moving three speakers at once silently overwrote
