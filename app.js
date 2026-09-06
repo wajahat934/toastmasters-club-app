@@ -1453,12 +1453,46 @@ function viewBook(){
         }
         if(slotReserved(m,s.key))
           return `<div class="bookslot"><div><div class="rname">${esc(s.label)}</div><div class="holder muted">⏱ reserved — long-format speech this week</div></div></div>`;
+        /* open to others, but inside this member's fair-use gap: say so instead
+           of offering a Book button that would only refuse */
+        const grole=s.key.split('|')[0], gclash=gapConflict(me.profileId,grole,m.date,m.id);
+        if(gclash)
+          return `<div class="bookslot"><div><div class="rname">${esc(s.label)}</div><div class="holder muted" title="${esc(gapMessage(grole,gclash,m.date))}">⏳ ${roleGapWeeks(grole)}-week gap — yours: ${esc(fmtDate(gclash.date))}</div></div></div>`;
         return `<div class="bookslot open"><div><div class="rname">${esc(s.label)}</div><div class="holder muted">open</div></div>
           <button class="btn small" onclick="myBook('${m.id}','${s.key}')">Book</button></div>`;
       }).join('')}
       </div></div>`;
   }
   return html;
+}
+/* Fair-use gaps: at most one booking of a role per member in a set number of
+   weeks. The club's call of Sep 2026: speeches 3 weeks, Table Topics Master 6 —
+   both changeable in Settings as enthusiasm allows (0 = no limit). A member
+   self-booking is blocked with the reason; an officer assigning gets a confirm
+   and can override. An 'absent' outcome doesn't count — they didn't do it. */
+const ROLE_GAP_DEFAULTS={spk:3,ttm:6};
+const ROLE_GAP_NAMES={spk:'speech',ttm:'Table Topics Master turn'};
+function roleGapWeeks(role){
+  const g=state.settings.roleGaps||{};
+  return Math.max(0,Number(role in g?g[role]:(ROLE_GAP_DEFAULTS[role]||0))||0);
+}
+function gapConflict(pid,role,date,exceptMid){
+  const weeks=roleGapWeeks(role); if(!weeks)return null;
+  const win=weeks*7*864e5, want=+new Date(date);
+  for(const m of state.meetings){
+    if(m.cancelled||m.id===exceptMid)continue;
+    if(Math.abs(+new Date(m.date)-want)>=win)continue;
+    for(const [k,a] of Object.entries(m.assignments||{}))
+      if(k.split('|')[0]===role&&a&&a.memberId===pid&&a.status!=='absent')return m;
+  }
+  return null;
+}
+function gapMessage(role,clash,date){
+  const weeks=roleGapWeeks(role), what=ROLE_GAP_NAMES[role]||'booking';
+  const from=dstr(new Date(+new Date(clash.date)+weeks*7*864e5));
+  return +new Date(clash.date)<=+new Date(date)
+    ?`You have a ${what} on ${fmtDate(clash.date)} — the club spaces these ${weeks} weeks apart, so your next one can be from ${fmtDate(from)}. An officer can make an exception.`
+    :`You already have a ${what} booked for ${fmtDate(clash.date)}, within ${weeks} weeks of this meeting. Release that one first, or ask an officer.`;
 }
 /* Fair-use rule: no speeches in back-to-back meetings. Enforced only on member
    self-booking — admins can still place anyone from the schedule tab (contest
@@ -1495,6 +1529,11 @@ function slotReserved(m,slotKey){
 }
 async function myBook(mid,key){
   let dur=null;
+  {
+    const mT=state.meetings.find(x=>x.id===mid);
+    const gclash=mT?gapConflict(me.profileId,key.split('|')[0],mT.date,mid):null;
+    if(gclash){ toast(gapMessage(key.split('|')[0],gclash,mT.date)); return; }
+  }
   if(key.startsWith('spk|')){
     const clash=consecutiveSpeech(mid,me.profileId);
     if(clash){ toast(`You're speaking on ${fmtDate(clash.date)} — back-to-back speeches are off so more members get a turn. Pick a later meeting 🙏`); return; }
@@ -2167,6 +2206,16 @@ async function assign(mid,key,sel){
       const row=await api.insertProfile({name:name.trim(),home_club:club.trim()||'other club',approved:true,active:true,role:'member'});
       S.profiles.push(row); v=row.id;
     }catch(e){ toast('Could not add guest'); render(); return; }
+  }
+  /* fair-use gap: the officer may override, but knowingly */
+  if(v){
+    const mT=state.meetings.find(x=>x.id===mid);
+    const grole=key.split('|')[0];
+    const gclash=mT?gapConflict(v,grole,mT.date,mid):null;
+    if(gclash){
+      const mem=memberById(v);
+      if(!confirm(`${mem?mem.name:'This member'} has a ${ROLE_GAP_NAMES[grole]||grole} on ${fmtDate(gclash.date)} — inside the club's ${roleGapWeeks(grole)}-week gap for this role.\n\nAssign anyway?`)){ render(); return; }
+    }
   }
   const had=S.assignments.find(a=>a.meeting_id===mid&&a.slot_key===key);
   if(!v){
@@ -2920,6 +2969,22 @@ function viewSettings(){
     </div>
     <p class="small muted">Changing roles applies to all meetings and to what members can book.</p>
   </div>
+  <h2>Fair-use booking gaps</h2>
+  <div class="card">
+    <p class="small muted">At most one booking of these roles per member in the given number of
+    weeks (counted both ways from the meeting date). Members are blocked with the reason; officers
+    assigning from the schedule get a confirm and can override. 0 = no limit.</p>
+    <div class="row">
+      <label>Speeches — one per</label>
+      <input type="number" min="0" max="26" style="width:70px" value="${roleGapWeeks('spk')}" onchange="setRoleGap('spk',this.value)">
+      <label class="small muted">weeks</label>
+    </div>
+    <div class="row">
+      <label>Table Topics Master — one per</label>
+      <input type="number" min="0" max="26" style="width:70px" value="${roleGapWeeks('ttm')}" onchange="setRoleGap('ttm',this.value)">
+      <label class="small muted">weeks</label>
+    </div>
+  </div>
   <h2>Getting members on board</h2>
   <div class="card">
     <div class="row">
@@ -3036,6 +3101,7 @@ function urduNamesHtml(){
 }
 function saveSettingsRemote(){ sync(api.saveSettings(state.settings)); }
 function s_set(k,v){ state.settings[k]=typeof v==='string'?v.trim():v; S.settings=state.settings; saveSettingsRemote(); render(); }
+function setRoleGap(role,v){ s_set('roleGaps',{...(state.settings.roleGaps||{}),[role]:Math.max(0,Number(v)||0)}); }
 function roleEdit(i,k,v){ state.settings.roles[i][k]=typeof v==='string'?v.trim():v; saveSettingsRemote(); render(); }
 function roleDel(i){
   const r=state.settings.roles[i];
@@ -4419,7 +4485,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   pStart,pAdd,pRemove,pAdjust,pPaper,pVote,pCastMine,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
   bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
   sugAdd,sugStatus,sugNote,sugAnnounce,sugDel,copyInvite,copyNudge,copyOpenRoles,copyRolePlayers,demoOpenVoting,
-  toggleArchive,delMember,keepOpen,s_set,roleEdit,roleDel,roleAdd,exportData,setDcp,
+  toggleArchive,delMember,keepOpen,s_set,setRoleGap,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meChangePw,meGoalAdd,meGoalToggle,meGoalDel,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});
 Object.defineProperty(window,'dcpSelYear',{get:()=>dcpSelYear,set:v=>{dcpSelYear=v;}});

@@ -109,6 +109,14 @@ The club voted manually one week because the app choked under lag. Two causes, b
   and `beforeunload` warns if a vote is still unsent. RULE: a tap the member saw acknowledged
   must never silently reverse — anything new in this area keeps that property.
 
+Also added (same day): **fair-use booking gaps** — at most one booking of a role per member per
+N weeks, counted both ways from the meeting date, skipping cancelled meetings and 'absent'
+outcomes. Defaults live in `ROLE_GAP_DEFAULTS` (speeches 3, TTM 6), overridable per role in
+Settings → "Fair-use booking gaps" (`settings.roleGaps`, jsonb — no migration). Members get a
+greyed slot + reason and a hard stop in `myBook`; officers get a confirm in `assign()` and can
+override. `gapConflict()`/`gapMessage()` next to `consecutiveSpeech()` (which still exists and
+only matters if a gap is set to 0).
+
 ## Fixed 2026-08-23
 
 - **Reducing the speaker count deleted the evaluator.** `spkDelta` moved the dropped speaker forward
