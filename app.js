@@ -289,8 +289,23 @@ const DemoApi=(function(){
      live backend broadcasts, so the delta-update path runs (and can be
      rehearsed, with demoLag) against the fake backend too */
   let onEvt=null;
-  const emit=(table,eventType,n,o)=>{ if(onEvt)setTimeout(()=>onEvt(table,{eventType,new:n?{...n}:{},old:o?{...o}:{}}),0); };
-  const P=(n,extra)=>({id:uid(),auth_id:null,email:'',name:n,home_club:null,role:'member',approved:true,active:true,path:'',birthday:null,base_level:0,projects_done:0,...extra});
+  /* Two sandbox windows on the SAME computer share their fake backend over a
+     BroadcastChannel: every emitted event is also posted to the other windows,
+     which apply it to their own in-memory tables and hand it to the app's
+     normal realtime path. Open the sandbox twice — admin in one, member in the
+     other — and voting, booking and settings behave like the live app. Only
+     the emitting tables sync; profiles/awards/goals stay per-window. */
+  const TAB_TOKEN=Math.random().toString(36).slice(2);
+  let bch=null; try{ bch=new BroadcastChannel('rtc-sandbox'); }catch(e){}
+  const emit=(table,eventType,n,o)=>{
+    const payload={eventType,new:n?{...n}:{},old:o?{...o}:{}};
+    if(onEvt)setTimeout(()=>onEvt(table,payload),0);
+    if(bch)try{ bch.postMessage({from:TAB_TOKEN,table,payload}); }catch(e){}
+  };
+  /* deterministic profile ids, so rows broadcast between windows agree on who
+     is who (uid() would differ per window and break every reference) */
+  let pSeq=0;
+  const P=(n,extra)=>({id:'dp'+(pSeq++),auth_id:null,email:'',name:n,home_club:null,role:'member',approved:true,active:true,path:'',birthday:null,base_level:0,projects_done:0,...extra});
   const mdOf=n=>{const d=new Date();d.setDate(d.getDate()+n);return dstr(d).slice(5);};
   /* the roster mirrors the real club (names + rough Pathways standing as of
      Aug 2026) so training videos look like the app members actually see; the
@@ -351,6 +366,27 @@ const DemoApi=(function(){
   const suggestions=[{id:'sug1',profile_id:profiles[1].id,text:'Can we start meetings 10 minutes earlier?',hide_name:false,status:'new',admin_note:null,created_at:new Date().toISOString()}];
   const dcpRows=[],agendaRows=[];
   let settingsRows=[{id:1,data:defaultSettings()}];
+  /* events arriving from another sandbox window: patch our own tables first
+     (so tallies and later loads agree), then hand the event to the app */
+  const BC_PK={votes:r=>r.poll_id+'|'+r.voter,polls:r=>r.id,assignments:r=>r.meeting_id+'|'+r.slot_key,meetings:r=>r.id,announcements:r=>r.id};
+  const BC_ARR={votes,polls,assignments,meetings,announcements};
+  if(bch)bch.onmessage=ev=>{
+    const m=ev.data; if(!m||m.from===TAB_TOKEN)return;
+    const {table,payload}=m;
+    if(table==='settings'){ if(payload.new&&payload.new.data)settingsRows=[{id:1,data:payload.new.data}]; }
+    else{
+      const arr=BC_ARR[table],pk=BC_PK[table];
+      if(arr&&pk){
+        if(payload.eventType==='DELETE'){
+          if(payload.old&&Object.keys(payload.old).length){ const key=pk(payload.old); const i=arr.findIndex(r=>pk(r)===key); if(i>=0)arr.splice(i,1); }
+        }else if(payload.new&&Object.keys(payload.new).length){
+          const key=pk(payload.new); const i=arr.findIndex(r=>pk(r)===key);
+          if(i>=0)arr[i]={...arr[i],...payload.new}; else arr.push({...payload.new});
+        }
+      }
+    }
+    if(onEvt)onEvt(table,payload);
+  };
   const T={profiles,meetings,assignments,awards,goals};
   return {
     demo:true,
@@ -1486,7 +1522,9 @@ function viewBook(){
         const durChip=(a&&(a.durationMin||0)>=LONG_MIN)?` <span class="chip gold" title="long-format speech">⏱ ${a.durationMin} min</span>`:'';
         if(a&&a.memberId===me.profileId)
           return `<div class="bookslot mine"><div><div class="rname">${esc(s.label)}</div><div class="holder">You${durChip}</div></div>
-            <button class="btn ghost small" onclick="myUnbook('${m.id}','${s.key}')">Release</button></div>`;
+            ${releaseClosed(m)
+              ?`<span class="muted small" title="Releases close ${releaseCutoffDays()} days before the meeting. If you really can't make it, ask an officer.">🔒 yours now</span>`
+              :`<button class="btn ghost small" onclick="myUnbook('${m.id}','${s.key}')">Release</button>`}</div>`;
         if(a&&a.memberId){
           const holder=memberById(a.memberId);
           return `<div class="bookslot"><div><div class="rname">${esc(s.label)}</div><div class="holder">${esc(holder?holder.name:'…')}${durChip}</div></div></div>`;
@@ -1509,7 +1547,8 @@ function viewBook(){
    weeks. The club's call of Sep 2026: speeches 3 weeks, Table Topics Master 6 —
    both changeable in Settings as enthusiasm allows (0 = no limit). A member
    self-booking is blocked with the reason; an officer assigning gets a confirm
-   and can override. An 'absent' outcome doesn't count — they didn't do it. */
+   and can override. A held booking counts even if the member ends up absent —
+   see the note inside gapConflict. */
 /* Every role belongs to a gap GROUP. The named groups get their own dial in
    Settings; every unlisted role (Timer, Grammarian, Camera Master, whatever
    the club adds next) shares the single 'tag' dial. SAA and the Presiding
@@ -1536,9 +1575,21 @@ function gapConflict(pid,role,date,exceptMid){
     if(m.cancelled||m.id===exceptMid)continue;
     if(Math.abs(+new Date(m.date)-want)>=win)continue;
     for(const [k,a] of Object.entries(m.assignments||{}))
-      if(sameSet(k.split('|')[0])&&a&&a.memberId===pid&&a.status!=='absent')return m;
+      /* an 'absent' booking still counts: the turn was spent the moment the
+         slot was held past the release cutoff, speech given or not — the
+         club's call of Sep 2026. Officers can unbook someone entirely to
+         hand the turn back. */
+      if(sameSet(k.split('|')[0])&&a&&a.memberId===pid)return m;
   }
   return null;
+}
+/* Members may release a booking only until the cutoff (default 3 days before
+   the meeting — Wednesday for a Saturday club); after that the slot is theirs
+   to fill and an officer has to release them. 0 = release any time. */
+function releaseCutoffDays(){ const v=state.settings.releaseCutoffDays; return v==null?3:Math.max(0,Number(v)||0); }
+function releaseClosed(m){
+  const days=releaseCutoffDays(); if(!days)return false;
+  return Date.now()>=+parseD(m.date)-days*864e5;
 }
 function gapMessage(role,clash,date){
   const weeks=roleGapWeeks(role), what=ROLE_GAP_NAMES[gapGroupOf(role)]||'turn at this role';
@@ -1623,6 +1674,11 @@ async function myBook(mid,key){
   }
 }
 async function myUnbook(mid,key){
+  const mR=state.meetings.find(x=>x.id===mid);
+  if(mR&&releaseClosed(mR)){
+    toast(`Releases for ${fmtDate(mR.date)} closed ${releaseCutoffDays()} day${releaseCutoffDays()>1?'s':''} before the meeting — the role is yours now. If you really can't make it, ask an officer.`);
+    return;
+  }
   try{
     await api.unbook(mid,key);
     S.assignments=S.assignments.filter(a=>!(a.meeting_id===mid&&a.slot_key===key));
@@ -3033,7 +3089,14 @@ function viewSettings(){
     assigning from the schedule get a confirm and can override. 0 = no limit. SAA and the
     Presiding Officer are standing appointments and never limited. Under "all other roles" the
     number is shared but each role only limits itself — a Timer turn doesn't block a Grammarian
-    turn.</p>
+    turn. A booking held past the release deadline counts toward the gap even if the member is
+    absent on the day; an officer unbooking them hands the turn back.</p>
+    <div class="row">
+      <label>Members can release a booking until</label>
+      <input type="number" min="0" max="14" style="width:70px" value="${releaseCutoffDays()}" onchange="s_set('releaseCutoffDays',Math.max(0,Number(this.value)||0))">
+      <label class="small muted">days before the meeting (3 = Wednesday for a Saturday club; 0 = any time)</label>
+    </div>
+    <hr style="border:none;border-top:1px solid var(--line,#8884);margin:8px 0">
     ${[['spk','Speeches'],['ttm','Table Topics Master'],['eval','Evaluators (incl. TT Evaluator)'],
        ['tmod','Toastmaster of the Day'],['ge','General Evaluator'],
        ['tag','All other roles (Timer, Grammarian, Camera Master…)']].map(([k,label])=>`
@@ -3157,7 +3220,16 @@ function urduNamesHtml(){
     </tbody></table></div>
   </div>`;
 }
-function saveSettingsRemote(){ sync(api.saveSettings(state.settings)); }
+/* settingsDirty guards local edits against being clobbered by a slower fetch
+   or live update; once the last outstanding save has landed the server has our
+   copy, so remote settings updates are safe to accept again */
+let settingsSaving=0;
+function saveSettingsRemote(){
+  settingsSaving++;
+  Promise.resolve(api.saveSettings(state.settings))
+    .catch(e=>{ console.error(e); toast('Sync failed: '+(e.message||e)); })
+    .finally(()=>{ if(--settingsSaving===0)settingsDirty=false; });
+}
 function s_set(k,v){ settingsDirty=true; state.settings[k]=typeof v==='string'?v.trim():v; S.settings=state.settings; saveSettingsRemote(); render(); }
 function setRoleGap(role,v){ s_set('roleGaps',{...(state.settings.roleGaps||{}),[role]:Math.max(0,Number(v)||0)}); }
 function roleEdit(i,k,v){ settingsDirty=true; state.settings.roles[i][k]=typeof v==='string'?v.trim():v; saveSettingsRemote(); render(); }

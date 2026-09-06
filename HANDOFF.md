@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=85**.
+   every deploy or browsers serve the old `app.js`. Currently **v=86**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -99,6 +99,26 @@
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Added 2026-09-06 late — release cutoff, absent counts, two-window sandbox (v86)
+
+- **Release cutoff**: members can self-release a booking only until
+  `settings.releaseCutoffDays` before the meeting (default 3 = Wednesday for a Saturday club;
+  0 = any time; dial in the Fair-use Settings card). Inside the window the slot shows
+  "🔒 yours now" and `myUnbook` refuses; officers can still unbook from the schedule.
+- **A held booking counts toward the gap even when the outcome is absent** — the club's rule:
+  the turn is spent once the slot is held past the cutoff, speech given or not. The absent-skip
+  in `gapConflict` was REMOVED deliberately; an officer unbooking someone entirely is the
+  hand-the-turn-back path.
+- **Sandbox windows on one computer share their fake backend** over
+  `BroadcastChannel('rtc-sandbox')`: DemoApi `emit()` broadcasts, a listener patches the local
+  tables and feeds the app's realtime path. Demo profile ids are now deterministic (`dp0…`) so
+  rows agree across windows — uid() ids would not. Only emitting tables sync (assignments,
+  meetings, polls, votes, announcements, settings); profiles/awards/goals stay per-window.
+  Different DEVICES still don't sync in demo — there is no server.
+- `settingsDirty` now clears when the last outstanding settings save lands (was sticky until
+  the Settings tab was reopened, which would have blocked incoming settings realtime on the
+  device that last edited).
 
 ## Fixed 2026-09-06 — voting resilience (v83)
 
