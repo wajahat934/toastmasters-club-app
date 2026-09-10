@@ -4472,14 +4472,21 @@ function applyDelta(table,p){
   }
   return false;
 }
-/* Reloads are sequenced: a slow response from an OLDER reload must never be
-   applied over a newer one — on a laggy night that is exactly how fresh local
-   state (a vote, a booking) got wound back to a stale snapshot. */
-let reloadSeq=0;
-async function reload(){
-  const seq=++reloadSeq;
+/* Reload is SINGLE-FLIGHT: a second caller while one is running waits for the
+   same load instead of starting its own. This is both the stale-data guard
+   (two loads can never race, so an old response can never land on top of a
+   newer one) and a crash fix: entry runs route() twice — boot plus the auth
+   library's signed-in event — and when a drop-the-superseded-reload guard let
+   the first caller continue WITHOUT state ever being built, enterApp read
+   state.settings off null and members got a blank screen at open. */
+let reloadInflight=null;
+function reload(){
+  if(reloadInflight)return reloadInflight;
+  reloadInflight=doReload().finally(()=>{ reloadInflight=null; });
+  return reloadInflight;
+}
+async function doReload(){
   const raw=await api.loadAll();
-  if(seq!==reloadSeq)return;   /* superseded while in flight — drop the stale snapshot */
   S.profiles=raw.profiles; S.meetings=raw.meetings; S.assignments=raw.assignments;
   S.awards=raw.awards; S.goals=raw.goals;
   S.polls=raw.polls||[]; S.votes=raw.votes||[]; S.announcements=raw.announcements||[];
