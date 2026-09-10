@@ -1546,9 +1546,14 @@ function viewBook(){
           return `<div class="bookslot"><div><div class="rname">${esc(s.label)}</div><div class="holder muted">🚫 reserved — the officers will assign this role</div></div></div>`;
         if(slotReserved(m,s.key))
           return `<div class="bookslot"><div><div class="rname">${esc(s.label)}</div><div class="holder muted">⏱ reserved — long-format speech this week</div></div></div>`;
-        /* open to others, but inside this member's fair-use gap: say so instead
-           of offering a Book button that would only refuse */
-        const grole=s.key.split('|')[0], gclash=gapConflict(me.profileId,grole,m.date,m.id);
+        /* open to others, but not to this member: already holding this role
+           family in this meeting, or inside their fair-use gap — say so
+           instead of offering a Book button that would only refuse */
+        const grole=s.key.split('|')[0];
+        const smc=sameMeetingConflict(me.profileId,grole,m);
+        if(smc)
+          return `<div class="bookslot"><div><div class="rname">${esc(s.label)}</div><div class="holder muted" title="One turn of a role per meeting — an officer can double you up if needed.">⏳ you're already ${esc(roleNameById(ridOf(smc)))} this meeting</div></div></div>`;
+        const gclash=gapConflict(me.profileId,grole,m.date,m.id);
         if(gclash)
           return `<div class="bookslot"><div><div class="rname">${esc(s.label)}</div><div class="holder muted" title="${esc(gapMessage(grole,gclash,m.date))}">⏳ ${roleGapWeeks(grole)}-week gap — yours: ${esc(fmtDate(gclash.date))}</div></div></div>`;
         return `<div class="bookslot open"><div><div class="rname">${esc(s.label)}</div><div class="holder muted">open</div></div>
@@ -1596,6 +1601,18 @@ function gapConflict(pid,role,date,exceptMid){
          hand the turn back. */
       if(sameSet(k.split('|')[0])&&a&&a.memberId===pid)return m;
   }
+  return null;
+}
+/* One member, one turn of a role family per MEETING — always on, no dial.
+   The weekly gap rule skips the meeting being booked (so a booking can be
+   moved between its slots), which left this hole: nothing stopped one person
+   taking Evaluator 1 AND Evaluator 2 on the same night. Members are blocked;
+   officers get a confirm — a small club sometimes doubles up on purpose. */
+function sameMeetingConflict(pid,role,m){
+  const grp=gapGroupOf(role); if(!grp)return null;
+  const sameSet=r=>grp==='tag'?r===role:gapGroupOf(r)===grp;
+  for(const [k,a] of Object.entries((m&&m.assignments)||{}))
+    if(sameSet(k.split('|')[0])&&a&&a.memberId===pid&&a.status!=='absent')return k;
   return null;
 }
 /* Members may release a booking only until the cutoff (default 3 days before
@@ -1663,6 +1680,8 @@ async function myBook(mid,key,btn){
   {
     const mT=state.meetings.find(x=>x.id===mid);
     if(mT&&slotBlocked(mT,key)){ toast('This role is reserved for this meeting — the officers will assign it.'); return; }
+    const smc=mT?sameMeetingConflict(me.profileId,key.split('|')[0],mT):null;
+    if(smc){ toast(`You're already ${roleNameById(ridOf(smc))} in this meeting — one turn of a role per meeting. An officer can double you up if the club needs it.`); return; }
     const gclash=mT?gapConflict(me.profileId,key.split('|')[0],mT.date,mid):null;
     if(gclash){ toast(gapMessage(key.split('|')[0],gclash,mT.date)); return; }
   }
@@ -2354,10 +2373,15 @@ async function assign(mid,key,sel){
       S.profiles.push(row); v=row.id;
     }catch(e){ toast('Could not add guest'); render(); return; }
   }
-  /* fair-use gap: the officer may override, but knowingly */
+  /* fair-use rules: the officer may override, but knowingly */
   if(v){
     const mT=state.meetings.find(x=>x.id===mid);
     const grole=key.split('|')[0];
+    const smc=mT?sameMeetingConflict(v,grole,mT):null;
+    if(smc&&smc!==key){
+      const mem=memberById(v);
+      if(!confirm(`${mem?mem.name:'This member'} is already ${roleNameById(ridOf(smc))} in this meeting.\n\nGive them a second turn of the same role anyway?`)){ render(); return; }
+    }
     const gclash=mT?gapConflict(v,grole,mT.date,mid):null;
     if(gclash){
       const mem=memberById(v);

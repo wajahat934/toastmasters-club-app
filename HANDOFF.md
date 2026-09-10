@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=88**.
+   every deploy or browsers serve the old `app.js`. Currently **v=89**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -99,6 +99,15 @@
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Fixed 2026-09-10 — one turn of a role family per meeting (v89)
+
+The weekly gap rule excludes the meeting being booked (so a booking can be moved between its
+slots), which left a hole: one member could take Evaluator 1 AND Evaluator 2 on the same night.
+`sameMeetingConflict()` now blocks a member from self-booking a second slot of the same role
+FAMILY in one meeting (eval family includes the TT Evaluator; tag roles match only themselves;
+SAA/PO exempt) — always on, independent of the gap dials. The grid greys the slot with the
+reason; officers get a confirm in `assign()` and can still double someone up on purpose.
 
 ## Added 2026-09-10 — perceived-speed batch (v88)
 
