@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=87**.
+   every deploy or browsers serve the old `app.js`. Currently **v=88**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -99,6 +99,23 @@
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Added 2026-09-10 — perceived-speed batch (v88)
+
+- **Instant open**: `saveSnapshot()` after every full load keeps the last data in localStorage
+  (`tmSnap.v1` — per-member, 7-day cap, DEMO-gated because the sandbox shares this origin's
+  storage; `localStorage.demoSnap='1'` enables it in demo for testing; agendaAssets and agendas
+  excluded or the base64 images blow the quota). `paintSnapshot()` in enterApp paints it before
+  the fresh load; if the fresh load then FAILS the app stays usable on the snapshot with an
+  honest toast. Snapshot cleared on the sign-out button.
+- **Split load**: `loadCore()` (settings/profiles/meetings/assignments/polls/votes/announcements)
+  and `loadRest()` (awards/goals/dcp/agendas/birthday_changes/suggestions) fetch in PARALLEL but
+  core is applied+painted the moment it lands. `loadAll` is gone from both apis.
+- **In-place tally**: a votes delta calls `tallyPatch(pollId)` which patches the `data-app`/
+  `data-total` cells on the VC card — no rebuild, no redraw, focus survives while a room votes.
+  Falls back to the debounced redraw when the card isn't on screen.
+- **Pressed booking buttons**: Book/Release flip to "Booking…"/"Releasing…" + disabled on tap
+  (myBook/myUnbook take the button as 3rd arg); error paths re-render so the button comes back.
 
 ## Added 2026-09-06 late — release cutoff, absent counts, two-window sandbox (v86)
 

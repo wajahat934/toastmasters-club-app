@@ -192,12 +192,21 @@ const SupabaseApi={
     const {data,error}=await sb.from('settings').select('*').eq('id',1).maybeSingle();
     if(error)throw error; return data;
   },
-  async loadAll(){
+  /* The first paint needs only the core: who, when, what's booked, what's
+     being voted on. The heavy rest — every saved agenda above all — arrives
+     right behind it. Both fetches run in parallel; the split is about when
+     each half can be APPLIED, not total transfer time. */
+  async loadCore(){
     const q=async(t,optional)=>{ const {data,error}=await sb.from(t).select('*'); if(error){ if(optional)return []; throw error; } return data; };
-    const [settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes,announcements,birthdayChanges,suggestions]=await Promise.all(
-      [...['settings','profiles','meetings','assignments','awards','goals','dcp','agendas'].map(t=>q(t)),
-       q('polls',true),q('votes',true),q('announcements',true),q('birthday_changes',true),q('suggestions',true)]);
-    return {settingsRows,profiles,meetings,assignments,awards,goals,dcpRows,agendaRows,polls,votes,announcements,birthdayChanges,suggestions};
+    const [settingsRows,profiles,meetings,assignments,polls,votes,announcements]=await Promise.all(
+      [q('settings'),q('profiles'),q('meetings'),q('assignments'),q('polls',true),q('votes',true),q('announcements',true)]);
+    return {settingsRows,profiles,meetings,assignments,polls,votes,announcements};
+  },
+  async loadRest(){
+    const q=async(t,optional)=>{ const {data,error}=await sb.from(t).select('*'); if(error){ if(optional)return []; throw error; } return data; };
+    const [awards,goals,dcpRows,agendaRows,birthdayChanges,suggestions]=await Promise.all(
+      [q('awards'),q('goals'),q('dcp'),q('agendas'),q('birthday_changes',true),q('suggestions',true)]);
+    return {awards,goals,dcpRows,agendaRows,birthdayChanges,suggestions};
   },
   async addSuggestion(f){ const {data,error}=await sb.from('suggestions').insert(f).select().single(); if(error)throw error; return data; },
   async updSuggestion(id,f){ const {error}=await sb.from('suggestions').update(f).eq('id',id); if(error)throw error; },
@@ -403,11 +412,15 @@ const DemoApi=(function(){
     /* return copies of rows AND of the arrays — the app mutates its own state
        locally, and sharing references would both double rows up and hide
        real changes from this fake backend (the server sees separate rows) */
-    async loadAll(){
+    async loadCore(){
       const cp=a=>a.map(o=>({...o}));
       return {settingsRows:cp(settingsRows),profiles:cp(profiles),meetings:cp(meetings),assignments:cp(assignments),
-        awards:cp(awards),goals:cp(goals),dcpRows:cp(dcpRows),agendaRows:cp(agendaRows),polls:cp(polls),
-        votes:cp(votes),announcements:cp(announcements),birthdayChanges:cp(birthdayChanges),suggestions:cp(suggestions)};
+        polls:cp(polls),votes:cp(votes),announcements:cp(announcements)};
+    },
+    async loadRest(){
+      const cp=a=>a.map(o=>({...o}));
+      return {awards:cp(awards),goals:cp(goals),dcpRows:cp(dcpRows),agendaRows:cp(agendaRows),
+        birthdayChanges:cp(birthdayChanges),suggestions:cp(suggestions)};
     },
     async addSuggestion(f){ const row={id:uid(),status:'new',admin_note:null,created_at:new Date().toISOString(),...f}; suggestions.push(row); return row; },
     async updSuggestion(id,f){ Object.assign(suggestions.find(s=>s.id===id)||{},f); },
@@ -1031,13 +1044,13 @@ function vcPollCard(p){
       ${(p.candidates||[]).map(c=>`<tr>
         <td title="${esc(c.name)}">${esc(vcShortName(c.name))} ${p.winner_key===c.key?'🏆':''}
           ${p.status==='open'?`<button class="del no-print" title="Remove this candidate" onclick="removeCandidate('${p.id}','${c.key}')">✕</button>`:''}</td>
-        <td class="num">${app[c.key]}</td>
+        <td class="num" data-app="${p.id}:${c.key}">${app[c.key]}</td>
         <td class="num">
           <button class="btn ghost small" onclick="adjustPoll('${p.id}','${c.key}',-1)">−</button>
           ${Number((p.adjust||{})[c.key]||0)}
           <button class="btn ghost small" onclick="adjustPoll('${p.id}','${c.key}',1)">＋</button>
         </td>
-        <td class="num"><b>${total[c.key]}</b></td>
+        <td class="num"><b data-total="${p.id}:${c.key}">${total[c.key]}</b></td>
       </tr>`).join('')}
     </tbody></table></div>
     ${tie?`<div class="warnline">⚖ It's a tie — pick the winner:
@@ -1524,7 +1537,7 @@ function viewBook(){
           return `<div class="bookslot mine"><div><div class="rname">${esc(s.label)}</div><div class="holder">You${durChip}</div></div>
             ${releaseClosed(m)
               ?`<span class="muted small" title="Releases close ${releaseCutoffDays()} days before the meeting. If you really can't make it, ask an officer.">🔒 yours now</span>`
-              :`<button class="btn ghost small" onclick="myUnbook('${m.id}','${s.key}')">Release</button>`}</div>`;
+              :`<button class="btn ghost small" onclick="myUnbook('${m.id}','${s.key}',this)">Release</button>`}</div>`;
         if(a&&a.memberId){
           const holder=memberById(a.memberId);
           return `<div class="bookslot"><div><div class="rname">${esc(s.label)}</div><div class="holder">${esc(holder?holder.name:'…')}${durChip}</div></div></div>`;
@@ -1539,7 +1552,7 @@ function viewBook(){
         if(gclash)
           return `<div class="bookslot"><div><div class="rname">${esc(s.label)}</div><div class="holder muted" title="${esc(gapMessage(grole,gclash,m.date))}">⏳ ${roleGapWeeks(grole)}-week gap — yours: ${esc(fmtDate(gclash.date))}</div></div></div>`;
         return `<div class="bookslot open"><div><div class="rname">${esc(s.label)}</div><div class="holder muted">open</div></div>
-          <button class="btn small" onclick="myBook('${m.id}','${s.key}')">Book</button></div>`;
+          <button class="btn small" onclick="myBook('${m.id}','${s.key}',this)">Book</button></div>`;
       }).join('')}
       </div></div>`;
   }
@@ -1645,7 +1658,7 @@ function slotReserved(m,slotKey){
   const pre=slotKey.startsWith('spk|')?'spk|':slotKey.startsWith('eval|')?'eval|':null;
   return !!pre&&bookedCount(m,pre)>=speakersFor(m)-1;
 }
-async function myBook(mid,key){
+async function myBook(mid,key,btn){
   let dur=null;
   {
     const mT=state.meetings.find(x=>x.id===mid);
@@ -1677,6 +1690,9 @@ async function myBook(mid,key){
       return;
     }
   }
+  /* the tap must never feel dead: the button acknowledges it immediately,
+     the server stays the referee for who actually got the slot */
+  if(btn){ btn.disabled=true; btn.textContent='Booking…'; }
   try{
     await api.book(mid,key,me.profileId,dur);
     /* stamped locally too, so give-way order is right straight away rather than
@@ -1686,19 +1702,21 @@ async function myBook(mid,key){
   }catch(e){
     if(String(e.message||'').includes('duplicate')){ toast('Someone just took that slot'); await reload(); }
     else toast('Could not book: '+(e.message||e));
+    render();
   }
 }
-async function myUnbook(mid,key){
+async function myUnbook(mid,key,btn){
   const mR=state.meetings.find(x=>x.id===mid);
   if(mR&&releaseClosed(mR)){
     toast(`Releases for ${fmtDate(mR.date)} closed ${releaseCutoffDays()} day${releaseCutoffDays()>1?'s':''} before the meeting — the role is yours now. If you really can't make it, ask an officer.`);
     return;
   }
+  if(btn){ btn.disabled=true; btn.textContent='Releasing…'; }
   try{
     await api.unbook(mid,key);
     S.assignments=S.assignments.filter(a=>!(a.meeting_id===mid&&a.slot_key===key));
     rebuild();render();toast('Released');
-  }catch(e){ toast('Could not release: '+(e.message||e)); }
+  }catch(e){ toast('Could not release: '+(e.message||e)); render(); }
 }
 
 /* ================= MEMBER: own profile ================= */
@@ -4479,6 +4497,23 @@ function applyDelta(table,p){
    library's signed-in event — and when a drop-the-superseded-reload guard let
    the first caller continue WITHOUT state ever being built, enterApp read
    state.settings off null and members got a blank screen at open. */
+/* A vote changes nothing in the derived state, so on the Vote Counter screen
+   an incoming vote only needs its two number cells patched — no rebuild, no
+   full redraw, no lost focus while 25 phones vote at once. Returns false when
+   the card is not on screen, and the caller falls back to the normal redraw. */
+function tallyPatch(pollId){
+  const p=S.polls.find(x=>x.id===pollId); if(!p)return false;
+  const app=appVotes(p),total=pollTally(p);
+  const sel=v=>window.CSS&&CSS.escape?CSS.escape(v):v.replace(/["\\]/g,'\\$&');
+  let hit=false;
+  for(const c of (p.candidates||[])){
+    const a=document.querySelector(`[data-app="${sel(pollId+':'+c.key)}"]`);
+    const t=document.querySelector(`[data-total="${sel(pollId+':'+c.key)}"]`);
+    if(a){ a.textContent=app[c.key]; hit=true; }
+    if(t){ t.textContent=total[c.key]; hit=true; }
+  }
+  return hit;
+}
 let reloadInflight=null;
 function reload(){
   if(reloadInflight)return reloadInflight;
@@ -4486,23 +4521,74 @@ function reload(){
   return reloadInflight;
 }
 async function doReload(){
-  const raw=await api.loadAll();
-  S.profiles=raw.profiles; S.meetings=raw.meetings; S.assignments=raw.assignments;
-  S.awards=raw.awards; S.goals=raw.goals;
-  S.polls=raw.polls||[]; S.votes=raw.votes||[]; S.announcements=raw.announcements||[];
-  S.birthdayChanges=raw.birthdayChanges||[]; S.suggestions=raw.suggestions||[];
-  S._hadSettings=!!(raw.settingsRows[0]&&raw.settingsRows[0].data&&raw.settingsRows[0].data.roles);
-  S.settings=S._hadSettings?raw.settingsRows[0].data:defaultSettings();
-  S.dcp={}; for(const r of raw.dcpRows)S.dcp[r.year]=r.data;
-  S.agendas={}; for(const r of raw.agendaRows)S.agendas[r.meeting_id]=r.data;
+  /* both halves fetch in parallel; the light half is applied — and painted —
+     the moment it lands, without waiting for the agendas behind it */
+  const restP=api.loadRest();
+  const core=await api.loadCore();
+  S.profiles=core.profiles; S.meetings=core.meetings; S.assignments=core.assignments;
+  S.polls=core.polls||[]; S.votes=core.votes||[]; S.announcements=core.announcements||[];
+  S._hadSettings=!!(core.settingsRows[0]&&core.settingsRows[0].data&&core.settingsRows[0].data.roles);
+  S.settings=S._hadSettings?core.settingsRows[0].data:defaultSettings();
   overlayPendingVotes();
   rebuild();
+  if(entered)renderLive();
+  const rest=await restP;
+  S.awards=rest.awards; S.goals=rest.goals;
+  S.birthdayChanges=rest.birthdayChanges||[]; S.suggestions=rest.suggestions||[];
+  S.dcp={}; for(const r of rest.dcpRows)S.dcp[r.year]=r.data;
+  S.agendas={}; for(const r of rest.agendaRows)S.agendas[r.meeting_id]=r.data;
+  rebuild();
+  saveSnapshot();
+}
+/* ---- instant open: the last good load, kept on the device ----
+   Painting it makes the app appear in well under a second; the real load then
+   replaces it quietly. The snapshot is per-member (votes and admin-only rows
+   differ by who is signed in), skips DEMO mode (the sandbox shares this
+   origin's storage with the live app), and leaves out the agenda images,
+   which would blow the storage quota. */
+const SNAP_KEY='tmSnap.v1';
+const snapAllowed=()=>!DEMO||localStorage.getItem('demoSnap')==='1';
+function saveSnapshot(){
+  if(!snapAllowed()||!me)return;
+  try{
+    const s={...S.settings}; delete s.agendaAssets;
+    localStorage.setItem(SNAP_KEY,JSON.stringify({profileId:me.profileId,t:Date.now(),
+      d:{profiles:S.profiles,meetings:S.meetings,assignments:S.assignments,polls:S.polls,votes:S.votes,
+         announcements:S.announcements,awards:S.awards,goals:S.goals,settings:s,dcp:S.dcp}}));
+  }catch(e){ try{localStorage.removeItem(SNAP_KEY);}catch(e2){} }
+}
+function paintSnapshot(profileId){
+  if(!snapAllowed())return false;
+  try{
+    const snap=JSON.parse(localStorage.getItem(SNAP_KEY)||'null');
+    if(!snap||snap.profileId!==profileId)return false;
+    if(Date.now()-snap.t>7*864e5)return false;
+    const d=snap.d; if(!d||!d.settings||!d.settings.roles)return false;
+    Object.assign(S,{profiles:d.profiles||[],meetings:d.meetings||[],assignments:d.assignments||[],
+      polls:d.polls||[],votes:d.votes||[],announcements:d.announcements||[],
+      awards:d.awards||[],goals:d.goals||[],settings:d.settings,dcp:d.dcp||{}});
+    rebuild();
+    return true;
+  }catch(e){ return false; }
 }
 let entered=false;
 async function enterApp(profile){
   me={profileId:profile.id,name:profile.name};
   isAdmin=profile.role==='admin';
-  await reload();
+  /* instant open: paint the device's last snapshot while the fresh load runs */
+  let painted=false;
+  if(!entered&&paintSnapshot(profile.id)){
+    const saved=localStorage.getItem('lastTab');
+    tab=tabsFor().some(([id])=>id===saved)?saved:(isAdmin?'schedule':'book');
+    show('appWrap'); render(); painted=true;
+  }
+  try{ await reload(); }
+  catch(e){
+    /* painted from the snapshot, the app is usable — say so instead of dying */
+    if(!painted)throw e;
+    authLog('entry-reload-failed',{err:String(e&&e.message||e)});
+    toast('Could not refresh — showing the last saved data. Reconnecting…');
+  }
   if(isAdmin){
     if(!S._hadSettings)sync(api.saveSettings(S.settings));
     await ensureMeetings();
@@ -4545,7 +4631,14 @@ async function enterApp(profile){
       },250);
     };
     api.subscribe(
-      (table,p)=>{ if(applyDelta(table,p))renderSoon(); else scheduleReload(); },
+      (table,p)=>{
+        if(!applyDelta(table,p)){ scheduleReload(); return; }
+        if(table==='votes'){
+          const pid=(p.new&&p.new.poll_id)||(p.old&&p.old.poll_id);
+          if(pid&&tallyPatch(pid))return;   /* numbers patched in place */
+        }
+        renderSoon();
+      },
       why=>{ authLog('realtime:'+why); if(why==='rejoined')scheduleReload(); }
     );
     setInterval(()=>{ if(!document.hidden)scheduleReload(); },300000);
@@ -4678,7 +4771,7 @@ function bindAuth(){
   });
   document.getElementById('pendingRefresh').addEventListener('click',route);
   document.getElementById('pendingOut').addEventListener('click',async()=>{ authLog('signout:pending-screen'); await api.signOut(); route(); });
-  document.getElementById('signOut').addEventListener('click',async()=>{ authLog('signout:button'); await api.signOut(); entered=false; route(); });
+  document.getElementById('signOut').addEventListener('click',async()=>{ authLog('signout:button'); try{localStorage.removeItem(SNAP_KEY);}catch(e){} await api.signOut(); entered=false; route(); });
   document.getElementById('viewAs').addEventListener('click',()=>{
     viewAsMember=!viewAsMember;
     tab=viewAsMember?'book':'schedule';
