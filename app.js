@@ -775,7 +775,7 @@ function render(){
   else if(tab==='practice')main.innerHTML=viewPractice();
   putScroll(keepScroll);
 }
-function setTab(t){ tab=t; try{localStorage.setItem('lastTab',t);}catch(e){} render(); window.scrollTo(0,0); if(t==='settings')refreshSettings(); }
+function setTab(t){ tab=t; try{localStorage.setItem('lastTab',t);}catch(e){} render(); window.scrollTo(0,0); if(t==='settings'||t==='agenda')refreshSettings(); }
 /* Settings is saved as ONE whole row, so a save from a stale tab silently
    undoes every settings change made elsewhere since that tab last loaded —
    that is how the Camera Master role vanished club-wide. Opening the Settings
@@ -786,9 +786,13 @@ async function refreshSettings(){
   settingsDirty=false;
   try{
     const row=await api.loadSettings();
-    if(row&&row.data&&row.data.roles&&!settingsDirty){
+    if(row&&row.data&&row.data.roles&&!settingsDirty
+       &&JSON.stringify(row.data)!==JSON.stringify(S.settings)){
       S.settings=row.data; rebuild();
-      if(tab==='settings')render();
+      /* the agenda header lives in settings, so the sheet gets the fresh copy
+         too — unless the officer is already typing in it */
+      const editing=document.activeElement&&document.activeElement.isContentEditable;
+      if((tab==='settings'||tab==='agenda')&&!editing)render();
     }
   }catch(e){ authLog('settings-refresh-failed',{err:String(e&&e.message||e)}); }
 }
@@ -3219,7 +3223,7 @@ function setAgHeader(k,v){
   const h={...agHeader()}; v=String(v||'').trim();
   if(v)h[k]=v; else delete h[k];
   state.settings.agendaHeader=h; S.settings=state.settings;
-  saveSettingsRemote();
+  saveSettingsFields(['agendaHeader']);
 }
 function authLogText(){
   /* Everything except the timestamp and the online flag used to be dropped on
@@ -3243,7 +3247,7 @@ function setUrduName(id,v){
   v=String(v||'').trim();
   if(v)map[id]=v; else delete map[id];
   state.settings.urduNames=map; S.settings=state.settings;
-  saveSettingsRemote();
+  saveSettingsFields(['urduNames']);
 }
 function suggestUrduNames(){
   const map={...urduNames()};
@@ -3254,7 +3258,7 @@ function suggestUrduNames(){
     if(g){ map[m.id]=g; n++; }
   }
   state.settings.urduNames=map; S.settings=state.settings;
-  saveSettingsRemote(); render();
+  saveSettingsFields(['urduNames']); render();
   toast(n?`${n} name${n>1?'s':''} filled in — please check each one`:'Nothing new matched the dictionary');
 }
 function urduNamesHtml(){
@@ -3282,29 +3286,44 @@ function urduNamesHtml(){
     </tbody></table></div>
   </div>`;
 }
-/* settingsDirty guards local edits against being clobbered by a slower fetch
-   or live update; once the last outstanding save has landed the server has our
-   copy, so remote settings updates are safe to accept again */
-let settingsSaving=0;
-function saveSettingsRemote(){
-  settingsSaving++;
-  Promise.resolve(api.saveSettings(state.settings))
-    .catch(e=>{ console.error(e); toast('Sync failed: '+(e.message||e)); })
-    .finally(()=>{ if(--settingsSaving===0)settingsDirty=false; });
+/* Every settings edit saves ONLY its own field(s), merged onto the server's
+   CURRENT copy, fetched at save time. A device holding stale settings can no
+   longer revert fields it did not touch — whole-blob overwrites are how the
+   Camera Master role, the agenda header (district/division/time) and the
+   banner images kept getting wound back. Saves queue one behind another so
+   they cannot interleave, and each save captures its values at call time so
+   a quick second edit is not lost under the first.
+   settingsDirty guards local edits against being clobbered by a slower fetch
+   or live update; it clears when the last outstanding save has landed. */
+let settingsSaving=0,sfQueue=Promise.resolve();
+function saveSettingsFields(keys){
+  settingsDirty=true; settingsSaving++;
+  const vals={}; for(const k of keys)vals[k]=state.settings[k];
+  sfQueue=sfQueue.then(async()=>{
+    try{
+      let base=null,fetched=false;
+      try{
+        const row=await api.loadSettings(); fetched=true;
+        base=(row&&row.data&&row.data.roles)?row.data:null;
+      }catch(e){}
+      if(!fetched){ toast('Could not save — no connection. The change stays on this screen; try again once online.'); return; }
+      /* no row yet = first-ever save; otherwise merge onto the server's copy */
+      await api.saveSettings(base?{...base,...vals}:{...state.settings,...vals});
+    }catch(e){ console.error(e); toast('Sync failed: '+(e.message||e)); }
+    finally{ if(--settingsSaving===0)settingsDirty=false; }
+  });
 }
-function s_set(k,v){ settingsDirty=true; state.settings[k]=typeof v==='string'?v.trim():v; S.settings=state.settings; saveSettingsRemote(); render(); }
+function s_set(k,v){ state.settings[k]=typeof v==='string'?v.trim():v; S.settings=state.settings; saveSettingsFields([k]); render(); }
 function setRoleGap(role,v){ s_set('roleGaps',{...(state.settings.roleGaps||{}),[role]:Math.max(0,Number(v)||0)}); }
-function roleEdit(i,k,v){ settingsDirty=true; state.settings.roles[i][k]=typeof v==='string'?v.trim():v; saveSettingsRemote(); render(); }
+function roleEdit(i,k,v){ state.settings.roles[i][k]=typeof v==='string'?v.trim():v; saveSettingsFields(['roles']); render(); }
 function roleDel(i){
   const r=state.settings.roles[i];
   if(!confirm('Remove the role "'+r.name+'" from all meetings?'))return;
-  settingsDirty=true;
-  state.settings.roles.splice(i,1); saveSettingsRemote(); render();
+  state.settings.roles.splice(i,1); saveSettingsFields(['roles']); render();
 }
 function roleAdd(){
   const v=document.getElementById('newRole').value.trim(); if(!v)return;
-  settingsDirty=true;
-  state.settings.roles.push({id:uid(),name:v,count:1}); saveSettingsRemote(); render();
+  state.settings.roles.push({id:uid(),name:v,count:1}); saveSettingsFields(['roles']); render();
 }
 function exportData(){
   const data=JSON.stringify(S,null,2);
@@ -4435,7 +4454,7 @@ const AgendaApp=(function(){
             img.src=r.result;
             state.settings.agendaAssets=state.settings.agendaAssets||{};
             state.settings.agendaAssets[img.dataset.asset]=r.result;
-            saveSettingsRemote();
+            saveSettingsFields(['agendaAssets']);
           };
           r.readAsDataURL(f);
         };

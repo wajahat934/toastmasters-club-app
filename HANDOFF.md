@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=89**.
+   every deploy or browsers serve the old `app.js`. Currently **v=90**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -99,6 +99,19 @@
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Fixed 2026-09-13 — settings saves are field-merges; the revert class is dead (v90)
+
+Every settings edit now saves ONLY its own field(s), merged onto the server's row fetched at
+save time (`saveSettingsFields(keys)` — queued, values captured at call time; replaces
+`saveSettingsRemote` everywhere). A stale device can no longer revert fields it didn't touch —
+that whole-blob overwrite is what kept winding back the agenda header (district/division/time),
+the banner images and, before that, the Camera Master role. Also: the agenda tab now refreshes
+settings on open like the Settings tab (skipped while a contenteditable is focused), and the
+first-seconds save-from-snapshot hole (v88 snapshot strips agendaAssets) is closed by the same
+merge — a save can no longer strip fields it doesn't carry. Cosmetic leftover: at instant-open
+the banner shows the default image until the fresh load lands (agendaAssets stays out of the
+snapshot for quota reasons).
 
 ## Fixed 2026-09-10 — one turn of a role family per meeting (v89)
 
