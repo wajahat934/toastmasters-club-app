@@ -1646,7 +1646,7 @@ function consecutiveSpeech(mid,pid){
 /* ---- long-format speeches (13+ min advanced projects) take a double slot ----
    Active only once `alter table assignments add column duration_min int;` has
    been run (auto-detected off the loaded rows; demo mode always on). A meeting
-   hosting one long speech keeps its last speaker+evaluator slot free so the
+   hosting one long speech keeps its last SPEAKER slot free (evaluators stay normal since v91) so the
    agenda still fits 2 hours. Admin assignment ignores all of this. */
 const LONG_MIN=13;
 function durTracked(){ return DEMO||('duration_min' in ((S.assignments&&S.assignments[0])||{})); }
@@ -1673,11 +1673,13 @@ function toggleSlotBlock(mid,key){
   saveMeetingConfig(m);
 }
 function longRoomIn(m){ return !longSpeechIn(m)&&bookedCount(m,'spk|')<=speakersFor(m)-2&&!!openSpkKey(m); }
-/* one open slot stays blocked for members once the long speech's double time is claimed */
+/* one open SPEAKER slot stays blocked for members once the long speech's
+   double time is claimed. Evaluator slots stay normal — the club decided
+   (Sep 2026) an extra evaluation costs only 2-3 minutes and every evaluator
+   turn is practice, so it is not worth holding one back. */
 function slotReserved(m,slotKey){
   if(!longSpeechIn(m))return false;
-  const pre=slotKey.startsWith('spk|')?'spk|':slotKey.startsWith('eval|')?'eval|':null;
-  return !!pre&&bookedCount(m,pre)>=speakersFor(m)-1;
+  return slotKey.startsWith('spk|')&&bookedCount(m,'spk|')>=speakersFor(m)-1;
 }
 async function myBook(mid,key,btn){
   let dur=null;
@@ -2029,7 +2031,7 @@ function meetingBookingCard(m){
         const when=at?`booked ${new Date(at).toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}`
                      :'booking time not recorded yet';
         const blocked=slotBlocked(m,s.key);
-        return `<div class="slot"><label>${esc(s.label)}${(a&&(a.durationMin||0)>=LONG_MIN)?` <span class="pill other" title="long-format speech — one speaker/evaluator slot fewer this meeting">⏱ ${a.durationMin}m</span>`:''}${blocked?` <span class="pill absent" title="Members cannot book this slot — you assign it from the dropdown">🚫 reserved</span>`:''}${isNext?` <span class="pill other" title="Booked last of the ${esc(roleNameById(rid))}s — gives way first">gives way</span>`:''}${canDefer?`
+        return `<div class="slot"><label>${esc(s.label)}${(a&&(a.durationMin||0)>=LONG_MIN)?` <span class="pill other" title="long-format speech — one speaker slot fewer this meeting">⏱ ${a.durationMin}m</span>`:''}${blocked?` <span class="pill absent" title="Members cannot book this slot — you assign it from the dropdown">🚫 reserved</span>`:''}${isNext?` <span class="pill other" title="Booked last of the ${esc(roleNameById(rid))}s — gives way first">gives way</span>`:''}${canDefer?`
             <button class="btn ghost small" style="float:right;padding:0 6px"
               title="Move to a later meeting — ${esc(when)}" onclick="deferBooking('${m.id}','${s.key}')">⏩</button>`:''}${!(a&&a.memberId)?`
             <button class="btn ghost small" style="float:right;padding:0 6px"
