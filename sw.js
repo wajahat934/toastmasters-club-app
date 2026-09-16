@@ -32,6 +32,23 @@ self.addEventListener('message',e=>{
   if(e.data==='unregister')self.registration.unregister();
 });
 
+/* Meeting alerts. The payload is composed server-side (Edge Function
+   'notify'); this worker only displays it and focuses/opens the app on tap.
+   Nothing here touches the fetch path below. */
+self.addEventListener('push',e=>{
+  let d={}; try{ d=e.data?e.data.json():{}; }catch(err){}
+  e.waitUntil(self.registration.showNotification(d.title||'Rawalpindi Toastmasters',{
+    body:d.body||'',icon:'icon-192.png',badge:'icon-192.png',data:{url:d.url||'./'}
+  }));
+});
+self.addEventListener('notificationclick',e=>{
+  e.notification.close();
+  e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(list=>{
+    for(const c of list){ if('focus' in c)return c.focus(); }
+    return clients.openWindow((e.notification.data&&e.notification.data.url)||'./');
+  }));
+});
+
 self.addEventListener('fetch',e=>{
   const req=e.request;
   if(req.method!=='GET')return;

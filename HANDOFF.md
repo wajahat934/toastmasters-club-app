@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=94**.
+   every deploy or browsers serve the old `app.js`. Currently **v=95**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -99,6 +99,27 @@
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Added 2026-09-16 — backups, alerts, retention list, pre-push check (v95)
+
+- **Pre-push check**: `scripts/precheck.sh`, run automatically by `.githooks/pre-push`
+  (enable once per clone: `git config core.hooksPath .githooks`). Verifies app.js parses, no
+  mojibake/control bytes, both index files carry the SAME `?v=` and HANDOFF's version line
+  matches. Every check is an accident that actually shipped once.
+- **Weekly encrypted backup**: `.github/workflows/backup.yml` dumps all tables Mondays 02:00 UTC,
+  encrypts (repo is public; data has emails/birthdays), stores as 90-day artifacts. Needs repo
+  secrets `SUPABASE_SERVICE_KEY` + `BACKUP_PASSPHRASE` — restore command in the workflow header.
+- **🌱 Not-seen-lately list** (`notSeenLatelyHtml`, `NOT_SEEN_WEEKS=6`): top of the admin
+  Members→Roster view; members with no non-absent role on a past meeting for 6+ weeks (or ever),
+  worst first. Admin-only by construction (the whole tab is admin-only).
+- **Meeting alerts (web push)**: per-device opt-in card on My Profile (`pushCardHtml`,
+  `pushEnable/pushDisable`, `VAPID_PUBLIC` constant); subscriptions in `push_subscriptions`
+  (migration in `migrations/`); sw.js gained push+notificationclick handlers (fetch path
+  untouched); sends happen in the `notify` Edge Function (`supabase/functions/notify/`),
+  triggered FIRE-AND-FORGET from annAdd (announcement, admin-verified server-side) and
+  startPoll (voting open). NEVER await a notify call in a tap path. Inactive until the user
+  runs the migration + deploys the function + sets VAPID secrets (their setup sheet:
+  Downloads\Toastmaster\push-and-backup-setup.txt — contains the PRIVATE key, never commit it).
 
 ## Fixed 2026-09-16 — agenda tab gated on agendasLoaded; edu speaker slot (v93)
 

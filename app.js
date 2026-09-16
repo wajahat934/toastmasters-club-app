@@ -268,6 +268,25 @@ const SupabaseApi={
   async delGoal(id){ const {error}=await sb.from('goals').delete().eq('id',id); if(error)throw error; },
   async saveDcp(year,data){ const {error}=await sb.from('dcp').upsert({year,data}); if(error)throw error; },
   async saveAgenda(meeting_id,data){ const {error}=await sb.from('agendas').upsert({meeting_id,data}); if(error)throw error; },
+  async savePushSub(row){ const {error}=await sb.from('push_subscriptions').upsert(row); if(error)throw error; },
+  async deletePushSub(endpoint){ const {error}=await sb.from('push_subscriptions').delete().eq('endpoint',endpoint); if(error)throw error; },
+  /* fire-and-forget by design: a notification send must NEVER sit inside the
+     tap path — the poll opens / the announcement posts whether or not the
+     ping goes out */
+  notifyPush(type,data){
+    (async()=>{
+      try{
+        const s=await this.session(); if(!s)return;
+        await fetch(window.CLUB_CONFIG.SUPABASE_URL+'/functions/v1/notify',{
+          method:'POST',
+          headers:{'content-type':'application/json',
+                   'Authorization':'Bearer '+s.access_token,
+                   'apikey':window.CLUB_CONFIG.SUPABASE_ANON_KEY},
+          body:JSON.stringify({type,data})
+        });
+      }catch(e){ /* alerts are best-effort */ }
+    })();
+  },
   subscribe(onChange,onStatus){
     let joined=false;
     sb.channel('live')
@@ -480,6 +499,7 @@ const DemoApi=(function(){
     async saveDcp(year,data){ const ex=dcpRows.find(r=>r.year===year); if(ex)ex.data=data; else dcpRows.push({year,data}); },
     async saveAgenda(mid,data){ const ex=agendaRows.find(r=>r.meeting_id===mid); if(ex)ex.data=data; else agendaRows.push({meeting_id:mid,data}); },
     subscribe(onChange){ onEvt=onChange; },
+    async savePushSub(){}, async deletePushSub(){}, notifyPush(){},
     _tables:T
   };
 })();
@@ -896,7 +916,10 @@ function annManagerHtml(){
 async function annAdd(){
   const inp=document.getElementById('annText'); const text=inp.value.trim();
   if(!text){toast('Write the announcement first');return;}
-  try{ const row=await api.addAnnouncement(text); S.announcements.push(row); render(); toast('Posted 📣'); }
+  try{
+    const row=await api.addAnnouncement(text); S.announcements.push(row); render(); toast('Posted 📣');
+    api.notifyPush('announcement',{text});   /* best-effort ping, never awaited */
+  }
   catch(e){ toast('Could not post: '+(e.message||e)); }
 }
 function annDel(id){
@@ -1103,6 +1126,7 @@ async function startPoll(mid,cat){
   try{
     const row=await api.createPoll({meeting_id:mid,category:cat,candidates:prefillCandidates(m,cat),adjust:{}});
     S.polls.push(row); render();
+    api.notifyPush('poll',{category:cat});   /* best-effort ping, never awaited */
   }catch(e){ toast('Could not start: '+(e.message||e)); }
 }
 async function addCandidate(pollId,v){
@@ -1819,6 +1843,58 @@ function pathToggleDone(memId,i){
   pathsUpdate(memId,ps=>{ if(ps[i])ps[i].done=!ps[i].done; });
   toast('Pathway status updated');
 }
+/* ---- meeting alerts (web push) ----
+   Subscribing happens here, on an explicit tap; the pings themselves are sent
+   by the 'notify' Edge Function when voting opens or an announcement posts.
+   Everything is per-device: turning alerts on on a phone says nothing about
+   the same member's laptop. */
+const VAPID_PUBLIC='BEITKyGJbqazhs08cMsHeqFTTIsxgmfGbqDIFh2ZQShq0kGsN_IgGk7br7AwqQcu0iEa8xjRX6gkePOUvoASdEo';
+let pushState='off';
+function pushSupported(){ return !DEMO&&'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window; }
+function b64ToU8(s){
+  const pad='='.repeat((4-s.length%4)%4);
+  const raw=atob((s+pad).replace(/-/g,'+').replace(/_/g,'/'));
+  return Uint8Array.from(raw,c=>c.charCodeAt(0));
+}
+async function pushInit(){
+  if(!pushSupported())return;
+  try{
+    const reg=await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.getSubscription();
+    pushState=sub?'on':'off';
+  }catch(e){}
+}
+async function pushEnable(){
+  if(!pushSupported()){ toast('This browser does not support alerts'); return; }
+  try{
+    const perm=await Notification.requestPermission();
+    if(perm!=='granted'){ toast('Alerts stay off — permission was not given'); return; }
+    const reg=await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64ToU8(VAPID_PUBLIC)});
+    const j=sub.toJSON();
+    await api.savePushSub({endpoint:sub.endpoint,profile_id:me.profileId,keys:{p256dh:j.keys.p256dh,auth:j.keys.auth}});
+    pushState='on'; render(); toast('🔔 Meeting alerts are on for this device');
+  }catch(e){ toast('Could not turn alerts on: '+(e.message||e)); }
+}
+async function pushDisable(){
+  try{
+    const reg=await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.getSubscription();
+    if(sub){ try{ await api.deletePushSub(sub.endpoint); }catch(e){} await sub.unsubscribe(); }
+    pushState='off'; render(); toast('Alerts are off for this device');
+  }catch(e){ toast('Could not turn alerts off: '+(e.message||e)); }
+}
+function pushCardHtml(){
+  if(DEMO)return `<div class="card sub"><b>🔔 Meeting alerts</b> <span class="muted small">— not available in the sandbox.</span></div>`;
+  if(!pushSupported())return '';
+  return `<div class="card sub"><div class="row">
+    <span class="grow"><b>🔔 Meeting alerts</b><br>
+      <span class="small muted">A ping when voting opens and when the club posts an announcement. Applies to this device only.</span></span>
+    ${pushState==='on'
+      ?`<button class="btn ghost small" onclick="pushDisable()">🔕 Turn off</button>`
+      :`<button class="btn small" onclick="pushEnable()">Turn on</button>`}
+  </div></div>`;
+}
 function viewMe(){
   const mem=memberById(me.profileId);
   if(!mem)return `<div class="empty">Profile not found.</div>`;
@@ -1830,6 +1906,7 @@ function viewMe(){
     for(const [key,a] of Object.entries(m.assignments||{}))
       if(a&&a.memberId===mem.id)myBookings.push(`${fmtDate(m.date)} — ${roleNameById(key.split('|')[0])}`);
   return `<h2>My profile</h2>
+  ${pushCardHtml()}
   <div class="card">
     <div class="row"><span class="mname">${esc(mem.name)}</span> ${pathSummary(mem)}</div>
     <div class="row" style="margin-top:10px">
@@ -2833,6 +2910,7 @@ function viewMembers(){
   if(memView==='sug')return html+sugAdminHtml();
   if(memView==='urdu')return html+urduNamesHtml();
   const active=state.members.filter(m=>!m.archived&&(m.approved||!m.hasAccount));
+  html+=notSeenLatelyHtml(active);
   if(!active.length)html+=`<div class="empty">No members yet.</div>`;
   for(const mem of active)html+=memberCard(mem,h[mem.id]||{},abs[mem.id]||0);
   const archived=state.members.filter(m=>m.archived);
@@ -2841,6 +2919,38 @@ function viewMembers(){
       archived.map(m=>`<div class="row" style="padding:6px 0"><span class="grow">${esc(m.name)}</span><button class="btn ghost small" onclick="toggleArchive('${m.id}')">Reactivate</button></div>`).join('')+`</details>`;
   }
   return html;
+}
+/* Retention radar, admins only (this whole tab is admin-only): who has not
+   held a role in a while. The cheapest retention tool a club has is the TMOD
+   calling exactly these people before booking closes. External guests and
+   absent-marked bookings do not count as being seen. */
+const NOT_SEEN_WEEKS=6;
+function notSeenLatelyHtml(active){
+  const t=todayStr();
+  const last={};
+  for(const m of state.meetings){
+    if(m.cancelled||m.date>=t)continue;
+    for(const [k,a] of Object.entries(m.assignments||{})){
+      if(!a||!a.memberId||a.status==='absent')continue;
+      if(!last[a.memberId]||m.date>last[a.memberId])last[a.memberId]=m.date;
+    }
+  }
+  const rows=active.filter(m=>!m.external)
+    .map(m=>{
+      const d=last[m.id];
+      const weeks=d?Math.floor((+parseD(t)-+parseD(d))/(7*864e5)):null;
+      return {m,d,weeks};
+    })
+    .filter(r=>r.weeks===null||r.weeks>=NOT_SEEN_WEEKS)
+    .sort((a,b)=>(b.weeks===null?999:b.weeks)-(a.weeks===null?999:a.weeks));
+  if(!rows.length)return '';
+  return `<div class="card" style="border-color:var(--gold)">
+    <h3 style="margin:0 0 4px">🌱 Not seen in a role for ${NOT_SEEN_WEEKS}+ weeks</h3>
+    <p class="small muted" style="margin:0 0 6px">A personal invite from the TMOD works better than any broadcast — this list is only visible to officers.</p>
+    <div class="row" style="flex-wrap:wrap;gap:6px">
+      ${rows.map(r=>`<span class="chip ${r.weeks===null?'bad':''}" title="${r.d?('last role: '+esc(fmtDate(r.d))):'no role on record'}">${esc(r.m.name)} — ${r.weeks===null?'never':r.weeks+' wks'}</span>`).join('')}
+    </div>
+  </div>`;
 }
 function memberCard(mem,hist,absCount){
   const roleChips=Object.entries(hist).sort((a,b)=>b[1]-a[1]).map(([r,c])=>`<span class="chip">${esc(r)} ×${c}</span>`).join('')||`<span class="muted small">no roles yet</span>`;
@@ -4767,6 +4877,7 @@ async function enterApp(profile){
     window.addEventListener('offline',()=>authLog('browser:offline'));
     /* an unsent vote dies with the page — warn before the tab closes on one */
     window.addEventListener('beforeunload',e=>{ if(pendingVotes.size){ e.preventDefault(); e.returnValue=''; } });
+    pushInit();   /* reads this device's alert state; never awaited */
     document.addEventListener('visibilitychange',()=>{ if(!document.hidden)dateRollCheck(); });
   }
 }
@@ -4916,7 +5027,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
   sugAdd,sugStatus,sugNote,sugAnnounce,sugDel,copyInvite,copyNudge,copyOpenRoles,copyRolePlayers,demoOpenVoting,
   toggleArchive,delMember,keepOpen,s_set,setRoleGap,roleEdit,roleDel,roleAdd,exportData,setDcp,
-  myBook,myUnbook,meSet,meChangePw,meGoalAdd,meGoalToggle,meGoalDel,route});
+  myBook,myUnbook,meSet,meChangePw,meGoalAdd,meGoalToggle,meGoalDel,pushEnable,pushDisable,route});
 Object.defineProperty(window,'memView',{get:()=>memView,set:v=>{memView=v;}});
 Object.defineProperty(window,'dcpSelYear',{get:()=>dcpSelYear,set:v=>{dcpSelYear=v;}});
 
