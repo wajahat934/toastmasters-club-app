@@ -4224,9 +4224,10 @@ const AgendaApp=(function(){
     blocks.splice(idx+1,0,{type:'session',k:'s_edu',title:agT('s_edu','Educational Session'),removable:true,rows:[
       {k:'r_eduIntro',act:agT('r_eduIntro','Introduction of Guest Speaker'),fill:'tmod',who:eduTmod(),dur:2},
       /* fill:'edu' — the name comes from the meeting's Educational Session
-         Speaker booking, so it survives reloads like every other role player */
+         Speaker booking, so it survives reloads like every other role player;
+         'eduQa' is the composite line: booked speaker &amp; the TMOD */
       {k:'r_eduTalk',act:agT('r_eduTalk','Educational Session <span class="role-note">(topic)</span>'),fill:'edu',who:eduWho,dur:20},
-      {k:'r_eduQa',act:agT('r_eduQa','Q&amp;A &amp; Vote of Thanks'),who:agT('p_guestSpk2','Guest Speaker')+' &amp; '+eduTmod(),dur:5}
+      {k:'r_eduQa',act:agT('r_eduQa','Q&amp;A &amp; Vote of Thanks'),fill:'eduQa',who:((mt?roleMap(mt).edu:null)||agT('p_guestSpk2','Guest Speaker'))+' &amp; '+eduTmod(),dur:5}
     ]});
   }
   /* a meeting flagged 🎓 on Roles & Meetings always carries its block — a
@@ -4256,6 +4257,9 @@ const AgendaApp=(function(){
       for(const r of b.rows){
         if(r.fill==='spk'){ if(map.spk[si])r.who=map.spk[si]; si++; }
         else if(r.fill==='eval'){ if(map.eval[ei])r.who=map.eval[ei]; ei++; }
+        /* composite Q&A line: only rewritten once a session speaker is booked,
+           so a hand-typed guest name is never clobbered by a blank */
+        else if(r.fill==='eduQa'){ if(map.edu)r.who=map.edu+' &amp; '+eduTmod(); }
         else if(r.fill&&map[r.fill])r.who=map[r.fill];
       }
     }
@@ -4412,7 +4416,10 @@ const AgendaApp=(function(){
     /* saved sheets from before the edu slot existed: give their talk row the
        fill key so a booked session speaker lands on it (hand-typed names stay
        until the slot is actually booked) */
-    for(const b of blocks)if(b.k==='s_edu')for(const r of b.rows)if(r.k==='r_eduTalk')r.fill='edu';
+    for(const b of blocks)if(b.k==='s_edu')for(const r of b.rows){
+      if(r.k==='r_eduTalk')r.fill='edu';
+      if(r.k==='r_eduQa')r.fill='eduQa';
+    }
     const assets=(state.settings.agendaAssets)||{};
     document.querySelectorAll('#agWrap img.agswap').forEach(img=>{
       if(assets[img.dataset.asset])img.src=assets[img.dataset.asset];

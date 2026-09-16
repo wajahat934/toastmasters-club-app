@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=93**.
+   every deploy or browsers serve the old `app.js`. Currently **v=94**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -113,7 +113,7 @@
 - **Educational Session Speaker is a bookable slot**: a 🎓-flagged meeting's `slotListFor`
   carries a virtual `edu|0` slot (`EDU_ROLE`; `roleNameById` knows it; in `prefillCandidates`'
   CORE list so guests don't become Best Facilitator candidates; `roleMap().edu`). The agenda's
-  edu talk row carries `fill:'edu'` (older saved sheets healed on load), so the booked name
+  edu talk row carries `fill:'edu'` and the Q&A line `fill:'eduQa'` (composite: booked speaker &amp; TMOD, rewritten only once a speaker is booked; older saved sheets healed on load), so the booked name
   fills like any role player and survives refills. Unflagging the meeting orphans any booking
   (the usual orphan release flow surfaces it).
 
