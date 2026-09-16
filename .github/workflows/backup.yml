@@ -1,0 +1,56 @@
+# Weekly encrypted backup of the club's database.
+#
+# Every table is pulled with the service-role key, tarred, encrypted with a
+# passphrase, and stored as a workflow artifact (kept 90 days, so roughly the
+# last 13 weekly restore points always exist). The dump is ENCRYPTED because
+# this repository is public and the data includes member emails and birthdays.
+#
+# Needs two repository secrets (Settings -> Secrets and variables -> Actions):
+#   SUPABASE_SERVICE_KEY   Supabase dashboard -> Project Settings -> API -> service_role
+#   BACKUP_PASSPHRASE      any long passphrase; KEEP A COPY SOMEWHERE SAFE -
+#                          without it a backup cannot be decrypted.
+#
+# To restore: download the artifact from the Actions run, then
+#   openssl enc -d -aes-256-cbc -pbkdf2 -in club-backup.tar.gz.enc | tar xz
+# and re-insert the JSON with the Supabase SQL editor or a small script.
+name: backup
+on:
+  schedule:
+    - cron: "0 2 * * 1"   # every Monday 02:00 UTC (07:00 PKT)
+  workflow_dispatch: {}    # and on demand from the Actions tab
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump all tables
+        env:
+          KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          URL: https://rkdgqnwqyouqlvhsapfi.supabase.co
+        run: |
+          set -e
+          mkdir dump
+          for t in settings profiles meetings assignments awards goals dcp agendas polls votes announcements birthday_changes suggestions push_subscriptions; do
+            code=$(curl -s -o "dump/$t.json" -w "%{http_code}" "$URL/rest/v1/$t?select=*" \
+              -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
+            if [ "$code" != "200" ]; then
+              # a table that does not exist yet (e.g. push_subscriptions) is fine
+              echo "skip $t (HTTP $code)"; rm -f "dump/$t.json"
+            else
+              echo "$t: $(wc -c < dump/$t.json) bytes"
+            fi
+          done
+          ls dump | grep -q . || { echo "dump is empty - wrong key?"; exit 1; }
+      - name: Encrypt
+        env:
+          PASS: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          tar czf club-backup.tar.gz dump
+          openssl enc -aes-256-cbc -pbkdf2 -pass env:PASS \
+            -in club-backup.tar.gz -out club-backup.tar.gz.enc
+          rm -r dump club-backup.tar.gz
+      - name: Store
+        uses: actions/upload-artifact@v4
+        with:
+          name: club-backup-${{ github.run_id }}
+          path: club-backup.tar.gz.enc
+          retention-days: 90
