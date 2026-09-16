@@ -528,6 +528,10 @@ function speakersFor(m){
   return (m&&m.config&&m.config.speakers!=null)?m.config.speakers:def;
 }
 function ttOn(m){ return !(m&&m.config&&m.config.tt===false); }
+/* educational session is a meeting property, so the agenda GENERATES its
+   block and a refill can never lose it — a hand-added block lived only in
+   one saved sheet and vanished on "Fill from bookings" */
+function eduOn(m){ return !!(m&&m.config&&m.config.edu); }
 /* format swap: prepared speeches run before Table Topics */
 function speechFirstOn(m){ return !!(m&&m.config&&m.config.speechFirst); }
 /* attendance is opt-out: everyone counts as present unless listed here */
@@ -2010,6 +2014,10 @@ function meetingBookingCard(m){
              title="Run the Prepared Speech Session before Table Topics on the agenda">
         <input type="checkbox" ${speechFirstOn(m)?'checked':''} onchange="setMeetingOrder('${m.id}',this.checked)"> 🔁 Speeches first
       </label>
+      <label style="display:flex;gap:6px;align-items:center;margin-left:14px"
+             title="The agenda generates the Educational Session block for this meeting — it survives Fill from bookings">
+        <input type="checkbox" ${eduOn(m)?'checked':''} onchange="setMeetingEdu('${m.id}',this.checked)"> 🎓 Educational session
+      </label>
     </div>
     <div class="row small wodrow" style="margin-top:6px">
       <label class="muted">📖 Word of the Day</label>
@@ -2497,6 +2505,13 @@ async function setMeetingTT(mid,on){
   }
   m.config={...(m.config||{}),tt:on};
   saveMeetingConfig(m);
+}
+function setMeetingEdu(mid,on,quiet){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  m.config={...(m.config||{}),edu:!!on};
+  if(!quiet){ saveMeetingConfig(m); return; }
+  const row=S.meetings.find(x=>x.id===mid); if(row)row.config=m.config;
+  sync(api.updateMeeting(mid,{config:m.config}));
 }
 /* quiet: called from the agenda's own toolbar, where a full render() would
    remount the sheet from its last saved state and undo the tick that got us here */
@@ -3992,7 +4007,13 @@ const AgendaApp=(function(){
         makeEditable(titleSpan,()=>{ block.title=titleSpan.innerHTML; });
         const del=document.createElement('button');
         del.className='del no-print'; del.textContent='✕'; del.title='Remove this session';
-        del.addEventListener('click',()=>{ blocks.splice(blocks.indexOf(block),1); agRender(); });
+        del.addEventListener('click',()=>{
+          blocks.splice(blocks.indexOf(block),1);
+          /* removing the educational session also clears the meeting's 🎓
+             flag (quietly), or the block would just regenerate on next load */
+          if(block.k==='s_edu')setMeetingEdu(mid,false,true);
+          agRender();
+        });
         headTd.appendChild(titleSpan);
         /* added sessions can be slotted anywhere in the running order */
         const mk=(txt,title,fn)=>{
@@ -4183,8 +4204,24 @@ const AgendaApp=(function(){
     g('agChipDate').innerText=agFmtDate(new Date(y,m-1,d));
     g('agFpDate').innerText=agFmtDate(new Date(y,m-1,d+7));
   }
+  function insertEduBlock(){
+    if(blocks.some(b=>b.k==='s_edu'))return;
+    const idx=blocks.findIndex(b=>b.type==='break');
+    blocks.splice(idx+1,0,{type:'session',k:'s_edu',title:agT('s_edu','Educational Session'),removable:true,rows:[
+      {k:'r_eduIntro',act:agT('r_eduIntro','Introduction of Guest Speaker'),fill:'tmod',who:eduTmod(),dur:2},
+      {k:'r_eduTalk',act:agT('r_eduTalk','Educational Session <span class="role-note">(topic)</span>'),who:agT('p_guestSpk','Guest Speaker — ____________'),dur:20},
+      {k:'r_eduQa',act:agT('r_eduQa','Q&amp;A &amp; Vote of Thanks'),who:agT('p_guestSpk2','Guest Speaker')+' &amp; '+eduTmod(),dur:5}
+    ]});
+  }
+  /* a meeting flagged 🎓 on Roles & Meetings always carries its block — a
+     saved sheet from before the flag, or a refill, can no longer lose it */
+  function ensureEduBlock(){
+    const m=state.meetings.find(x=>x.id===mid);
+    if(m&&eduOn(m))insertEduBlock();
+  }
   function applyBookings(){
     const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+    ensureEduBlock();
     /* mirror the meeting's Table Topics and running-order settings onto the agenda */
     g('agTT').checked=ttOn(m); showTT=ttOn(m);
     g('agSwap').checked=speechFirstOn(m); swapOrder=speechFirstOn(m);
@@ -4354,6 +4391,7 @@ const AgendaApp=(function(){
       const no=nextNo(); g('agNo').value=no; g('agChipNo').innerText='No. '+no;
       applyBookings();
     }
+    ensureEduBlock();   /* a 🎓-flagged meeting carries its block even on a saved sheet */
     const assets=(state.settings.agendaAssets)||{};
     document.querySelectorAll('#agWrap img.agswap').forEach(img=>{
       if(assets[img.dataset.asset])img.src=assets[img.dataset.asset];
@@ -4434,12 +4472,11 @@ const AgendaApp=(function(){
       agRender();
     });
     g('agEdu').addEventListener('click',()=>{
-      const idx=blocks.findIndex(b=>b.type==='break');
-      blocks.splice(idx+1,0,{type:'session',k:'s_edu',title:agT('s_edu','Educational Session'),removable:true,rows:[
-        {k:'r_eduIntro',act:agT('r_eduIntro','Introduction of Guest Speaker'),fill:'tmod',who:eduTmod(),dur:2},
-        {k:'r_eduTalk',act:agT('r_eduTalk','Educational Session <span class="role-note">(topic)</span>'),who:agT('p_guestSpk','Guest Speaker — ____________'),dur:20},
-        {k:'r_eduQa',act:agT('r_eduQa','Q&amp;A &amp; Vote of Thanks'),who:agT('p_guestSpk2','Guest Speaker')+' &amp; '+eduTmod(),dur:5}
-      ]});
+      insertEduBlock();
+      /* the toolbar button now also flips the meeting's own flag (quietly —
+         a full render here would remount the sheet and undo this insert), so
+         the block regenerates on every future load and refill */
+      setMeetingEdu(mid,true,true);
       agRender();
     });
     g('agHideBar').addEventListener('click',()=>{ g('agExcomSec').classList.add('nobar'); queueAgSave(); });
@@ -4835,7 +4872,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   setUrduName,suggestUrduNames,
   authLogText,
   releaseOrphans,
-  spkDelta,setMeetingTT,setMeetingOrder,setPresent,markAllPresent,creditSpeech,deferBooking,deferAllBookings,undoMove,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
+  spkDelta,setMeetingTT,setMeetingOrder,setMeetingEdu,setPresent,markAllPresent,creditSpeech,deferBooking,deferAllBookings,undoMove,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   vcPick,startPoll,addCandidate,removeCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,toggleSlotBlock,
   pStart,pAdd,pRemove,pAdjust,pPaper,pVote,pCastMine,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
   bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
