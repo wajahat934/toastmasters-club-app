@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=92**.
+   every deploy or browsers serve the old `app.js`. Currently **v=93**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -99,6 +99,23 @@
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Fixed 2026-09-16 — agenda tab gated on agendasLoaded; edu speaker slot (v93)
+
+- **SERIOUS v88 regression, fixed**: agendas are the LAST data to load and are never in the
+  instant-open snapshot. Opening straight onto the Agenda tab during that window regenerated
+  the sheet from defaults — the meeting number fell back to `nextNo()`'s floor (the club saw
+  358 become 351) and one edit saved the empty sheet over the real one. Now: `agendasLoaded`
+  flag; the agenda tab shows a loading note until the saved sheets have arrived once this
+  session; `queueAgSave` refuses to save before that; the tab re-renders itself when they land.
+  Also `applyDelta('agendas')` no longer stores an event whose `data` body is missing (a big
+  sheet can exceed the realtime payload cap and arrive stripped) — it falls back to a reload.
+- **Educational Session Speaker is a bookable slot**: a 🎓-flagged meeting's `slotListFor`
+  carries a virtual `edu|0` slot (`EDU_ROLE`; `roleNameById` knows it; in `prefillCandidates`'
+  CORE list so guests don't become Best Facilitator candidates; `roleMap().edu`). The agenda's
+  edu talk row carries `fill:'edu'` (older saved sheets healed on load), so the booked name
+  fills like any role player and survives refills. Unflagging the meeting orphans any booking
+  (the usual orphan release flow surfaces it).
 
 ## Fixed 2026-09-13 — settings saves are field-merges; the revert class is dead (v90)
 

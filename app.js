@@ -537,6 +537,7 @@ function speechFirstOn(m){ return !!(m&&m.config&&m.config.speechFirst); }
 /* attendance is opt-out: everyone counts as present unless listed here */
 function absentList(m){ return (m&&m.config&&m.config.absent)||[]; }
 function isAbsent(m,pid){ return absentList(m).includes(pid); }
+const EDU_ROLE={id:'edu',name:'Educational Session Speaker'};
 function slotListFor(m){
   const out=[];
   for(const r of state.settings.roles){
@@ -545,9 +546,13 @@ function slotListFor(m){
     if(m&&(r.id==='spk'||r.id==='eval'))count=speakersFor(m);
     for(let i=0;i<count;i++)out.push({key:r.id+'|'+i,role:r,label:(count>1?r.name+' '+(i+1):r.name)});
   }
+  /* a 🎓-flagged meeting carries a bookable slot for its guest/session
+     speaker, so the name lives in bookings like every other role instead of
+     as hand-typed agenda text that can be lost */
+  if(m&&eduOn(m))out.push({key:'edu|0',role:EDU_ROLE,label:EDU_ROLE.name});
   return out;
 }
-function roleNameById(id){ const r=state.settings.roles.find(r=>r.id===id); return r?r.name:'(removed role)'; }
+function roleNameById(id){ if(id==='edu')return EDU_ROLE.name; const r=state.settings.roles.find(r=>r.id===id); return r?r.name:'(removed role)'; }
 function memberById(id){ return state.members.find(m=>m.id===id); }
 const UNTRACKED_ROLES=['saa','po'];   // standing roles — booked and on agendas, but not counted as history
 function meetingOutcomes(m){
@@ -769,7 +774,14 @@ function render(){
     `<button class="${tab===id?'on':''}${id==='practice'?' practice':''}" onclick="setTab('${id}')">${label}</button>`).join('');
   const main=document.getElementById('main');
   if(tab==='schedule')main.innerHTML=noticesHtml()+winnersBoardHtml()+annManagerHtml()+viewSchedule();
-  else if(tab==='agenda'){ AgendaApp.mount(main); return; }
+  else if(tab==='agenda'){
+    /* the saved agendas are the LAST data to arrive (heaviest, and never in
+       the instant-open snapshot). Mounting before they land regenerated the
+       sheet from defaults — meeting number fell back to 351 and one edit
+       saved that empty sheet over the club's real one. Hold the tab instead. */
+    if(!agendasLoaded){ main.innerHTML='<div class="empty">📄 Loading the saved agendas…</div>'; return; }
+    AgendaApp.mount(main); return;
+  }
   else if(tab==='voting')main.innerHTML=viewVoting();
   else if(tab==='members')main.innerHTML=viewMembers();
   else if(tab==='dcp')main.innerHTML=viewDCP();
@@ -972,7 +984,7 @@ function prefillCandidates(m,cat,lookup=memberById){
     addSlots(/^(timer|vc|gram|al|ah|jm)\|/);
     /* roles added later in Settings (e.g. Camera Master) have uid slot keys —
        any booked role outside the core set counts as a facilitator candidate */
-    const CORE=['saa','po','tmod','ttm','ge','tte','spk','eval','timer','vc','gram','al','ah','jm'];
+    const CORE=['saa','po','tmod','ttm','ge','tte','spk','eval','timer','vc','gram','al','ah','jm','edu'];
     for(const [k,a] of Object.entries(m.assignments))
       if(a&&a.memberId&&!CORE.includes(k.split('|')[0]))add(a.memberId);
   }
@@ -3585,7 +3597,7 @@ const AgendaApp=(function(){
       spk:speech.spk,eval:speech.ev,
       timer:one(m,/^timer$/i),vc:one(m,/vote counter/i),gram:one(m,/grammarian/i),
       al:one(m,/active listener/i),ah:one(m,/ah[- ]?counter/i),jm:one(m,/joke/i),
-      cam:one(m,/camera/i)
+      cam:one(m,/camera/i),edu:one(m,/educational session speaker/i)
     };
   }
   function nextMeetingAfter(dateS){
@@ -4206,10 +4218,14 @@ const AgendaApp=(function(){
   }
   function insertEduBlock(){
     if(blocks.some(b=>b.k==='s_edu'))return;
+    const mt=state.meetings.find(x=>x.id===mid);
+    const eduWho=(mt?roleMap(mt).edu:null)||agT('p_guestSpk','Guest Speaker — ____________');
     const idx=blocks.findIndex(b=>b.type==='break');
     blocks.splice(idx+1,0,{type:'session',k:'s_edu',title:agT('s_edu','Educational Session'),removable:true,rows:[
       {k:'r_eduIntro',act:agT('r_eduIntro','Introduction of Guest Speaker'),fill:'tmod',who:eduTmod(),dur:2},
-      {k:'r_eduTalk',act:agT('r_eduTalk','Educational Session <span class="role-note">(topic)</span>'),who:agT('p_guestSpk','Guest Speaker — ____________'),dur:20},
+      /* fill:'edu' — the name comes from the meeting's Educational Session
+         Speaker booking, so it survives reloads like every other role player */
+      {k:'r_eduTalk',act:agT('r_eduTalk','Educational Session <span class="role-note">(topic)</span>'),fill:'edu',who:eduWho,dur:20},
       {k:'r_eduQa',act:agT('r_eduQa','Q&amp;A &amp; Vote of Thanks'),who:agT('p_guestSpk2','Guest Speaker')+' &amp; '+eduTmod(),dur:5}
     ]});
   }
@@ -4331,6 +4347,7 @@ const AgendaApp=(function(){
     clearTimeout(saveTimer);
     saveTimer=setTimeout(()=>{
       if(!mid||!g('agBody'))return;
+      if(!agendasLoaded)return;   /* never save a sheet built without the saved truth */
       const data=collectAgState();
       state.agendas[mid]=data; S.agendas=state.agendas;
       sync(api.saveAgenda(mid,data));
@@ -4392,6 +4409,10 @@ const AgendaApp=(function(){
       applyBookings();
     }
     ensureEduBlock();   /* a 🎓-flagged meeting carries its block even on a saved sheet */
+    /* saved sheets from before the edu slot existed: give their talk row the
+       fill key so a booked session speaker lands on it (hand-typed names stay
+       until the slot is actually booked) */
+    for(const b of blocks)if(b.k==='s_edu')for(const r of b.rows)if(r.k==='r_eduTalk')r.fill='edu';
     const assets=(state.settings.agendaAssets)||{};
     document.querySelectorAll('#agWrap img.agswap').forEach(img=>{
       if(assets[img.dataset.asset])img.src=assets[img.dataset.asset];
@@ -4552,9 +4573,13 @@ function applyDelta(table,p){
     return true;
   }
   if(table==='agendas'){
-    if(p&&p.eventType==='DELETE'){ if(p.old&&p.old.meeting_id)delete S.agendas[p.old.meeting_id]; }
-    else if(p&&p.new&&p.new.meeting_id)S.agendas[p.new.meeting_id]=p.new.data;
-    return true;
+    if(p&&p.eventType==='DELETE'){ if(p.old&&p.old.meeting_id)delete S.agendas[p.old.meeting_id]; return true; }
+    /* a big sheet can exceed the realtime payload cap and arrive stripped —
+       never store a missing body over a good sheet; fetch the truth instead */
+    if(p&&p.new&&p.new.meeting_id&&p.new.data&&typeof p.new.data==='object'){
+      S.agendas[p.new.meeting_id]=p.new.data; return true;
+    }
+    return false;
   }
   const d=DELTA_KEYS[table]; if(!d||!S[d.col])return false;
   const type=p&&p.eventType;
@@ -4619,9 +4644,15 @@ async function doReload(){
   S.birthdayChanges=rest.birthdayChanges||[]; S.suggestions=rest.suggestions||[];
   S.dcp={}; for(const r of rest.dcpRows)S.dcp[r.year]=r.data;
   S.agendas={}; for(const r of rest.agendaRows)S.agendas[r.meeting_id]=r.data;
+  const firstAgendas=!agendasLoaded;
+  agendasLoaded=true;
   rebuild();
+  if(firstAgendas&&entered&&tab==='agenda')render();   /* replace the loading note with the real sheet */
   saveSnapshot();
 }
+/* the agenda tab may not mount, and must never SAVE, before the saved sheets
+   have arrived at least once this session */
+let agendasLoaded=false;
 /* ---- instant open: the last good load, kept on the device ----
    Painting it makes the app appear in well under a second; the real load then
    replaces it quietly. The snapshot is per-member (votes and admin-only rows
