@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=95**.
+   every deploy or browsers serve the old `app.js`. Currently **v=96**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -99,6 +99,19 @@
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Fixed 2026-09-17 — blank screen on a half-updated cache (v96)
+
+A member's phone fetched a new index.html, lost the connection before the matching `?v=` app.js
+arrived, and the cache only held OLD versions under old URLs → silent blank page (incognito
+worked, which is the tell). Three defences now: (1) index.html (both copies) carries an inline
+BOOT WATCHDOG — 7 s with no screen visible shows a plain "could not load, try again" message
+with a retry button, no dependence on app.js; (2) sw.js falls back to `caches.match(req,
+{ignoreSearch:true})` — the same file from ANY cached version beats a blank screen, and the next
+healthy load replaces it; (3) `pruneSwCache()` keeps the newest TWO versions in the runtime
+cache (current + the fallback) and deletes older ones, 15 s after entry. Member-side cure for an
+already-poisoned phone: Chrome → Settings → Site settings → the app's site → Delete data, then
+reopen on good internet (they sign in again).
 
 ## Added 2026-09-16 — backups, alerts, retention list, pre-push check (v95)
 

@@ -67,6 +67,13 @@ self.addEventListener('fetch',e=>{
     }catch(err){
       const hit=await caches.match(req);
       if(hit)return hit;
+      /* The exact ?v=NN was never cached — a connection that dropped mid-
+         update leaves the phone holding index.html of a NEW version and
+         app.js of an OLD one, which used to mean a silent blank screen.
+         Serving the same file from any cached version keeps the app alive;
+         the next healthy load replaces it with the real one. */
+      const any=await caches.match(req,{ignoreSearch:true});
+      if(any)return any;
       throw err;
     }
   })());

@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#004165">
 <link rel="icon" type="image/png" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=95">
+<link rel="stylesheet" href="styles.css?v=96">
 </head>
 <body>
 
@@ -107,8 +107,28 @@
   <button class="btn ghost small" id="installNo">Not now</button>
 </div>
 
-<script src="config.js?v=95"></script>
-<script src="assets.js?v=95"></script>
-<script type="module" src="app.js?v=95"></script>
+<script src="config.js?v=96"></script>
+<script src="assets.js?v=96"></script>
+<script type="module" src="app.js?v=96"></script>
+<script>
+/* Boot watchdog — plain script, no dependence on app.js. If the app's code
+   never arrives (flaky connection mid-update), every screen stays hidden and
+   the member sees a silent blank page. After 7 seconds of that, say what is
+   happening and offer a retry instead. */
+setTimeout(function(){
+  var shown=['authWrap','pendingWrap','appWrap','resetWrap'].some(function(id){
+    var el=document.getElementById(id);
+    return el&&el.style.display!=='none'&&el.offsetHeight>0;
+  });
+  if(shown)return;
+  var d=document.createElement('div');
+  d.style.cssText='max-width:420px;margin:80px auto;padding:24px;text-align:center;font-family:system-ui,sans-serif';
+  d.innerHTML='<h2 style="margin:0 0 8px">📶 Could not load the app</h2>'
+    +'<p style="color:#667">Your internet connection dropped while the app was updating. '
+    +'Check your connection and try again.</p>'
+    +'<button onclick="location.reload()" style="padding:10px 22px;font-size:16px;border-radius:8px;border:0;background:#004165;color:#fff">Try again</button>';
+  document.body.appendChild(d);
+},7000);
+</script>
 </body>
 </html>

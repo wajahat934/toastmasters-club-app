@@ -1843,6 +1843,24 @@ function pathToggleDone(memId,i){
   pathsUpdate(memId,ps=>{ if(ps[i])ps[i].done=!ps[i].done; });
   toast('Pathway status updated');
 }
+/* The offline cache keeps every ?v=NN ever fetched. Keep the two newest
+   versions — the current one plus one older, which is the blank-screen safety
+   net the service worker falls back to when a connection drops mid-update —
+   and drop the rest. Best-effort, long after entry, never in a tap path. */
+async function pruneSwCache(){
+  try{
+    if(!('caches' in window))return;
+    const c=await caches.open('rtc-runtime-v1');
+    const keys=await c.keys();
+    const vers=[...new Set(keys.map(r=>(r.url.match(/[?&]v=(\d+)/)||[])[1]).filter(Boolean).map(Number))]
+      .sort((a,b)=>b-a);
+    const keep=new Set(vers.slice(0,2));
+    for(const r of keys){
+      const m=r.url.match(/[?&]v=(\d+)/);
+      if(m&&!keep.has(Number(m[1])))await c.delete(r);
+    }
+  }catch(e){}
+}
 /* ---- meeting alerts (web push) ----
    Subscribing happens here, on an explicit tap; the pings themselves are sent
    by the 'notify' Edge Function when voting opens or an announcement posts.
@@ -4878,6 +4896,7 @@ async function enterApp(profile){
     /* an unsent vote dies with the page — warn before the tab closes on one */
     window.addEventListener('beforeunload',e=>{ if(pendingVotes.size){ e.preventDefault(); e.returnValue=''; } });
     pushInit();   /* reads this device's alert state; never awaited */
+    setTimeout(pruneSwCache,15000);
     document.addEventListener('visibilitychange',()=>{ if(!document.hidden)dateRollCheck(); });
   }
 }
