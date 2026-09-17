@@ -3771,7 +3771,9 @@ const AgendaApp=(function(){
         <label title="Transition minutes after each prepared speech">🚶 Speech buffer <input type="number" id="agBuf" value="1" min="0" step="0.5"></label>
         <label title="Transition minutes after each evaluation">🚶 Eval buffer <input type="number" id="agBufE" value="1" min="0" step="0.5"></label>
         <label title="Transition minutes after each item in the Opening Session">🚶 Opening buffer <input type="number" id="agBufO" value="0" min="0" step="0.5"></label>
-        <button class="btn ghost small" id="agAdd">＋ Speaker</button>
+        <!-- retired like agTT/agSp/agEdu: speaker count is a meeting setting,
+             and applyBookings resizes sheet rows to match it anyway -->
+        <button class="btn ghost small" id="agAdd" style="display:none">＋ Speaker</button>
         <button class="btn ghost small" id="agEdu" style="display:none">🎓 Educational session</button>
         <button class="btn ghost small" id="agAddSession" title="A blank session you can name and fill — quiz, national anthem, anything">＋ Session</button>
         <button class="btn ghost small" id="agJoke" title="A one-minute Joke Master slot — move it anywhere with the arrows">😄 Joke Master</button>
