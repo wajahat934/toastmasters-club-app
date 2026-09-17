@@ -820,8 +820,13 @@ function setTab(t){ tab=t; try{localStorage.setItem('lastTab',t);}catch(e){} ren
 let settingsDirty=false;
 async function refreshSettings(){
   settingsDirty=false;
+  const gen=settingsWriteGen;
   try{
     const row=await api.loadSettings();
+    /* a save that started or landed while this fetch was in flight makes the
+       fetched row OLDER than local state — applying it wiped a just-saved
+       roles change once. Discard and let the save's own echo win. */
+    if(gen!==settingsWriteGen)return;
     if(row&&row.data&&row.data.roles&&!settingsDirty
        &&JSON.stringify(row.data)!==JSON.stringify(S.settings)){
       S.settings=row.data; rebuild();
@@ -3299,13 +3304,18 @@ function viewSettings(){
   </div>
   <h2>Meeting roles</h2>
   <div class="card">
-    ${s.roles.map((r,i)=>`<div class="row" style="padding:3px 0">
-      <input type="text" value="${esc(r.name)}" style="max-width:260px" onchange="roleEdit(${i},'name',this.value)">
+    ${s.roles.map(r=>`<div class="row" style="padding:3px 0">
+      <input type="text" value="${esc(r.name)}" style="max-width:260px" onchange="roleEdit('${r.id}','name',this.value)">
       <label class="small muted">slots</label>
-      <input type="number" min="1" max="6" value="${r.count||1}" onchange="roleEdit(${i},'count',Math.max(1,Number(this.value)))">
+      <input type="number" min="1" max="6" value="${r.count||1}" onchange="roleEdit('${r.id}','count',Math.max(1,Number(this.value)))">
       <label class="small muted" title="A standing role keeps its last holder: whoever did it last is filled into every empty upcoming meeting automatically, until someone changes it. SAA and the Presiding Officer already work this way.">
-        <input type="checkbox" ${(r.standing||r.id==='saa'||r.id==='po')?'checked':''} ${(r.id==='saa'||r.id==='po')?'disabled':''} onchange="roleEdit(${i},'standing',this.checked)"> 📌 standing</label>
-      <button class="btn ghost small" onclick="roleDel(${i})">✕</button>
+        <input type="checkbox" ${(r.standing||r.id==='saa'||r.id==='po')?'checked':''} ${(r.id==='saa'||r.id==='po')?'disabled':''} onchange="roleEdit('${r.id}','standing',this.checked)"> 📌 standing</label>
+      <label class="small muted" title="The slot stays OPEN for anyone to book. While nobody has, the agenda shows this member; a booking always wins.">agenda default
+        <select style="width:auto" onchange="roleEdit('${r.id}','defaultId',this.value)">
+          <option value="">—</option>
+          ${state.members.filter(mm=>!mm.archived&&!mm.external).map(mm=>`<option value="${mm.id}" ${r.defaultId===mm.id?'selected':''}>${esc(mm.name)}</option>`).join('')}
+        </select></label>
+      <button class="btn ghost small" onclick="roleDel('${r.id}')">✕</button>
     </div>`).join('')}
     <div class="row" style="margin-top:8px">
       <input type="text" id="newRole" placeholder="New role name" style="max-width:260px">
@@ -3460,9 +3470,9 @@ function urduNamesHtml(){
    a quick second edit is not lost under the first.
    settingsDirty guards local edits against being clobbered by a slower fetch
    or live update; it clears when the last outstanding save has landed. */
-let settingsSaving=0,sfQueue=Promise.resolve();
+let settingsSaving=0,sfQueue=Promise.resolve(),settingsWriteGen=0;
 function saveSettingsFields(keys){
-  settingsDirty=true; settingsSaving++;
+  settingsDirty=true; settingsSaving++; settingsWriteGen++;
   const vals={}; for(const k of keys)vals[k]=state.settings[k];
   sfQueue=sfQueue.then(async()=>{
     try{
@@ -3475,20 +3485,44 @@ function saveSettingsFields(keys){
       /* no row yet = first-ever save; otherwise merge onto the server's copy */
       await api.saveSettings(base?{...base,...vals}:{...state.settings,...vals});
     }catch(e){ console.error(e); toast('Sync failed: '+(e.message||e)); }
-    finally{ if(--settingsSaving===0)settingsDirty=false; }
+    finally{ settingsWriteGen++; if(--settingsSaving===0)settingsDirty=false; }
   });
 }
 function s_set(k,v){ state.settings[k]=typeof v==='string'?v.trim():v; S.settings=state.settings; saveSettingsFields([k]); render(); }
 function setRoleGap(role,v){ s_set('roleGaps',{...(state.settings.roleGaps||{}),[role]:Math.max(0,Number(v)||0)}); }
-function roleEdit(i,k,v){ state.settings.roles[i][k]=typeof v==='string'?v.trim():v; saveSettingsFields(['roles']); render(); }
-function roleDel(i){
-  const r=state.settings.roles[i];
+/* Role edits are read-modify-write against the SERVER'S current roles list,
+   matched by role id — never by list position, never from this device's
+   memory. A screen holding yesterday's list can therefore no longer erase a
+   role someone added since (the Camera Master kept vanishing exactly that
+   way: any roles edit from a stale device wrote the old array back). */
+async function mutateRoles(fn){
+  let fresh=null;
+  try{
+    const row=await api.loadSettings();
+    if(row&&row.data&&row.data.roles)fresh=row.data.roles.map(r=>({...r}));
+  }catch(e){}
+  if(!fresh){ toast('Could not save — no connection. Try again once online.'); render(); return; }
+  if(fn(fresh)===false){ render(); return; }
+  state.settings.roles=fresh; S.settings=state.settings;
+  saveSettingsFields(['roles']); render();
+}
+function roleEdit(id,k,v){
+  mutateRoles(roles=>{
+    const r=roles.find(x=>x.id===id); if(!r)return false;
+    r[k]=typeof v==='string'?v.trim():v;
+  });
+}
+function roleDel(id){
+  const r=state.settings.roles.find(x=>x.id===id); if(!r)return;
   if(!confirm('Remove the role "'+r.name+'" from all meetings?'))return;
-  state.settings.roles.splice(i,1); saveSettingsFields(['roles']); render();
+  mutateRoles(roles=>{
+    const i=roles.findIndex(x=>x.id===id); if(i<0)return false;
+    roles.splice(i,1);
+  });
 }
 function roleAdd(){
   const v=document.getElementById('newRole').value.trim(); if(!v)return;
-  state.settings.roles.push({id:uid(),name:v,count:1}); saveSettingsFields(['roles']); render();
+  mutateRoles(roles=>{ roles.push({id:uid(),name:v,count:1}); });
 }
 function exportData(){
   const data=JSON.stringify(S,null,2);
@@ -3699,6 +3733,15 @@ const AgendaApp=(function(){
     return out;
   }
   const one=(m,re)=>bookedNames(m,re).find(Boolean)||null;
+  /* A role can carry an AGENDA DEFAULT (Settings → Meeting roles): the slot
+     stays open for anyone to book, but while nobody has, the sheet shows the
+     club's regular volunteer instead of TBD. A booking always wins. */
+  function defaultHolder(re){
+    const r=state.settings.roles.find(x=>re.test(x.name)&&x.defaultId);
+    const mem=r&&memberById(r.defaultId);
+    return (mem&&!mem.archived)?tmName(mem):null;
+  }
+  const oneD=(m,re)=>one(m,re)||defaultHolder(re);
   /* Speakers, optionally reordered most junior first, with each speech
      evaluator travelling alongside their own speaker — evaluator 2 stays
      opposite speaker 2 wherever the reorder puts them. Speaker and evaluator
@@ -3727,13 +3770,13 @@ const AgendaApp=(function(){
   function roleMap(m){
     const speech=speechOrder(m);
     return {
-      saa:one(m,/sergeant|saa/i),po:one(m,/presiding|president/i),
-      tmod:one(m,/toastmaster of the day|^tmod$/i),ttm:one(m,/table topics master/i),
-      ge:one(m,/general evaluator/i),tte:one(m,/table topics evaluator/i),
+      saa:oneD(m,/sergeant|saa/i),po:oneD(m,/presiding|president/i),
+      tmod:oneD(m,/toastmaster of the day|^tmod$/i),ttm:oneD(m,/table topics master/i),
+      ge:oneD(m,/general evaluator/i),tte:oneD(m,/table topics evaluator/i),
       spk:speech.spk,eval:speech.ev,
-      timer:one(m,/^timer$/i),vc:one(m,/vote counter/i),gram:one(m,/grammarian/i),
-      al:one(m,/active listener/i),ah:one(m,/ah[- ]?counter/i),jm:one(m,/joke/i),
-      cam:one(m,/camera/i),edu:one(m,/educational session speaker/i)
+      timer:oneD(m,/^timer$/i),vc:oneD(m,/vote counter/i),gram:oneD(m,/grammarian/i),
+      al:oneD(m,/active listener/i),ah:oneD(m,/ah[- ]?counter/i),jm:oneD(m,/joke/i),
+      cam:oneD(m,/camera/i),edu:oneD(m,/educational session speaker/i)
     };
   }
   function nextMeetingAfter(dateS){
@@ -3789,7 +3832,7 @@ const AgendaApp=(function(){
           <option value="">Standard</option>
           <option value="pk">🇵🇰 Independence Day</option>
         </select></label>
-        <button class="btn ghost small" id="agPkKit" title="Add the National Anthem, Milli Naghma and a Quiz in the usual places">🇵🇰 Independence Day layout</button>
+        <button class="btn ghost small" id="agPkKit" style="display:none" title="Add the National Anthem, Milli Naghma and a Quiz in the usual places">🇵🇰 Independence Day layout</button>
       </div>
       <p class="small muted" style="margin:8px 0 0">Role players fill automatically from the meeting's bookings. Click any text on the sheet to edit — changes save per meeting for all admins. The PDF auto-scales to one A4 page.</p>
     </div>
@@ -4615,7 +4658,13 @@ const AgendaApp=(function(){
     g('agSwap').addEventListener('change',()=>{ updateToggles(); setMeetingOrder(mid,g('agSwap').checked,true); });
     /* re-order needs the names refetched from the bookings, not just a redraw */
     g('agJr').addEventListener('change',()=>{ juniorFirstOn=g('agJr').checked; applyBookings(); agRender(); });
-    g('agTheme2').addEventListener('change',()=>{ sheetTheme=g('agTheme2').value; applyTheme(); queueAgSave(); });
+    g('agTheme2').addEventListener('change',()=>{
+      sheetTheme=g('agTheme2').value; applyTheme(); queueAgSave();
+      /* one control for the occasion: choosing the 🇵🇰 theme offers the
+         layout items too (anthem, Milli Naghma, quiz) — the separate
+         toolbar button is retired */
+      if(sheetTheme==='pk'&&confirm('Also add the Independence Day items — National Anthem, Milli Naghma and the Quiz?'))addPkKit();
+    });
     g('agPkKit').addEventListener('click',addPkKit);
     g('agUr').addEventListener('change',()=>{ agUrdu=g('agUr').checked; applyLanguage(); agRender(); queueAgSave(); });
     g('agAdd').addEventListener('click',()=>{
@@ -4865,6 +4914,10 @@ async function enterApp(profile){
     tab=tabsFor().some(([id])=>id===saved)?saved:(isAdmin?'schedule':'book');
   }
   show('appWrap'); render();
+  /* opening DIRECTLY onto these tabs must fetch fresh settings the same way
+     clicking onto them does — a stale roles list edited here is how the
+     Camera Master role kept getting erased */
+  if(tab==='settings'||tab==='agenda')refreshSettings();
   if(!entered){
     entered=true;
     /* One realtime event used to mean one FULL loadAll on every connected
