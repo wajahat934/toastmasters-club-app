@@ -4399,7 +4399,17 @@ const AgendaApp=(function(){
     const v=g('agDate').value; if(!v)return;
     const [y,m,d]=v.split('-').map(Number);
     g('agChipDate').innerText=agFmtDate(new Date(y,m-1,d));
-    g('agFpDate').innerText=agFmtDate(new Date(y,m-1,d+7));
+    /* the planner header names the REAL next meeting when one exists —
+       cadence and cancellations make "+7 days" a guess — and flags a
+       Speakathon so the room knows the format at a glance */
+    const nm=nextMeetingAfter(g('agDate').value);
+    if(nm){
+      const [y2,m2,d2]=nm.date.split('-').map(Number);
+      g('agFpDate').innerHTML=agFmtDate(new Date(y2,m2-1,d2))
+        +(ttOn(nm)?'':' · ⭐ '+agT('h_speakathon','SPEAKATHON'));
+    }else{
+      g('agFpDate').innerText=agFmtDate(new Date(y,m-1,d+7));
+    }
   }
   function insertEduBlock(){
     if(blocks.some(b=>b.k==='s_edu'))return;
@@ -4644,7 +4654,7 @@ const AgendaApp=(function(){
       if(g('agBody')){ const data=collectAgState(); state.agendas[mid]=data; sync(api.saveAgenda(mid,data)); }
       mid=e.target.value; mount(container);
     });
-    g('agFill').addEventListener('click',()=>{ applyBookings(); agRender(); toast('Role players refreshed from bookings'); });
+    g('agFill').addEventListener('click',()=>{ applyBookings(); agRender(); updateDates(); toast('Role players refreshed from bookings'); });
     g('agPrint').addEventListener('click',()=>window.print());
     /* every toolbar edit SAVES — the start time, date, meeting number and
        buffers used to update the sheet but never persist, so a remount
