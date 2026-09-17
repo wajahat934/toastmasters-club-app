@@ -4462,7 +4462,16 @@ const AgendaApp=(function(){
       const fmap=roleMap(nm);
       const fp={tmod:fmap.tmod||'—',ttm:fmap.ttm||'—',ge:fmap.ge||'—',
         spk:fmap.spk.filter(Boolean).map((n,i)=>`${i+1}) ${n}`).join(' &nbsp; ')||'—'};
-      document.querySelectorAll('#agSheet [data-fp]').forEach(el=>{ el.innerHTML=fp[el.dataset.fp]; });
+      document.querySelectorAll('#agSheet [data-fp]').forEach(el=>{
+        el.innerHTML=fp[el.dataset.fp];
+        /* the planner mirrors the NEXT meeting's format: a Speakathon has no
+           TT Master line at all, a zero-speech night has no Speakers line */
+        const li=el.closest('li');
+        if(li){
+          if(el.dataset.fp==='ttm')li.style.display=ttOn(nm)?'':'none';
+          if(el.dataset.fp==='spk')li.style.display=speakersFor(nm)>0?'':'none';
+        }
+      });
     }
   }
   function staticEditables(){
