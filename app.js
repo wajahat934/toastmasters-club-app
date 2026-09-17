@@ -2028,7 +2028,12 @@ function autoFillStanding(){
   const t=todayStr();
   const ms=state.meetings.filter(m=>!m.cancelled).sort((a,b)=>a.date<b.date?-1:1);
   let changed=false;
-  for(const rid of ['saa','po']){
+  /* SAA and PO are standing by nature; any other role the club marks
+     📌 standing in Settings (e.g. Camera Master) propagates the same way:
+     whoever held it last fills every empty upcoming slot until changed */
+  const standing=['saa','po',
+    ...state.settings.roles.filter(r=>r.standing&&r.id!=='saa'&&r.id!=='po').map(r=>r.id)];
+  for(const rid of standing){
     if(!state.settings.roles.some(r=>r.id===rid))continue;
     const key=rid+'|0';
     let src=null;
@@ -2518,7 +2523,8 @@ async function assign(mid,key,sel){
     sync(api.adminAssign(mid,key,v));
   }
   rebuild();
-  if(v&&(key==='saa|0'||key==='po|0'))autoFillStanding();
+  const ridStanding=key.split('|')[0];
+  if(v&&(ridStanding==='saa'||ridStanding==='po'||(state.settings.roles.find(r=>r.id===ridStanding)||{}).standing))autoFillStanding();
   render();
 }
 function setOutcome(mid,key,st){
@@ -3297,6 +3303,8 @@ function viewSettings(){
       <input type="text" value="${esc(r.name)}" style="max-width:260px" onchange="roleEdit(${i},'name',this.value)">
       <label class="small muted">slots</label>
       <input type="number" min="1" max="6" value="${r.count||1}" onchange="roleEdit(${i},'count',Math.max(1,Number(this.value)))">
+      <label class="small muted" title="A standing role keeps its last holder: whoever did it last is filled into every empty upcoming meeting automatically, until someone changes it. SAA and the Presiding Officer already work this way.">
+        <input type="checkbox" ${(r.standing||r.id==='saa'||r.id==='po')?'checked':''} ${(r.id==='saa'||r.id==='po')?'disabled':''} onchange="roleEdit(${i},'standing',this.checked)"> 📌 standing</label>
       <button class="btn ghost small" onclick="roleDel(${i})">✕</button>
     </div>`).join('')}
     <div class="row" style="margin-top:8px">
