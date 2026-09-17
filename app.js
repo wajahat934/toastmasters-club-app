@@ -3759,8 +3759,12 @@ const AgendaApp=(function(){
         <label>📅 Date <input type="date" id="agDate"></label>
         <label>⏰ Start <input type="time" id="agStart" value="16:30"></label>
         <label>No. <input type="number" id="agNo" value="351"></label>
-        <label title="Untick for a Speakathon">🗣 Table Topics <input type="checkbox" id="agTT" checked></label>
-        <label title="Untick to drop the Prepared Speech Session">🎤 Speeches <input type="checkbox" id="agSp" checked></label>
+        <!-- Table Topics, Speeches and the Educational session are meeting
+             SETTINGS, controlled from the Roles & Meetings card; the agenda
+             mirrors them. Their controls stay in the DOM (a dozen readers use
+             the ids) but are hidden from the toolbar. -->
+        <label style="display:none">🗣 Table Topics <input type="checkbox" id="agTT" checked></label>
+        <label style="display:none">🎤 Speeches <input type="checkbox" id="agSp" checked></label>
         <label title="Run the Prepared Speech Session before Table Topics">🔁 Speeches first <input type="checkbox" id="agSwap"></label>
         <label title="Order the speakers most junior first, by Pathways level then projects done">🎓 Junior first <input type="checkbox" id="agJr" checked></label>
         <label title="Render this agenda in Urdu, right to left">اردو Urdu <input type="checkbox" id="agUr"></label>
@@ -3768,7 +3772,7 @@ const AgendaApp=(function(){
         <label title="Transition minutes after each evaluation">🚶 Eval buffer <input type="number" id="agBufE" value="1" min="0" step="0.5"></label>
         <label title="Transition minutes after each item in the Opening Session">🚶 Opening buffer <input type="number" id="agBufO" value="0" min="0" step="0.5"></label>
         <button class="btn ghost small" id="agAdd">＋ Speaker</button>
-        <button class="btn ghost small" id="agEdu">🎓 Educational session</button>
+        <button class="btn ghost small" id="agEdu" style="display:none">🎓 Educational session</button>
         <button class="btn ghost small" id="agAddSession" title="A blank session you can name and fill — quiz, national anthem, anything">＋ Session</button>
         <button class="btn ghost small" id="agJoke" title="A one-minute Joke Master slot — move it anywhere with the arrows">😄 Joke Master</button>
         <label title="Colour scheme for the printed sheet">🎨 <select id="agTheme2" style="width:auto">
@@ -4580,18 +4584,21 @@ const AgendaApp=(function(){
     });
     g('agFill').addEventListener('click',()=>{ applyBookings(); agRender(); toast('Role players refreshed from bookings'); });
     g('agPrint').addEventListener('click',()=>window.print());
-    g('agDate').addEventListener('input',updateDates);
-    g('agStart').addEventListener('input',updateTimes);
-    g('agBuf').addEventListener('input',updateTimes);
-    g('agBufE').addEventListener('input',updateTimes);
-    g('agBufO').addEventListener('input',updateTimes);
-    g('agNo').addEventListener('input',()=>{ g('agChipNo').innerText='No. '+g('agNo').value; });
+    /* every toolbar edit SAVES — the start time, date, meeting number and
+       buffers used to update the sheet but never persist, so a remount
+       quietly wound them back (the club watched 3:30 turn back into 4:30) */
+    g('agDate').addEventListener('input',()=>{ updateDates(); queueAgSave(); });
+    g('agStart').addEventListener('input',()=>{ updateTimes(); queueAgSave(); });
+    g('agBuf').addEventListener('input',()=>{ updateTimes(); queueAgSave(); });
+    g('agBufE').addEventListener('input',()=>{ updateTimes(); queueAgSave(); });
+    g('agBufO').addEventListener('input',()=>{ updateTimes(); queueAgSave(); });
+    g('agNo').addEventListener('input',()=>{ g('agChipNo').innerText='No. '+g('agNo').value; queueAgSave(); });
     function updateToggles(){
       showTT=g('agTT').checked; showSpeech=g('agSp').checked;
       swapOrder=g('agSwap').checked; juniorFirstOn=g('agJr').checked;
       placeIntroRow(); placeTTEvalRow();
       g('agChipSpk').style.display=(!showTT&&showSpeech)?'inline-block':'none';
-      agRender();
+      agRender(); queueAgSave();
     }
     g('agTT').addEventListener('change',updateToggles);
     g('agSp').addEventListener('change',updateToggles);
