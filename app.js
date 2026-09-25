@@ -2566,6 +2566,61 @@ function releaseOrphans(mid){
   rebuild(); render();
   toast(`Released ${gone.length} leftover booking${gone.length>1?'s':''}`);
 }
+/* Taking a speaker slot away when one is OPEN should cost nobody their turn:
+   the empty slot goes and every pair below it moves up one — speaker AND
+   evaluator together, so Evaluator N stays opposite Speaker N. An evaluator
+   who sat opposite the empty speaker slot is reseated in whichever evaluator
+   slot is left free. Returns false when every speaker slot is full (someone
+   must give way), 'abort' when the officer backs out, else the new
+   blocked-slot list for the meeting's config. */
+function compactSpeakerSlot(mid,cur){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return false;
+  const held=k=>{ const a=(m.assignments||{})[k]; return !!(a&&a.memberId); };
+  let i=-1;
+  for(let j=0;j<cur;j++)if(!held('spk|'+j)&&!held('eval|'+j)){ i=j; break; }
+  if(i<0)for(let j=0;j<cur;j++)if(!held('spk|'+j)){ i=j; break; }
+  if(i<0)return false;
+  const rowOf=k=>S.assignments.find(a=>a.meeting_id===mid&&a.slot_key===k);
+  snapshotBookings('the speaker slots');
+  let orphan=rowOf('eval|'+i)?{...rowOf('eval|'+i)}:null;
+  if(orphan){
+    let seated=0;
+    for(let j=0;j<cur;j++)if(j!==i&&held('eval|'+j))seated++;
+    if(seated>=cur-1){
+      const nm=(memberById(orphan.profile_id)||{}).name||'Their evaluator';
+      if(!confirm(`Speaker ${i+1} is open, so that slot goes — but its evaluator ${nm} has no seat left.\n\nOK = move ${nm} forward to the next meeting.\nCancel = leave the slot count alone.`)){ lastMove=null; return 'abort'; }
+      if(!moveForward(mid,'eval|'+i)){
+        applySnapshot(lastMove); lastMove=null; render();
+        toast('No later meeting has a free Evaluator slot — slot count left alone');
+        return 'abort';
+      }
+      orphan=null;
+    }else unbookLocal(mid,'eval|'+i);
+  }
+  /* move one booking to a free slot, carrying its booking time (give-way
+     order) and a long-format speech's length */
+  const shift=(from,to)=>{
+    const r=rowOf(from); if(!r)return;
+    const pid=r.profile_id, at=r.booked_at, dur=r.duration_min;
+    unbookLocal(mid,from); bookLocal(mid,to,pid,at);
+    if(dur){ const nr=rowOf(to); if(nr)nr.duration_min=dur; sync(api.setAsg(mid,to,{duration_min:dur})); }
+  };
+  for(let j=i+1;j<cur;j++){ shift('spk|'+j,'spk|'+(j-1)); shift('eval|'+j,'eval|'+(j-1)); }
+  if(orphan){
+    for(let j=0;j<cur-1;j++)
+      if(!rowOf('eval|'+j)){ bookLocal(mid,'eval|'+j,orphan.profile_id,orphan.booked_at); break; }
+  }
+  rebuild();
+  /* officer-reserved slots are keyed by position: follow the move */
+  const blocked=[];
+  for(const k of ((m.config||{}).blockedSlots)||[]){
+    const [rid,n]=k.split('|'); const x=Number(n);
+    if(rid!=='spk'&&rid!=='eval'){ blocked.push(k); continue; }
+    if(x<i)blocked.push(k); else if(x>i)blocked.push(rid+'|'+(x-1));
+  }
+  toast(i<cur-1?`Open Speaker ${i+1} slot removed — speakers ${i+2}–${cur} moved up one`:`Open Speaker ${i+1} slot removed`);
+  return {blocked};
+}
 async function spkDelta(mid,d){
   const m=state.meetings.find(x=>x.id===mid); if(!m)return;
   /* 0 is allowed: an Urdu night, an educational session or a Table-Topics-only
@@ -2573,6 +2628,13 @@ async function spkDelta(mid,d){
   const cur=speakersFor(m), next=Math.min(8,Math.max(0,cur+d));
   if(next===cur)return;
   if(d<0){
+    const c=compactSpeakerSlot(mid,cur);
+    if(c==='abort'){ render(); return; }
+    if(c){
+      m.config={...(m.config||{}),speakers:next,blockedSlots:c.blocked};
+      saveMeetingConfig(m);
+      return;
+    }
     /* the speaker who gives way is the last to have booked, not whoever happens
        to sit in the slot being removed — so move them out of the way first */
     const give=bookingsByGiveWay(m,'spk')[0];
@@ -3564,6 +3626,7 @@ const AG_UR={
   r_tteval:'فی البدیہہ تقاریر کے تجزیہ کار',
   r_reports:'رپورٹس کی طلبی',
   r_ge:'مجموعی تجزیہ کار',
+  r_tmodGe:'میزبانِ اجلاس کی جانب سے مجموعی تجزیہ کار کی دعوت',
   r_feedback:'مہمانوں کی رائے و انعامات',
   r_photo:'گروپ تصویر 📸',
   r_eduIntro:'مہمان مقرر کا تعارف', r_eduTalk:'تعلیمی نشست <span class="role-note">(موضوع)</span>',
@@ -3687,6 +3750,7 @@ const AG_EN={};
     p_blank:'TBD',p_guests:'Non-Role Players &amp; Guests',
     p_timerVc:'Timer &amp; Vote Counter',p_rolePlayers:'Role Players',p_everyone:'Everyone',
     p_tmod:'TMOD',p_guestSpk:'Guest Speaker — ____________',p_guestTmod:'Guest Speaker &amp; TMOD',
+    r_tmodGe:'TMOD invites the General Evaluator',
     s_edu:'Educational Session',r_eduIntro:'Introduction of Guest Speaker',
     r_eduTalk:'Educational Session <span class="role-note">(topic)</span>',
     r_eduQa:'Q&amp;A &amp; Vote of Thanks',
@@ -3968,6 +4032,19 @@ const AgendaApp=(function(){
     const i=from.rows.findIndex(isIntroRow);
     if(i<0)return;                       /* already sitting where it belongs */
     to.rows.unshift(from.rows.splice(i,1)[0]);
+  }
+  /* A Speakathon has no Table Topics Master to hand the floor back, so the
+     TMOD calls the General Evaluator to the stage: one row at the head of the
+     Evaluation Session, present only while Table Topics is off. Tagged so it
+     is removed again (and never duplicated) when the format changes. */
+  function placeSpeakathonTmodRow(){
+    const ev=blocks.find(b=>b.id==='eval'); if(!ev)return;
+    const i=ev.rows.findIndex(r=>r.k==='r_tmodGe');
+    if(showTT){ if(i>=0)ev.rows.splice(i,1); return; }
+    if(i>=0)return;
+    const mt=state.meetings.find(x=>x.id===mid);
+    const who=(mt?roleMap(mt).tmod:null)||agT('p_blank','TBD');
+    ev.rows.unshift({k:'r_tmodGe',act:agT('r_tmodGe','TMOD invites the General Evaluator'),fill:'tmod',who,dur:1});
   }
   /* Evaluations run in the order the sessions did: Table Topics first normally,
      so its evaluator leads — but with speeches first the speech evaluators go
@@ -4438,6 +4515,7 @@ const AgendaApp=(function(){
     g('agTT').checked=ttOn(m); showTT=ttOn(m);
     g('agSwap').checked=speechFirstOn(m); swapOrder=speechFirstOn(m);
     juniorFirstOn=g('agJr').checked;
+    placeSpeakathonTmodRow();
     g('agChipSpk').style.display=(!showTT&&g('agSp').checked)?'inline-block':'none';
     const map=roleMap(m);
     /* respect a meeting configured with no prepared speeches */
@@ -4617,6 +4695,10 @@ const AgendaApp=(function(){
       applyBookings();
     }
     ensureEduBlock();   /* a 🎓-flagged meeting carries its block even on a saved sheet */
+    /* the MEETING decides the format: a saved sheet remembers the Table Topics
+       and running-order ticks from when it was saved, and with those ticks now
+       off the toolbar a stale copy would silently keep the old format */
+    if(m){ g('agTT').checked=ttOn(m); g('agSwap').checked=speechFirstOn(m); }
     /* saved sheets from before the edu slot existed: give their talk row the
        fill key so a booked session speaker lands on it (hand-typed names stay
        until the slot is actually booked) */
@@ -4638,7 +4720,7 @@ const AgendaApp=(function(){
     applyHeader();
     agUrdu=g('agUr').checked; applyLanguage();
     sheetTheme=g('agTheme2').value; applyTheme();
-    placeIntroRow(); placeTTEvalRow();
+    placeIntroRow(); placeTTEvalRow(); placeSpeakathonTmodRow();
     g('agChipSpk').style.display=(!showTT&&showSpeech)?'inline-block':'none';
     agRender(); updateDates();
   }
@@ -4668,7 +4750,7 @@ const AgendaApp=(function(){
     function updateToggles(){
       showTT=g('agTT').checked; showSpeech=g('agSp').checked;
       swapOrder=g('agSwap').checked; juniorFirstOn=g('agJr').checked;
-      placeIntroRow(); placeTTEvalRow();
+      placeIntroRow(); placeTTEvalRow(); placeSpeakathonTmodRow();
       g('agChipSpk').style.display=(!showTT&&showSpeech)?'inline-block':'none';
       agRender(); queueAgSave();
     }

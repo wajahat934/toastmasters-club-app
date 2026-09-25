@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=102**.
+   every deploy or browsers serve the old `app.js`. Currently **v=103**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -99,6 +99,24 @@
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Fixed 2026-09-25 — speaker "−" compacts open slots; Speakathon TMOD row (v103)
+
+- **Speaker count "−" no longer bumps anyone when a slot is open.** `spkDelta` always cut the
+  LAST slot and pushed its give-way speaker forward, even with an open slot higher up.
+  `compactSpeakerSlot()` now runs first: it picks an open speaker slot (preferring one whose
+  evaluator slot is also open), moves every speaker/evaluator PAIR below it up one (booked_at and
+  a long speech's duration_min carried), reseats an evaluator who sat opposite the empty speaker
+  slot in the freed evaluator seat (moving them forward only if no seat is left, with a confirm),
+  and remaps position-keyed `config.blockedSlots`. The old give-way flow runs only when every
+  speaker slot is full.
+- **Speakathon agendas get "TMOD invites the General Evaluator"** (`r_tmodGe`, fill tmod, 1 min)
+  at the head of the Evaluation Session via `placeSpeakathonTmodRow()` — added while Table Topics
+  is off, removed when it is back on, never duplicated. Called alongside placeIntroRow/
+  placeTTEvalRow and from applyBookings.
+- **The meeting decides the format on saved sheets**: loadMeeting now sets the hidden agTT and
+  agSwap ticks from the meeting (`ttOn`, `speechFirstOn`) after restoring a saved sheet — with
+  those ticks off the toolbar, a sheet saved under the old format kept it forever.
 
 ## Fixed 2026-09-17 — blank screen on a half-updated cache (v96)
 
