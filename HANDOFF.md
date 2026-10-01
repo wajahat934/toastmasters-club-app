@@ -33,8 +33,63 @@
 
 ---
 
+## Start here — state as of 2026-10-02
+
+**Live at v103, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+admins. The club runs live voting in meetings, so `main` is production.
+
+**How to work on this app (each rule exists because breaking it once hurt the club):**
+- Test in a demo copy, never on live data. The scratchpad copy gets wiped between sessions —
+  rebuild it by copying the repo there and replacing `config.js` with `demo/config.js`.
+  `localStorage.demoLag=<ms>` fakes slow internet. Two windows on one computer share live
+  events (admin in one, member in the other).
+- Bump `?v=NN` in BOTH `index.html` and `demo/index.html`, plus the version line below.
+  `.githooks/pre-push` runs `scripts/precheck.sh` and refuses the push if these disagree
+  (enable once per clone: `git config core.hooksPath .githooks`).
+- The owner reviews by screenshot and confirms on the real app. Ship, wait for Pages to serve
+  the new `?v=`, then tell them what to click to check.
+- Nothing may slow down a booking or voting tap. Notifications, saves and logging run in the
+  background, never in the tap path. The owner cares about speed above everything.
+- Keep explanations to the owner short and in plain English.
+
+**Club rules the app enforces (all decided by the owner):**
+- Members vote in the app. Guests vote on paper slips, for Best Table Topics only. Paper
+  votes are entered with the Paper ＋ button.
+- Fair-use gaps per role group, set in Settings (speeches 3 weeks, TTM 4 weeks at last
+  look). Under "all other roles" each role only limits itself.
+- One turn of a role family per meeting (no Evaluator 1 + Evaluator 2). Officers can override.
+- Members can release a booking until 3 days before the meeting (Wednesday). After that the
+  turn counts even if they miss the meeting. An officer unbooking them gives the turn back.
+- A long-format speech holds back one SPEAKER slot only. Evaluator slots stay open.
+- Officers can reserve (🚫) any empty slot for special meetings.
+- Speaker count "−" removes an open slot first. Someone gives way only when every slot is full.
+- Agenda defaults: a role can name a default person who shows on the agenda only while the
+  slot is unbooked (planned for Camera Master → Noor ud Din). 📌 standing roles auto-book
+  their last holder into every meeting (SAA, PO).
+
+**Also delivered outside the app, in `Downloads\Toastmaster\`:** the app-voting Vote
+Counter script PDF (`Scripts\Vote Counter (App Voting).pdf`), and the private setup sheet for
+backups and alerts (`push-and-backup-setup.txt`). The setup sheet holds the VAPID private
+key — never copy it into this repo.
+
 ## Outstanding — needs the user, not code
 
+- **Backups are built but not switched on.** Add repo secrets `SUPABASE_SERVICE_KEY` and
+  `BACKUP_PASSPHRASE`, then run the `backup` workflow once from the Actions tab. Steps are in
+  the private setup sheet. Until then, nothing is backed up.
+- **Meeting alerts (push) are built but not switched on.** Run
+  `migrations/2026-09-16-push-subscriptions.sql`, set the three VAPID secrets, then deploy the
+  `notify` function. Steps are in the private setup sheet. Until then the My Profile alerts card
+  shows but sends nothing.
+- **Camera Master default.** The role was erased by the stale-roles bug (fixed in v100). The
+  owner needs to re-add it, set its agenda default to Muhammad Noor ud din, and leave
+  📌 standing unticked. Not confirmed done.
+- **Supabase region.** Never checked (Project Settings → General). If it is not near Pakistan
+  (`ap-south-1` Mumbai is best), moving it is the biggest raw-speed gain left.
+- **Offered, not built:** make the install bar fall back to "use the ⋮ menu → Add to Home
+  screen" when Chrome does not offer the install itself. Waiting on the owner's yes.
+- ~~**Realtime for settings and agendas.**~~ **Done** (2026-09-13): the owner ran
+  `alter publication supabase_realtime add table settings, agendas;`.
 - ~~**Supabase → Auth → URL Configuration.**~~ **Done** (2026-08-23). Site URL and Redirect URLs
   both carry the Pages URL with its trailing slash, matching `APP_URL` in app.js. Password reset
   was tested end to end and reaches the set-a-new-password screen.
@@ -78,8 +133,9 @@
   saved its old roles list over the new one — and the v83 delta-realtime change makes tabs
   stale for LONGER. Mitigations since v85: opening the Settings tab always re-fetches the row
   first (`refreshSettings`, guarded by `settingsDirty`), and settings+agendas are wired into the
-  realtime channel — but they only deliver once the user runs
-  `alter publication supabase_realtime add table settings, agendas;` in the SQL editor.
+  realtime channel (the publication SQL was run 2026-09-13). Since v90 every settings save merges
+  only its own fields onto the server row, and since v100 role edits are applied by role id to
+  the server's current list (`mutateRoles`).
 
 - **`state` goes stale after writing to `S`.** `bookLocal`/`unbookLocal` mutate `S`; helpers that read
   the derived `state` are stale until `rebuild()`. Moving three speakers at once silently overwrote
