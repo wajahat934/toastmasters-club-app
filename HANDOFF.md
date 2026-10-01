@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=108**.
+   every deploy or browsers serve the old `app.js`. Currently **v=109**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-10-02
 
-**Live at v108, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v109, repo clean, nothing half-built.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **How to work on this app (each rule exists because breaking it once hurt the club):**
@@ -165,7 +165,7 @@ Club rule from Oct 2026: one cake at month end for all that month's birthdays. T
 cake alert is GONE; admins now see a "🍰 <Month> birthday cake" banner listing the month's
 birthdays and the month's last meeting, which stays until an officer presses "✓ Cake done"
 (`cakeDone(ym)` → `settings.cakeDone['YYYY-MM']`, field-merged per month). Unticked months keep
-showing (looks back 2 months, never before `CAKE_RULE_FROM='2026-10'`). The 7-day "Birthdays this
+showing (looks back 2 months, never before `CAKE_RULE_FROM='2026-09'` — September included at the club's request, v109). The 7-day "Birthdays this
 coming week" banner and the on-the-day banners are unchanged.
 
 ## Changed 2026-10-02 — booking day rolls over at 8 pm (v107)

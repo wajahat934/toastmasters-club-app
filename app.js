@@ -892,7 +892,7 @@ async function refreshSettings(){
 
 /* ================= NOTICES: birthdays + announcements ================= */
 const BDAY_NOTICE_DAYS=7;
-const CAKE_RULE_FROM='2026-10';   /* the month the club switched to one cake a month */
+const CAKE_RULE_FROM='2026-09';   /* the club switched to one cake a month in Oct 2026; September was included so its birthdays get a cake too */
 function cakeDone(ym){
   const name=parseD(ym+'-01').toLocaleDateString(undefined,{month:'long'});
   if(!confirm('Mark the '+name+' birthday cake as done? The reminder disappears for all officers.'))return;
