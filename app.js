@@ -892,6 +892,15 @@ async function refreshSettings(){
 
 /* ================= NOTICES: birthdays + announcements ================= */
 const BDAY_NOTICE_DAYS=7;
+const CAKE_RULE_FROM='2026-10';   /* the month the club switched to one cake a month */
+function cakeDone(ym){
+  const name=parseD(ym+'-01').toLocaleDateString(undefined,{month:'long'});
+  if(!confirm('Mark the '+name+' birthday cake as done? The reminder disappears for all officers.'))return;
+  state.settings.cakeDone={...(state.settings.cakeDone||{}),[ym]:{by:me&&me.name,at:new Date().toISOString()}};
+  S.settings=state.settings;
+  saveSettingsFields(['cakeDone'],{cakeDone:[ym]});
+  render(); toast('🍰 '+name+' cake marked done');
+}
 function fmtMD(v){ return v?`${MD_MONTHS[Number(v.slice(0,2))-1]} ${Number(v.slice(3))}`:'not set'; }
 function fmtWhen(ts){
   try{
@@ -936,31 +945,33 @@ function noticesHtml(){
     else
       html+=`<div class="banner"><strong>🎂 It's ${esc(x.name)}'s birthday today!</strong> Send them your wishes. 🥳</div>`;
   }
-  /* admin cake reminder: birthdays falling since the last meeting up to the
-     next one, shown from 4 days before that meeting through meeting day */
+  /* MONTHLY CAKE (the club's rule since Oct 2026): one cake at the end of each
+     month for everyone born that month. The banner lists the month's
+     birthdays and STAYS — an officer removes it with "✓ Cake done" once the
+     cake is sorted (settings.cakeDone {'YYYY-MM': {by, at}}). A month left
+     unticked keeps showing after it ends, so a missed cake is never silently
+     forgotten; months before the rule started are ignored. */
   if(isAdmin&&!viewAsMember){
     const t=todayStr();
-    const nm=state.meetings.filter(m=>!m.cancelled&&m.date>=t).sort((a,b)=>a.date<b.date?-1:1)[0];
-    if(nm){
-      const prev=state.meetings.filter(m=>!m.cancelled&&m.date<nm.date).sort((a,b)=>a.date<b.date?1:-1)[0];
-      const start=prev?parseD(prev.date):(()=>{const d=parseD(nm.date);d.setDate(d.getDate()-7);return d;})();
-      const end=parseD(nm.date);
-      const inWindow=md=>{
-        for(const y of [start.getFullYear(),end.getFullYear()]){
-          const d=parseD(y+'-'+md);
-          if(d>start&&d<=end)return true;
-        }
-        return false;
-      };
-      const celebrate=bd.filter(x=>inWindow(x.birthday));
-      const daysToMeeting=(end-parseD(t))/86400000;
-      /* the club asked for a week's notice (it was 4 days before the meeting,
-         which flagged a birthday just after the last meeting only once it had
-         already passed) */
-      if(celebrate.length&&daysToMeeting<=BDAY_NOTICE_DAYS)
-        html+=`<div class="banner" style="border-color:var(--maroon)"><strong>🍰 Cake alert for ${fmtDate(nm.date)}:</strong>
-          ${celebrate.map(x=>`<b>${esc(x.name)}</b> (${MD_MONTHS[Number(x.birthday.slice(0,2))-1]} ${Number(x.birthday.slice(3))})`).join(', ')}
-          — birthday${celebrate.length>1?'s':''} to celebrate at the meeting. Arrange the cake! 🎂</div>`;
+    const done=(state.settings&&state.settings.cakeDone)||{};
+    const cur=t.slice(0,7);
+    const months=[];
+    for(let i=2;i>=0;i--){
+      const d=parseD(cur+'-01'); d.setMonth(d.getMonth()-i);
+      const ym=dstr(d).slice(0,7);
+      if(ym>=CAKE_RULE_FROM&&!done[ym])months.push(ym);
+    }
+    for(const ym of months){
+      const mm=ym.slice(5,7);
+      const born=bd.filter(x=>x.birthday.slice(0,2)===mm).sort((a,b)=>a.birthday<b.birthday?-1:1);
+      if(!born.length)continue;
+      const last=state.meetings.filter(m=>!m.cancelled&&m.date.slice(0,7)===ym).sort((a,b)=>a.date<b.date?1:-1)[0];
+      const monthName=parseD(ym+'-01').toLocaleDateString(undefined,{month:'long'});
+      const overdue=ym<cur;
+      html+=`<div class="banner" style="border-color:var(--maroon)"><strong>🍰 ${esc(monthName)} birthday cake${overdue?' — still to do':''}:</strong>
+        ${born.map(x=>`<b>${esc(x.name)}</b> (${MD_MONTHS[Number(x.birthday.slice(0,2))-1]} ${Number(x.birthday.slice(3))})`).join(', ')}
+        ${last?`— cake at the last meeting of the month, ${fmtDate(last.date)}.`:''}
+        <button class="btn small" style="margin-left:8px" onclick="cakeDone('${ym}')">✓ Cake done</button></div>`;
     }
     /* every birthday in the next 7 days, counted from the birthday itself —
        not tied to meeting dates, so none is announced late */
@@ -5662,7 +5673,7 @@ Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,set
   spkDelta,setMeetingTT,setMeetingOrder,setMeetingEdu,setPresent,markAllPresent,creditSpeech,deferBooking,deferAllBookings,undoMove,setWod,addPastMeeting,pastEditToggle,mergeProfiles,
   vcPick,startPoll,addCandidate,removeCandidate,adjustPoll,closePoll,finalizePoll,reopenPoll,deletePoll,castMyVote,setWinner,toggleSlotBlock,
   pStart,pAdd,pRemove,pAdjust,pPaper,pVote,pCastMine,pTrickleToggle,pClose,pFinalize,pReopen,pDelete,pReset,
-  bdaySet,annAdd,annDel,paperVoter,bcSeen,pathAdd,pathDel,pathField,pathToggleDone,
+  bdaySet,annAdd,annDel,paperVoter,bcSeen,cakeDone,pathAdd,pathDel,pathField,pathToggleDone,
   sugAdd,sugStatus,sugNote,sugAnnounce,sugDel,copyInvite,copyNudge,copyOpenRoles,copyRolePlayers,demoOpenVoting,
   toggleArchive,delMember,keepOpen,s_set,setRoleGap,roleEdit,roleDel,roleAdd,exportData,setDcp,
   myBook,myUnbook,meSet,meChangePw,meGoalAdd,meGoalToggle,meGoalDel,pushEnable,pushDisable,route});
