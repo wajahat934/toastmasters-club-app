@@ -334,3 +334,8 @@ details.mem .body{padding:12px 16px}
 #installBar .grow{flex:1 1 auto;min-width:0}
 #installBar #installMsg{flex:1 1 190px}
 @media print{#installBar{display:none!important}}
+
+/* member ballot: large tap targets, one column on phones */
+.ballotgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+.ballot .ballotbtn{width:100%;min-height:52px;font-size:1.05rem;font-weight:600;text-align:left;padding:10px 14px}
+@media (max-width:520px){ .ballotgrid{grid-template-columns:1fr} }

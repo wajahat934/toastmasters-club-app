@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=105**.
+   every deploy or browsers serve the old `app.js`. Currently **v=106**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-10-02
 
-**Live at v105, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v106, repo clean, nothing half-built.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **How to work on this app (each rule exists because breaking it once hurt the club):**
@@ -158,6 +158,17 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Added 2026-10-02 — members' phones kept light for voting (v106)
+
+- **Lite load for members** (`loadCore(lite)` / `loadRest(lite,myId)`, lite = `!isAdmin`): no DCP,
+  agendas or birthday-change log; own goals only; polls from the last 60 days only.
+- **Vote catch-up** (`quickVoteRefresh` → `api.loadVoting`: last 3 days' polls + their votes).
+  Runs when a member's realtime rejoins and when the app returns from >15 s in the background
+  (the "vote now" moment: the whole room unlocks at once). The full reload on rejoin is delayed
+  15–45 s at random for members; the 5-minute safety reload is jittered over a minute for members.
+- **Ballot first**: an open poll is the first card on the member's Book tab; candidates are big
+  full-width buttons (52 px, one column on phones).
 
 ## Fixed 2026-10-02 later — voting-night load, double polls, birthdays (v105)
 

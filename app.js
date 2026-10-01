@@ -196,17 +196,36 @@ const SupabaseApi={
      being voted on. The heavy rest — every saved agenda above all — arrives
      right behind it. Both fetches run in parallel; the split is about when
      each half can be APPLIED, not total transfer time. */
-  async loadCore(){
-    const q=async(t,optional)=>{ const {data,error}=await sb.from(t).select('*'); if(error){ if(optional)return []; throw error; } return data; };
+  /* `lite` = a member's phone. It skips what only officers see (DCP, saved
+     agendas, birthday-change log), takes only its own goals, and only the
+     last 60 days of polls (the winners board and congratulations look back
+     a week) — less to download on meeting-day wifi. */
+  async loadCore(lite){
+    const q=async(t,optional,f)=>{ let r=sb.from(t).select('*'); if(f)r=f(r); const {data,error}=await r; if(error){ if(optional)return []; throw error; } return data; };
+    const since=new Date(Date.now()-60*864e5).toISOString();
     const [settingsRows,profiles,meetings,assignments,polls,votes,announcements]=await Promise.all(
-      [q('settings'),q('profiles'),q('meetings'),q('assignments'),q('polls',true),q('votes',true),q('announcements',true)]);
+      [q('settings'),q('profiles'),q('meetings'),q('assignments'),
+       q('polls',true,lite?r=>r.gte('created_at',since):null),q('votes',true),q('announcements',true)]);
     return {settingsRows,profiles,meetings,assignments,polls,votes,announcements};
   },
-  async loadRest(){
-    const q=async(t,optional)=>{ const {data,error}=await sb.from(t).select('*'); if(error){ if(optional)return []; throw error; } return data; };
+  async loadRest(lite,myId){
+    const q=async(t,optional,f)=>{ let r=sb.from(t).select('*'); if(f)r=f(r); const {data,error}=await r; if(error){ if(optional)return []; throw error; } return data; };
+    const none=async()=>[];
     const [awards,goals,dcpRows,agendaRows,birthdayChanges,suggestions]=await Promise.all(
-      [q('awards'),q('goals'),q('dcp'),q('agendas'),q('birthday_changes',true),q('suggestions',true)]);
+      [q('awards'),q('goals',false,lite&&myId?r=>r.eq('profile_id',myId):null),
+       lite?none():q('dcp'),lite?none():q('agendas'),lite?none():q('birthday_changes',true),q('suggestions',true)]);
     return {awards,goals,dcpRows,agendaRows,birthdayChanges,suggestions};
+  },
+  /* the voting catch-up: just the last 3 days' polls and their votes —
+     a few KB, versus the whole club's data for a full reload */
+  async loadVoting(){
+    const since=new Date(Date.now()-3*864e5).toISOString();
+    const {data:polls,error}=await sb.from('polls').select('*').gte('created_at',since);
+    if(error)throw error;
+    const ids=(polls||[]).map(p=>p.id);
+    let votes=[];
+    if(ids.length){ const r=await sb.from('votes').select('*').in('poll_id',ids); if(r.error)throw r.error; votes=r.data||[]; }
+    return {polls:polls||[],votes,pollIds:ids};
   },
   async addSuggestion(f){ const {data,error}=await sb.from('suggestions').insert(f).select().single(); if(error)throw error; return data; },
   async updSuggestion(id,f){ const {error}=await sb.from('suggestions').update(f).eq('id',id); if(error)throw error; },
@@ -450,6 +469,10 @@ const DemoApi=(function(){
       const cp=a=>a.map(o=>({...o}));
       return {settingsRows:cp(settingsRows),profiles:cp(profiles),meetings:cp(meetings),assignments:cp(assignments),
         polls:cp(polls),votes:cp(votes),announcements:cp(announcements)};
+    },
+    async loadVoting(){
+      const cp=a=>a.map(o=>({...o}));
+      return {polls:cp(polls),votes:cp(votes),pollIds:polls.map(p=>p.id)};
     },
     async loadRest(){
       const cp=a=>a.map(o=>({...o}));
@@ -828,7 +851,7 @@ function render(){
   else if(tab==='members')main.innerHTML=viewMembers();
   else if(tab==='dcp')main.innerHTML=viewDCP();
   else if(tab==='settings')main.innerHTML=viewSettings();
-  else if(tab==='book')main.innerHTML=congratsHtml()+noticesHtml()+openVoteCardsHtml()+winnersBoardHtml()+viewBook();
+  else if(tab==='book')main.innerHTML=openVoteCardsHtml()+congratsHtml()+noticesHtml()+winnersBoardHtml()+viewBook();   /* an open ballot comes first — nothing to scroll past */
   else if(tab==='me')main.innerHTML=congratsHtml()+noticesHtml()+viewMe();
   else if(tab==='practice')main.innerHTML=viewPractice();
   putScroll(keepScroll);
@@ -1317,6 +1340,27 @@ async function flushVotes(){
     }
   }finally{ voteFlushing=false; }
 }
+/* The vote catch-up. When the Vote Counter says "vote now", the whole room
+   unlocks its phones at once; every phone's live connection has been asleep
+   and rejoins, and each used to re-download ALL the club's data at the same
+   moment — on one weak wifi. Now a waking phone fetches only the recent
+   polls and their votes (a few KB) right away, which is all the ballot
+   needs; the full refresh follows later, spread out (see onLiveStatus). */
+let voteRefreshing=null;
+function quickVoteRefresh(){
+  if(voteRefreshing)return voteRefreshing;
+  voteRefreshing=(async()=>{
+    try{
+      const v=await api.loadVoting();
+      const ids=new Set(v.pollIds);
+      S.polls=[...S.polls.filter(p=>!ids.has(p.id)),...v.polls];
+      S.votes=[...S.votes.filter(x=>!ids.has(x.poll_id)),...v.votes];
+      overlayPendingVotes(); rebuild();
+      if(['book','schedule','voting'].includes(tab))renderLive();
+    }catch(e){ authLog('vote-refresh-failed',{err:String(e&&e.message||e)}); }
+  })().finally(()=>{ voteRefreshing=null; });
+  return voteRefreshing;
+}
 /* After any reload replaces S.votes wholesale, put my not-yet-confirmed votes
    back on top — a snapshot read before the write committed must not undo a
    tap the member already saw acknowledged. */
@@ -1361,10 +1405,11 @@ function openVoteCardsHtml(){
     const m=state.meetings.find(m=>m.id===p.meeting_id); if(!m||m.cancelled)continue;
     const mine=myVoteKey(p);
     const onPaper=(p.paper_voters||[]).includes(me.profileId);
-    html+=`<div class="card" style="border-color:var(--accent)">
+    /* big, full-width buttons: one tap on a phone, no aiming */
+    html+=`<div class="card ballot" style="border-color:var(--accent)">
       <h3 style="margin:0 0 6px">🗳 Vote: ${esc(p.category)} <span class="muted small">· ${fmtDate(m.date)}</span></h3>
-      <div class="row">
-        ${(p.candidates||[]).map(c=>`<button class="btn ${mine===c.key?'good':'ghost'} small" ${onPaper?'disabled':''} onclick="castMyVote('${p.id}','${c.key}')">${mine===c.key?'✓ ':''}${esc(c.name)}</button>`).join('')}
+      <div class="ballotgrid">
+        ${(p.candidates||[]).map(c=>`<button class="btn ballotbtn ${mine===c.key?'good':'ghost'}" ${onPaper?'disabled':''} onclick="castMyVote('${p.id}','${c.key}')">${mine===c.key?'✓ ':''}${esc(c.name)}</button>`).join('')}
       </div>
       <div class="small muted" style="margin-top:6px">${onPaper?'🧾 You voted on paper for this one — thanks!':(mine?'You can change your vote until voting closes.':'Tap to vote — secret ballot.')}</div>
     </div>`;
@@ -5291,8 +5336,9 @@ function reload(){
 async function doReload(){
   /* both halves fetch in parallel; the light half is applied — and painted —
      the moment it lands, without waiting for the agendas behind it */
-  const restP=api.loadRest();
-  const core=await api.loadCore();
+  const lite=!isAdmin;
+  const restP=api.loadRest(lite,me&&me.profileId);
+  const core=await api.loadCore(lite);
   S.profiles=core.profiles; S.meetings=core.meetings; S.assignments=core.assignments;
   S.polls=core.polls||[]; S.votes=core.votes||[]; S.announcements=core.announcements||[];
   S._hadSettings=!!(core.settingsRows[0]&&core.settingsRows[0].data&&core.settingsRows[0].data.roles);
@@ -5400,7 +5446,7 @@ async function enterApp(profile){
        agendas). Reload bursts are still coalesced: a short debounce folds
        them into one, and only one runs at a time. */
     let rlTimer=null,rlRunning=false,rlAgain=false;
-    const scheduleReload=()=>{
+    const scheduleReload=(delay)=>{
       clearTimeout(rlTimer);
       rlTimer=setTimeout(async()=>{
         if(rlRunning){ rlAgain=true; return; }
@@ -5408,7 +5454,7 @@ async function enterApp(profile){
         try{ await reload(); if(['book','schedule','voting'].includes(tab))renderLive(); }
         catch(e){ authLog('reload-failed',{err:String(e&&e.message||e)}); }
         finally{ rlRunning=false; if(rlAgain){ rlAgain=false; scheduleReload(); } }
-      },400);
+      },delay||400);
     };
     let dtTimer=null;
     const renderSoon=()=>{   /* fold a burst of deltas into one redraw */
@@ -5432,13 +5478,30 @@ async function enterApp(profile){
         }
         renderSoon();
       };
-    const onLiveStatus=why=>{ authLog('realtime:'+why); if(why==='rejoined')scheduleReload(); };
+    const onLiveStatus=why=>{
+      authLog('realtime:'+why);
+      if(why!=='rejoined')return;
+      /* officers catch up at once; a member's phone fetches the ballot now
+         and the rest 15-45 s later, at a random moment, so a room of phones
+         waking together does not all download everything together */
+      if(isAdmin)scheduleReload();
+      else{ quickVoteRefresh(); scheduleReload(15000+Math.random()*30000); }
+    };
+    /* back from the lock screen: fetch the ballot straight away rather than
+       waiting for the live connection to notice it was asleep */
+    let hiddenAt=0;
+    document.addEventListener('visibilitychange',()=>{
+      if(document.hidden){ hiddenAt=Date.now(); return; }
+      if(hiddenAt&&Date.now()-hiddenAt>15000)quickVoteRefresh();
+    });
     const startLive=()=>{
       liveOpts={votes:wantVotesLive(),agendas:isAdmin};
       api.subscribe(onLive,onLiveStatus,liveOpts);
     };
     startLive();
-    setInterval(()=>{ if(!document.hidden)scheduleReload(); },300000);
+    /* members' safety-net refresh lands at a random point in the next minute,
+       so phones opened together do not keep refreshing together */
+    setInterval(()=>{ if(!document.hidden)scheduleReload(isAdmin?400:Math.random()*60000); },300000);
     setInterval(dateRollCheck,60000);
     window.addEventListener('online',()=>{ authLog('browser:online'); flushVotes(); route(); });
     window.addEventListener('offline',()=>authLog('browser:offline'));
