@@ -374,7 +374,7 @@ const DemoApi=(function(){
   /* deterministic profile ids, so rows broadcast between windows agree on who
      is who (uid() would differ per window and break every reference) */
   let pSeq=0;
-  const P=(n,extra)=>({id:'dp'+(pSeq++),auth_id:null,email:'',name:n,home_club:null,role:'member',approved:true,active:true,path:'',birthday:null,base_level:0,projects_done:0,...extra});
+  const P=(n,extra)=>({id:'dp'+(pSeq++),auth_id:null,email:'',name:n,home_club:null,role:'member',approved:true,active:true,path:'',birthday:null,joined:null,base_level:0,projects_done:0,...extra});
   const mdOf=n=>{const d=new Date();d.setDate(d.getDate()+n);return dstr(d).slice(5);};
   /* the roster mirrors the real club (names + rough Pathways standing as of
      Aug 2026) so training videos look like the app members actually see; the
@@ -573,7 +573,7 @@ function rebuild(){
       paths:(p.paths&&p.paths.length)?p.paths:(p.path?[{name:p.path,baseLevel:p.base_level||0,projectsDone:p.projects_done||0,done:false}]:[]),
       awards:(awardsBy[p.id]||[]).map(a=>({id:a.id,level:a.level,path:a.path||'',date:a.date})).sort((a,b)=>a.date<b.date?-1:1),
       goals:(goalsBy[p.id]||[]).map(g=>({id:g.id,text:g.text,done:g.done})),
-      archived:!p.active,role:p.role,approved:p.approved,hasAccount:!!p.auth_id,email:p.email||'',birthday:p.birthday||''}))
+      archived:!p.active,role:p.role,approved:p.approved,hasAccount:!!p.auth_id,email:p.email||'',birthday:p.birthday||'',joined:p.joined||''}))
       .sort((a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:'base'})),
     meetings:S.meetings.map(m=>({id:m.id,date:m.date,theme:m.theme||'',cancelled:m.cancelled,reviewed:m.reviewed,config:m.config||{},wod:m.wod||{},assignments:asgBy[m.id]||{}}))
       .sort((a,b)=>a.date<b.date?-1:1),
@@ -797,8 +797,8 @@ let viewAsMember=false;
 function actingAdmin(){ return isAdmin&&!viewAsMember; }
 function tabsFor(){
   if(isAdmin&&!viewAsMember)
-    return [['schedule','Roles & Meetings'],['agenda','Agenda'],['voting','Voting'],['members','Members'],['dcp','DCP Goals'],['me','My Profile'],['settings','Settings'],['practice','🧪 Practice']];
-  const t=[['book','Book a Role'],['me','My Profile']];
+    return [['schedule','Roles & Meetings'],['agenda','Agenda'],['voting','Voting'],['members','Members'],['points','🏆 Points'],['dcp','DCP Goals'],['me','My Profile'],['settings','Settings'],['practice','🧪 Practice']];
+  const t=[['book','Book a Role'],['points','🏆 Points'],['me','My Profile']];
   if(state&&vcMeetings().length){ t.push(['voting','Vote Counter']); t.push(['practice','🧪 Practice']); }
   return t;
 }
@@ -861,6 +861,7 @@ function render(){
   else if(tab==='book')main.innerHTML=openVoteCardsHtml()+congratsHtml()+noticesHtml()+winnersBoardHtml()+viewBook();   /* an open ballot comes first — nothing to scroll past */
   else if(tab==='me')main.innerHTML=congratsHtml()+noticesHtml()+viewMe();
   else if(tab==='practice')main.innerHTML=viewPractice();
+  else if(tab==='points')main.innerHTML=viewPoints();
   putScroll(keepScroll);
 }
 function setTab(t){ tab=t; try{localStorage.setItem('lastTab',t);}catch(e){} render(); window.scrollTo(0,0); if(t==='settings'||t==='agenda')refreshSettings(); }
@@ -1433,6 +1434,225 @@ function openVoteCardsHtml(){
     </div>`;
   }
   return html;
+}
+
+/* ================= POINTS (gamification) =================
+   The club's "RTC Gamification Rules" (Oct 2026, owned by the VP-Membership):
+   - each meeting a member earns the points of their HIGHEST role only (roles
+     don't stack); attending with no role = 1; a Table Topics speaker = 3
+     (taken from that meeting's Best Table Topics candidates — club's choice);
+   - every vote won adds a flat bonus (3), on top;
+   - a one-time +10 the meeting a member logs a role at their 6th meeting;
+   - newcomer multiplier on ROLE points only: max(1, 2 − months_in_RTC/6),
+     months from the joining date officers enter (no date = 1.0x);
+   - a meeting's points count once an officer marks it reviewed (that is
+     when outcomes and the attendance register have been checked);
+   - Toastmaster of the Month = top monthly total; an officer confirms it,
+     which also writes it into the Wall of Fame (settings.gameWinners).
+   Every number lives in settings.gameRules and is editable in the tab.
+   Roles are matched by NAME, so custom roles (Camera Master's id is random)
+   still score; anything unmatched scores the "other role" value. */
+const GAME_ROLES=[
+  {k:'tmod',label:'Toastmaster of the Day',re:/toastmaster of the day|^tmod\b/i,pts:5},
+  {k:'tte',label:'Table Topics Evaluator',re:/table topics? evaluator/i,pts:4},
+  {k:'ttm',label:'Table Topics Master',re:/table topics? master/i,pts:4},
+  {k:'ge',label:'General Evaluator',re:/general evaluator/i,pts:5},
+  {k:'keynote',label:'Keynote Speech',re:/keynote/i,pts:8},
+  {k:'edu',label:'Educational Session',re:/educational/i,pts:8},
+  {k:'spk',label:'Prepared Speaker / Moderator',re:/^(prepared )?speaker|moderator/i,pts:5},
+  {k:'eval',label:'Speech / Project Evaluator',re:/evaluator/i,pts:4},
+  {k:'timer',label:'Timer',re:/^timer/i,pts:3},
+  {k:'tech',label:'Tech Host',re:/tech host/i,pts:3},
+  {k:'gram',label:'Grammarian & Word Master',re:/grammarian|word ?master/i,pts:3},
+  {k:'ah',label:'Ah Counter',re:/ah[- ]?counter/i,pts:3},
+  {k:'al',label:'Active Listener',re:/active listener/i,pts:2},
+  {k:'jm',label:'Joke Master',re:/joke/i,pts:2},
+  {k:'vc',label:'Vote Counter',re:/vote counter/i,pts:2},
+  {k:'panel',label:'Panelist',re:/panel/i,pts:3},
+  {k:'saa',label:'Sergeant at Arms',re:/sergeant|\bsaa\b/i,pts:3,extra:true},
+  {k:'po',label:'Presiding Officer',re:/presiding/i,pts:3,extra:true},
+  {k:'cam',label:'Camera Master',re:/camera/i,pts:3,extra:true},
+  {k:'other',label:'Any other role',re:null,pts:2,extra:true}
+];
+const GAME_DEFAULTS={start:'2026-10-01',ttSpeaker:3,attend:1,award:3,streakN:6,streakBonus:10,multMax:2,multMonths:6};
+function gameRules(){
+  const r=(state.settings&&state.settings.gameRules)||{};
+  const pts={}; for(const g of GAME_ROLES)pts[g.k]=(r.pts&&r.pts[g.k]!=null)?Number(r.pts[g.k]):g.pts;
+  return {...GAME_DEFAULTS,...r,pts};
+}
+function gameRoleKey(name){
+  for(const g of GAME_ROLES)if(g.re&&g.re.test(String(name||'').trim()))return g.k;
+  return 'other';
+}
+function monthsBetween(fromS,toS){
+  const a=parseD(fromS),b=parseD(toS);
+  let n=(b.getFullYear()-a.getFullYear())*12+(b.getMonth()-a.getMonth());
+  if(b.getDate()<a.getDate())n--;
+  return Math.max(0,n);
+}
+function gameMultiplier(mem,dateS,R){
+  if(!mem||!mem.joined)return 1;
+  return Math.max(1,R.multMax-monthsBetween(mem.joined,dateS)/R.multMonths);
+}
+/* one pass over every reviewed meeting since the program started:
+   {byMember:{id:{total,months:{ym:pts},log:[...]}}, pending:n} */
+function gameScores(){
+  const R=gameRules(), out={}, streak={};
+  const rnd=x=>Math.round(x*100)/100;
+  const add=(id,ym,pts,entry)=>{
+    const o=out[id]=out[id]||{total:0,months:{},log:[]};
+    o.total=rnd(o.total+pts); o.months[ym]=rnd((o.months[ym]||0)+pts); o.log.push(entry);
+  };
+  const eligible=x=>x&&!x.external&&x.approved!==false;   /* RTC members only: no guests, no unapproved signups */
+  let pending=0;
+  const meetings=pastMeetings().filter(m=>m.date>=R.start).sort((a,b)=>a.date<b.date?-1:1);
+  for(const m of meetings){
+    if(!m.reviewed){ pending++; continue; }
+    const ym=m.date.slice(0,7), best={};
+    const take=(id,k,label,pts)=>{ if(!best[id]||pts>best[id].pts)best[id]={k,label,pts}; };
+    /* booked roles that were actually done */
+    for(const [key,a] of Object.entries(m.assignments||{})){
+      if(!a||!a.memberId||a.status==='absent')continue;
+      const mem=memberById(a.memberId); if(!eligible(mem))continue;
+      const name=a.status==='other'&&a.actualRole?a.actualRole:roleNameById(key.split('|')[0]);
+      const k=gameRoleKey(name);
+      take(mem.id,k,name,R.pts[k]);
+    }
+    /* Table Topics speakers = the candidates on that night's TT vote */
+    for(const p of pollsFor(m.id))if(/table ?topics?/i.test(p.category))
+      for(const c of (p.candidates||[])){
+        const mem=c.profileId&&memberById(c.profileId);
+        if(eligible(mem)&&!isAbsent(m,mem.id))take(mem.id,'ttspk','Table Topics speaker',R.ttSpeaker);
+      }
+    /* present with no role at all — the register is opt-out, which is why
+       points wait for the officer's review */
+    for(const mem of state.members)
+      if(eligible(mem)&&!mem.archived&&!best[mem.id]&&!isAbsent(m,mem.id)&&(!mem.joined||mem.joined<=m.date))
+        take(mem.id,'attend','Attended',R.attend);
+    for(const [id,b] of Object.entries(best)){
+      const mem=memberById(id);
+      const isRole=b.k!=='attend';
+      const mult=isRole?gameMultiplier(mem,m.date,R):1;
+      add(id,ym,rnd(b.pts*mult),{date:m.date,what:b.label,base:b.pts,mult,pts:rnd(b.pts*mult)});
+      if(isRole){
+        streak[id]=(streak[id]||0)+1;
+        if(streak[id]===R.streakN)add(id,ym,R.streakBonus,{date:m.date,what:R.streakN+'-meeting bonus',base:R.streakBonus,mult:1,pts:R.streakBonus});
+      }
+    }
+    /* vote winners: flat bonus per award, on top of the role */
+    for(const p of pollsFor(m.id)){
+      if(p.status!=='closed'||!p.winner_key)continue;
+      const c=(p.candidates||[]).find(c=>c.key===p.winner_key);
+      const mem=c&&c.profileId&&memberById(c.profileId);
+      if(eligible(mem))add(mem.id,ym,R.award,{date:m.date,what:'🏆 '+p.category,base:R.award,mult:1,pts:R.award});
+    }
+  }
+  return {byMember:out,pending};
+}
+function gameMonthRanking(sc,ym){
+  return state.members.filter(x=>!x.external&&!x.archived&&x.approved!==false)
+    .map(x=>({mem:x,pts:((sc.byMember[x.id]||{}).months||{})[ym]||0}))
+    .filter(r=>r.pts>0).sort((a,b)=>b.pts-a.pts||a.mem.name.localeCompare(b.mem.name));
+}
+let gameMonth=null, gameEditing=false;
+const fmtPts=x=>Number.isInteger(x)?String(x):Number(x).toFixed(1);
+function ymLabel(ym){ return parseD(ym+'-01').toLocaleDateString(undefined,{month:'long',year:'numeric'}); }
+function viewPoints(){
+  const R=gameRules(), sc=gameScores();
+  const cur=todayStr().slice(0,7);
+  const months=[]; { const d=parseD(R.start.slice(0,7)+'-01'); while(dstr(d).slice(0,7)<=cur){ months.unshift(dstr(d).slice(0,7)); d.setMonth(d.getMonth()+1); } }
+  if(!months.length)months.push(cur);
+  if(!gameMonth||!months.includes(gameMonth))gameMonth=months[0];
+  const ym=gameMonth, rank=gameMonthRanking(sc,ym);
+  const winners=(state.settings&&state.settings.gameWinners)||{};
+  const admin=actingAdmin();
+  const mine=sc.byMember[me.profileId];
+  const myMem=memberById(me.profileId);
+  let html=`<h2>🏆 Points</h2>
+  <div class="card"><div class="row">
+    <label class="small">Month <select style="width:auto" onchange="gamePickMonth(this.value)">
+      ${months.map(m=>`<option value="${m}" ${m===ym?'selected':''}>${esc(ymLabel(m))}</option>`).join('')}</select></label>
+    ${admin&&sc.pending?`<span class="pill absent" title="Points count once a meeting is marked reviewed on Roles &amp; Meetings">${sc.pending} meeting${sc.pending>1?'s':''} waiting for review</span>`:''}
+  </div>`;
+  /* Toastmaster of the Month: confirmed winner, or (finished month) the leader for an officer to confirm */
+  const won=winners[ym];
+  if(won)html+=`<div class="banner" style="background:var(--gold-soft);border-color:var(--gold);margin-top:10px">🏅 <b>Toastmaster of the Month — ${esc(ymLabel(ym))}: ${esc(won.name)}</b> (${fmtPts(won.pts)} pts)
+    ${admin?` <button class="btn ghost small" onclick="gameUnconfirm('${ym}')">Undo</button>`:''}</div>`;
+  else if(admin&&ym<cur&&rank.length){
+    const top=rank.filter(r=>r.pts===rank[0].pts);
+    html+=`<div class="banner" style="margin-top:10px">🏅 <b>${esc(ymLabel(ym))} is over.</b> ${top.length>1?'Tie at the top — pick the Toastmaster of the Month:':'Confirm the Toastmaster of the Month:'}
+      ${top.map(r=>`<button class="btn small" onclick="gameConfirm('${ym}','${r.mem.id}')">${esc(r.mem.name)} · ${fmtPts(r.pts)}</button>`).join(' ')}</div>`;
+  }
+  html+=`<div class="tblwrap" style="margin-top:10px"><table><thead><tr><th>#</th><th>Member</th><th class="num">Points</th></tr></thead><tbody>
+    ${rank.length?rank.map(r=>{
+      const pos=rank.findIndex(x=>x.pts===r.pts)+1;
+      const boost=gameMultiplier(r.mem,todayStr(),R);
+      return `<tr ${r.mem.id===me.profileId?'style="background:var(--accent-soft)"':''}><td>${pos}</td>
+        <td>${pos===1?'🥇 ':pos===2?'🥈 ':pos===3?'🥉 ':''}${esc(r.mem.name)}${boost>1?` <span class="pill" title="Newcomer boost on role points">×${boost.toFixed(2)}</span>`:''}</td>
+        <td class="num"><b>${fmtPts(r.pts)}</b></td></tr>`;}).join('')
+      :`<tr><td colspan="3" class="muted">No points yet for ${esc(ymLabel(ym))}. Points appear once a meeting is marked reviewed.</td></tr>`}
+    </tbody></table></div></div>`;
+  /* my own breakdown — the "why" behind the number */
+  if(myMem&&!myMem.external){
+    const log=(mine&&mine.log||[]).filter(e=>e.date.slice(0,7)===ym);
+    const boost=gameMultiplier(myMem,todayStr(),R);
+    html+=`<div class="card"><h3 style="margin:0 0 6px">My points — ${esc(ymLabel(ym))}: ${fmtPts((mine&&mine.months[ym])||0)}</h3>
+      ${boost>1?`<p class="small muted">Newcomer boost right now: ×${boost.toFixed(2)} on role points.</p>`:''}
+      ${log.length?`<div class="tblwrap"><table><thead><tr><th>Meeting</th><th>For</th><th class="num">Points</th></tr></thead><tbody>
+        ${log.map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${esc(e.what)}${e.mult>1?` <span class="muted small">(${fmtPts(e.base)} × ${e.mult.toFixed(2)})</span>`:''}</td><td class="num">${fmtPts(e.pts)}</td></tr>`).join('')}
+      </tbody></table></div>`:'<p class="small muted">Nothing yet this month — book a role!</p>'}</div>`;
+  }
+  /* Wall of Fame */
+  const wall=Object.entries(winners).sort((a,b)=>a[0]<b[0]?1:-1);
+  html+=`<div class="card" style="border-color:var(--gold)"><h3 style="margin:0 0 6px">🏛 Wall of Fame</h3>
+    ${wall.length?wall.map(([m,w])=>`<div>🏅 <b>${esc(ymLabel(m))}</b> — ${esc(w.name)} <span class="muted small">(${fmtPts(w.pts)} pts)</span></div>`).join('')
+      :'<p class="small muted">The first Toastmaster of the Month will appear here.</p>'}</div>`;
+  /* how points work — the live numbers, editable by officers */
+  html+=`<details class="card" ${gameEditing?'open':''}><summary style="cursor:pointer"><b>How points work</b></summary>
+    <ul class="small" style="margin:8px 0">
+      <li>Each meeting you earn the points of your <b>highest</b> role only — roles don't add up.</li>
+      <li>Table Topics speaker: <b>${fmtPts(R.ttSpeaker)}</b>. Attending with no role: <b>${fmtPts(R.attend)}</b>.</li>
+      <li>Winning any vote (Best Speaker, Best Evaluator…): <b>+${fmtPts(R.award)}</b> each.</li>
+      <li>Your ${R.streakN}th meeting with a role: one-time <b>+${fmtPts(R.streakBonus)}</b>.</li>
+      <li>Newcomers get up to <b>×${fmtPts(R.multMax)}</b> on role points, fading to ×1 after ${R.multMonths} months in the club.</li>
+      <li>Points count once officers mark the meeting reviewed. Highest total in a month = <b>Toastmaster of the Month</b>.</li>
+    </ul>
+    <div class="tblwrap"><table><thead><tr><th>Role</th><th class="num">Points</th></tr></thead><tbody>
+      ${GAME_ROLES.map(g=>`<tr><td>${esc(g.label)}${g.extra?' <span class="muted small">(not in the rules sheet)</span>':''}</td>
+        <td class="num">${admin&&gameEditing?`<input type="number" min="0" step="0.5" style="width:70px" value="${R.pts[g.k]}" onchange="gameSet('pts.${g.k}',this.value)">`:fmtPts(R.pts[g.k])}</td></tr>`).join('')}
+      ${admin&&gameEditing?[['ttSpeaker','Table Topics speaker'],['attend','Attendance, no role'],['award','Bonus per vote won'],['streakN','Meetings for the streak bonus'],['streakBonus','Streak bonus'],['multMax','Newcomer multiplier at month 0'],['multMonths','Months until the boost ends']]
+        .map(([k,l])=>`<tr><td>${l}</td><td class="num"><input type="number" min="0" step="0.5" style="width:70px" value="${R[k]}" onchange="gameSet('${k}',this.value)"></td></tr>`).join('')
+        +`<tr><td>Points count from</td><td class="num"><input type="date" style="width:auto" value="${R.start}" onchange="gameSet('start',this.value)"></td></tr>`:''}
+    </tbody></table></div>
+    ${admin?`<button class="btn ghost small" style="margin-top:8px" onclick="gameToggleEdit()">${gameEditing?'Done':'✎ Edit the numbers'}</button>`:''}
+  </details>`;
+  if(admin&&!S.profiles.some(p=>'joined' in p))
+    html+=`<p class="small muted">⚠ Joining dates aren't set up yet — run <code>migrations/2026-10-03-gamification.sql</code>. Until then nobody gets the newcomer boost.</p>`;
+  return html;
+}
+/* app.js is a module: inline handlers can't assign its variables directly */
+function gamePickMonth(v){ gameMonth=v; render(); }
+function gameToggleEdit(){ gameEditing=!gameEditing; render(); }
+function gameSet(path,v){
+  const r={...((state.settings.gameRules)||{})};
+  if(path.startsWith('pts.')){ r.pts={...(r.pts||{}),[path.slice(4)]:Math.max(0,Number(v)||0)}; }
+  else r[path]=path==='start'?(v||GAME_DEFAULTS.start):Math.max(0,Number(v)||0);
+  state.settings.gameRules=r; S.settings=state.settings;
+  saveSettingsFields(['gameRules']); render();
+}
+function gameConfirm(ym,id){
+  const mem=memberById(id); if(!mem)return;
+  const pts=((gameScores().byMember[id]||{}).months||{})[ym]||0;
+  if(!confirm(mem.name+' is Toastmaster of the Month for '+ymLabel(ym)+'?\n\nThis goes on the Wall of Fame for everyone.'))return;
+  state.settings.gameWinners={...(state.settings.gameWinners||{}),[ym]:{id,name:mem.name,pts,at:new Date().toISOString()}};
+  S.settings=state.settings;
+  saveSettingsFields(['gameWinners'],{gameWinners:[ym]}); render(); toast('🏅 '+mem.name+' — Toastmaster of the Month');
+}
+function gameUnconfirm(ym){
+  if(!confirm('Remove the '+ymLabel(ym)+' winner from the Wall of Fame?'))return;
+  const w={...(state.settings.gameWinners||{})}; delete w[ym];
+  state.settings.gameWinners=w; S.settings=state.settings;
+  saveSettingsFields(['gameWinners']); render();
 }
 
 /* ================= PRACTICE: Vote Counter rehearsal =================
@@ -3179,7 +3399,9 @@ function memberCard(mem,hist,absCount){
           <input type="text" value="${esc(mem.name)}" style="max-width:220px" onchange="setMem('${mem.id}','name',this.value)"></div>
         ${mem.external?`<div><label class="small muted">Home club</label><br>
           <input type="text" value="${esc(mem.homeClub)}" style="max-width:180px" onchange="setMem('${mem.id}','homeClub',this.value)"></div>`
-        :`<div><label class="small muted">🎂 Birthday${(()=>{const n=S.birthdayChanges.filter(c=>c.profile_id===mem.id&&!c.by_admin).length;return n?` <span class="chip bad small">changed ${n}×</span>`:'';})()}</label><br>${bdaySelects(mem.id,mem.birthday)}</div>`}
+        :`<div><label class="small muted">🎂 Birthday${(()=>{const n=S.birthdayChanges.filter(c=>c.profile_id===mem.id&&!c.by_admin).length;return n?` <span class="chip bad small">changed ${n}×</span>`:'';})()}</label><br>${bdaySelects(mem.id,mem.birthday)}</div>
+          ${S.profiles.some(p=>'joined' in p)?`<div><label class="small muted" title="Sets the newcomer points boost — fades to none after 6 months">🗓 Joined RTC</label><br>
+            <input type="month" style="width:auto" value="${esc((mem.joined||'').slice(0,7))}" onchange="setMem('${mem.id}','joined',this.value?this.value+'-01':null)"></div>`:''}`}
       </div>
       ${mem.external?'':`
       ${pathsBlock(mem)}
@@ -3252,7 +3474,7 @@ function setMem(id,k,v){
   if(k==='name'){ v=String(v).trim(); if(!v){toast('Name cannot be empty');render();return;} }
   mem[k]=v;
   const p=S.profiles.find(p=>p.id===id);
-  const col={path:'path',baseLevel:'base_level',projectsDone:'projects_done',name:'name',homeClub:'home_club',birthday:'birthday'}[k];
+  const col={path:'path',baseLevel:'base_level',projectsDone:'projects_done',name:'name',homeClub:'home_club',birthday:'birthday',joined:'joined'}[k];
   if(p&&col)p[col]=v;
   sync(api.updateProfile(id,{[col]:v}));
   if(k!=='path'){render();keepOpen(id);}
@@ -5665,7 +5887,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,

@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=109**.
+   every deploy or browsers serve the old `app.js`. Currently **v=110**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-10-02
 
-**Live at v109, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v110, repo clean, nothing half-built.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **How to work on this app (each rule exists because breaking it once hurt the club):**
@@ -74,6 +74,9 @@ key — never copy it into this repo.
 
 ## Outstanding — needs the user, not code
 
+- **Run `migrations/2026-10-03-gamification.sql`** — adds `profiles.joined` + a trigger so only
+  officers can change it. Until then the "Joined RTC" field is hidden and nobody gets the
+  newcomer boost. Then officers fill in each member's joining month (Members → member card).
 - **Run `migrations/2026-10-02-voting.sql`** (SQL Editor). Creates `agenda_assets` (images leave the
   settings row every phone downloads) and the one-poll-per-award unique index. If old duplicate
   polls exist the index is skipped and the notice lists them. App works either way.
@@ -158,6 +161,22 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Added 2026-10-02 — 🏆 Points / gamification (v110)
+
+From the club's "RTC Gamification Rules" doc (VP-Membership owns it). New tab for everyone
+(`viewPoints`): monthly leaderboard, "my points" breakdown, Wall of Fame, rules table.
+Engine `gameScores()` runs client-side over **reviewed** past meetings from `gameRules().start`
+(default 2026-10-01): highest role only per meeting (roles matched by NAME via `GAME_ROLES`
+regexes — custom roles like Camera Master have random ids), TT speakers = candidates of that
+meeting's Table Topics poll (club's choice), attendance-only = 1 (opt-out register, hence the
+reviewed gate), +award per closed-poll win, one-time streak bonus at the Nth role meeting,
+newcomer multiplier on ROLE points only `max(1, multMax − months/multMonths)` from
+`profiles.joined` (no date = 1.0). Guests and unapproved signups excluded. All numbers editable
+by officers (`settings.gameRules`, whole-object save). Toastmaster of the Month: officer confirms
+the leader of a finished month (ties → pick) → `settings.gameWinners[ym]` (per-month merge) =
+the Wall of Fame. Defaults not in the doc: SAA/PO/Camera Master 3, any other role 2.
+Members' lite load keeps 60 days of polls — enough for the current and previous month.
 
 ## Changed 2026-10-02 — one birthday cake a month (v108)
 
