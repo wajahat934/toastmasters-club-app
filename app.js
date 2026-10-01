@@ -268,6 +268,10 @@ const SupabaseApi={
   async delGoal(id){ const {error}=await sb.from('goals').delete().eq('id',id); if(error)throw error; },
   async saveDcp(year,data){ const {error}=await sb.from('dcp').upsert({year,data}); if(error)throw error; },
   async saveAgenda(meeting_id,data){ const {error}=await sb.from('agendas').upsert({meeting_id,data}); if(error)throw error; },
+  /* agenda images: own table (migration 2026-10-02-voting.sql), admin-only,
+     so the settings row every phone downloads no longer carries them */
+  async loadAssets(){ const {data,error}=await sb.from('agenda_assets').select('key,data'); if(error)throw error; const o={}; for(const r of data||[])o[r.key]=r.data; return o; },
+  async saveAsset(key,data){ const {error}=await sb.from('agenda_assets').upsert({key,data,updated_at:new Date().toISOString()}); if(error)throw error; },
   async loadAgenda(meeting_id){ const {data,error}=await sb.from('agendas').select('data').eq('meeting_id',meeting_id).maybeSingle(); if(error)throw error; return data?data.data:null; },
   async savePushSub(row){ const {error}=await sb.from('push_subscriptions').upsert(row); if(error)throw error; },
   async deletePushSub(endpoint){ const {error}=await sb.from('push_subscriptions').delete().eq('endpoint',endpoint); if(error)throw error; },
@@ -288,20 +292,30 @@ const SupabaseApi={
       }catch(e){ /* alerts are best-effort */ }
     })();
   },
-  subscribe(onChange,onStatus){
+  /* opts.votes / opts.agendas: only the screens that can READ those rows
+     listen for them. Realtime checks every subscriber's row-level security
+     for every change, so with 50 phones subscribed to votes each vote cost
+     50 permission checks on the server — for events members are not even
+     allowed to receive (secret ballot). That is what choked voting night.
+     Called again when the answer changes (a member becomes Vote Counter):
+     the old channel is dropped first. */
+  subscribe(onChange,onStatus,opts){
+    opts=opts||{};
     let joined=false;
-    sb.channel('live')
+    if(this._ch){ try{ sb.removeChannel(this._ch); }catch(e){} }
+    let ch=sb.channel('live')
       .on('postgres_changes',{event:'*',schema:'public',table:'assignments'},p=>onChange('assignments',p))
       .on('postgres_changes',{event:'*',schema:'public',table:'meetings'},p=>onChange('meetings',p))
       .on('postgres_changes',{event:'*',schema:'public',table:'polls'},p=>onChange('polls',p))
-      .on('postgres_changes',{event:'*',schema:'public',table:'votes'},p=>onChange('votes',p))
       .on('postgres_changes',{event:'*',schema:'public',table:'announcements'},p=>onChange('announcements',p))
       .on('postgres_changes',{event:'*',schema:'public',table:'birthday_changes'},p=>onChange('birthday_changes',p))
-      /* these two only deliver once the publication carries them:
+      /* settings/agendas only deliver once the publication carries them:
          alter publication supabase_realtime add table settings, agendas; */
-      .on('postgres_changes',{event:'*',schema:'public',table:'settings'},p=>onChange('settings',p))
-      .on('postgres_changes',{event:'*',schema:'public',table:'agendas'},p=>onChange('agendas',p))
-      .subscribe(status=>{
+      .on('postgres_changes',{event:'*',schema:'public',table:'settings'},p=>onChange('settings',p));
+    if(opts.votes)ch=ch.on('postgres_changes',{event:'*',schema:'public',table:'votes'},p=>onChange('votes',p));
+    if(opts.agendas)ch=ch.on('postgres_changes',{event:'*',schema:'public',table:'agendas'},p=>onChange('agendas',p));
+    this._ch=ch;
+    ch.subscribe(status=>{
         /* the first SUBSCRIBED is the normal join (we just loaded everything);
            a later one means the connection dropped and came back, and events
            were missed in between — the caller must catch up with a reload */
@@ -393,7 +407,7 @@ const DemoApi=(function(){
   const announcements=[{id:'annDemo',text:'🧪 Welcome to the training sandbox — everything here is sample data. Play any role freely!',created_at:new Date().toISOString()}];
   const birthdayChanges=[];
   const suggestions=[{id:'sug1',profile_id:profiles[1].id,text:'Can we start meetings 10 minutes earlier?',hide_name:false,status:'new',admin_note:null,created_at:new Date().toISOString()}];
-  const dcpRows=[],agendaRows=[];
+  const dcpRows=[],agendaRows=[],demoAssets={};
   let settingsRows=[{id:1,data:defaultSettings()}];
   /* events arriving from another sandbox window: patch our own tables first
      (so tallies and later loads agree), then hand the event to the app */
@@ -499,6 +513,8 @@ const DemoApi=(function(){
     async delGoal(id){ const i=goals.findIndex(g=>g.id===id); if(i>=0)goals.splice(i,1); },
     async saveDcp(year,data){ const ex=dcpRows.find(r=>r.year===year); if(ex)ex.data=data; else dcpRows.push({year,data}); },
     async saveAgenda(mid,data){ const ex=agendaRows.find(r=>r.meeting_id===mid); if(ex)ex.data=data; else agendaRows.push({meeting_id:mid,data}); emit('agendas','UPDATE',{meeting_id:mid,data}); },
+    async loadAssets(){ return {...demoAssets}; },
+    async saveAsset(key,data){ demoAssets[key]=data; },
     async loadAgenda(mid){ const r=agendaRows.find(r=>r.meeting_id===mid); return r?JSON.parse(JSON.stringify(r.data)):null; },
     subscribe(onChange){ onEvt=onChange; },
     async savePushSub(){}, async deletePushSub(){}, notifyPush(){},
@@ -534,6 +550,10 @@ function rebuild(){
     dcp:S.dcp, agendas:S.agendas
   };
 }
+/* a row this device just inserted may ALREADY be here: the realtime echo of
+   the insert can arrive before the insert's own reply. Pushing it again shows
+   it twice — and deleting the "duplicate" deletes the real row. */
+function addOnce(arr,row){ if(row&&!arr.some(r=>r.id===row.id))arr.push(row); }
 function sync(p){ Promise.resolve(p).catch(e=>{ console.error(e); toast('Sync failed: '+(e.message||e)); }); }
 
 /* ---------- shared read logic (ported unchanged) ---------- */
@@ -731,7 +751,7 @@ async function ensureMeetings(){
     d.setDate(d.getDate()+step);
     const ds=dstr(d);
     if(!S.meetings.some(m=>m.date===ds)){
-      try{ const row=await api.insertMeeting({date:ds}); S.meetings.push(row); count++; }
+      try{ const row=await api.insertMeeting({date:ds}); addOnce(S.meetings,row); count++; }
       catch(e){ console.error(e); break; }
     }
   }
@@ -841,6 +861,7 @@ async function refreshSettings(){
 }
 
 /* ================= NOTICES: birthdays + announcements ================= */
+const BDAY_NOTICE_DAYS=7;
 function fmtMD(v){ return v?`${MD_MONTHS[Number(v.slice(0,2))-1]} ${Number(v.slice(3))}`:'not set'; }
 function fmtWhen(ts){
   try{
@@ -903,10 +924,28 @@ function noticesHtml(){
       };
       const celebrate=bd.filter(x=>inWindow(x.birthday));
       const daysToMeeting=(end-parseD(t))/86400000;
-      if(celebrate.length&&daysToMeeting<=4)
+      /* the club asked for a week's notice (it was 4 days before the meeting,
+         which flagged a birthday just after the last meeting only once it had
+         already passed) */
+      if(celebrate.length&&daysToMeeting<=BDAY_NOTICE_DAYS)
         html+=`<div class="banner" style="border-color:var(--maroon)"><strong>🍰 Cake alert for ${fmtDate(nm.date)}:</strong>
           ${celebrate.map(x=>`<b>${esc(x.name)}</b> (${MD_MONTHS[Number(x.birthday.slice(0,2))-1]} ${Number(x.birthday.slice(3))})`).join(', ')}
           — birthday${celebrate.length>1?'s':''} to celebrate at the meeting. Arrange the cake! 🎂</div>`;
+    }
+    /* every birthday in the next 7 days, counted from the birthday itself —
+       not tied to meeting dates, so none is announced late */
+    const today=parseD(t), soon=[];
+    for(const x of bd){
+      if(x.birthday===todayMD)continue;   /* today has its own banner */
+      for(const y of [today.getFullYear(),today.getFullYear()+1]){
+        const d=parseD(y+'-'+x.birthday), n=Math.round((d-today)/86400000);
+        if(n>0&&n<=BDAY_NOTICE_DAYS){ soon.push({x,n}); break; }
+      }
+    }
+    if(soon.length){
+      soon.sort((a,b)=>a.n-b.n);
+      html+=`<div class="banner"><strong>🎂 Birthdays this coming week:</strong>
+        ${soon.map(({x,n})=>`<b>${esc(x.name)}</b> (${MD_MONTHS[Number(x.birthday.slice(0,2))-1]} ${Number(x.birthday.slice(3))} — ${n===1?'tomorrow':'in '+n+' days'})`).join(', ')}</div>`;
     }
   }
   return html;
@@ -924,7 +963,7 @@ async function annAdd(){
   const inp=document.getElementById('annText'); const text=inp.value.trim();
   if(!text){toast('Write the announcement first');return;}
   try{
-    const row=await api.addAnnouncement(text); S.announcements.push(row); render(); toast('Posted 📣');
+    const row=await api.addAnnouncement(text); addOnce(S.announcements,row); render(); toast('Posted 📣');
     api.notifyPush('announcement',{text});   /* best-effort ping, never awaited */
   }
   catch(e){ toast('Could not post: '+(e.message||e)); }
@@ -1112,12 +1151,10 @@ function vcPollCard(p){
         ${state.members.filter(x=>!x.archived&&!(p.candidates||[]).some(c=>c.profileId===x.id)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
         <option value="__custom">Custom name…</option>
       </select>
-      <span class="muted" style="margin-left:10px">🧾 Voted on paper:</span>
-      ${(p.paper_voters||[]).map(pid=>{const mm=memberById(pid);return `<span class="chip bad" title="${esc(mm?mm.name:'?')}">${esc(vcShortName(mm?mm.name:'?'))} <a style="cursor:pointer" onclick="paperVoter('${p.id}','${pid}',false)">✕</a></span>`;}).join('')||'<span class="muted small">none</span>'}
-      <select style="width:auto" onchange="if(this.value){paperVoter('${p.id}',this.value,true);}" title="Marked members can't vote in the app for this poll (their app vote, if any, is removed)">
-        <option value="">＋ Mark member…</option>
-        ${state.members.filter(x=>!x.archived&&x.hasAccount&&!(p.paper_voters||[]).includes(x.id)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
-      </select></div>`:''}
+      ${/* no "＋ Mark member" picker: new Vote Counters mistook it for adding a
+           candidate. Anyone already marked still shows, so they can be unmarked. */
+        (p.paper_voters||[]).length?`<span class="muted" style="margin-left:10px">🧾 Voted on paper:</span>
+      ${(p.paper_voters||[]).map(pid=>{const mm=memberById(pid);return `<span class="chip bad" title="${esc(mm?mm.name:'?')}">${esc(vcShortName(mm?mm.name:'?'))} <a style="cursor:pointer" onclick="paperVoter('${p.id}','${pid}',false)">✕</a></span>`;}).join('')}`:''}</div>`:''}
   </div>`;
 }
 function vcPick(v){ vcSelMeeting=v; render(); }
@@ -1130,12 +1167,31 @@ async function startPoll(mid,cat){
   if(pollsFor(mid).some(p=>p.category.trim().toLowerCase()===cat.trim().toLowerCase())){
     toast('There is already a “'+cat+'” vote for this meeting'); return;
   }
+  /* TWO polls for one award happened on a slow night, two ways:
+     (1) a second tap while the first insert was still on its way passed the
+         check above (the first poll was not on screen yet) and made a real
+         second poll, splitting the vote — hence the in-flight guard;
+     (2) the realtime echo of the insert landed BEFORE the insert's own reply,
+         and the reply was pushed on top — the same poll twice on screen, and
+         deleting the "extra" one deleted the real poll with its votes —
+         hence the add-only-if-missing. A unique index (migration
+         2026-10-02-voting.sql) stops a second device doing (1) too. */
+  const flightKey=mid+'|'+cat.trim().toLowerCase();
+  if(pollsStarting.has(flightKey)){ toast('Opening “'+cat+'” — one moment…'); return; }
+  pollsStarting.add(flightKey); toast('Opening “'+cat+'”…');
   try{
     const row=await api.createPoll({meeting_id:mid,category:cat,candidates:prefillCandidates(m,cat),adjust:{}});
-    S.polls.push(row); render();
+    addOnce(S.polls,row);
+    render();
     api.notifyPush('poll',{category:cat});   /* best-effort ping, never awaited */
-  }catch(e){ toast('Could not start: '+(e.message||e)); }
+  }catch(e){
+    const msg=String(e&&(e.message||e.code)||e);
+    if(/duplicate|unique|23505/i.test(msg)){ toast('“'+cat+'” is already open — showing it'); reload().then(()=>render()).catch(()=>{}); }
+    else toast('Could not start: '+msg);
+  }
+  finally{ pollsStarting.delete(flightKey); }
 }
+const pollsStarting=new Set();
 async function addCandidate(pollId,v){
   const p=S.polls.find(p=>p.id===pollId); if(!p)return;
   let cand;
@@ -1294,7 +1350,7 @@ async function setWinner(mid,cat,sel){
       sync(api.updatePoll(existing.id,{candidates:cands,status:'closed',winner_key:key}));
     }else{
       const row=await api.createPoll({meeting_id:mid,category:cat,status:'closed',candidates:[{key,name,profileId}],adjust:{},winner_key:key});
-      S.polls.push(row);
+      addOnce(S.polls,row);
     }
     render();
   }catch(e){ toast('Could not save winner: '+(e.message||e)); }
@@ -1506,12 +1562,10 @@ function pPollCard(p){
         ${pRoster().filter(m=>!p.candidates.some(c=>c.key===m.id)).map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}
         <option value="__custom">Custom name…</option>
       </select>
-      <span class="muted" style="margin-left:10px">🧾 Voted on paper:</span>
-      ${(p.paper_voters||[]).map(pid=>{const mm=pMemberById(pid);return `<span class="chip bad" title="${esc(mm?mm.name:'?')}">${esc(vcShortName(mm?mm.name:'?'))} <a style="cursor:pointer" onclick="pPaper('${p.id}','${pid}',false)">✕</a></span>`;}).join('')||'<span class="muted small">none</span>'}
-      <select style="width:auto" onchange="if(this.value){pPaper('${p.id}',this.value,true);}" title="Marked members can't vote in the app for this poll (their app vote, if any, is set aside)">
-        <option value="">＋ Mark member…</option>
-        ${[pMemberById(P_ME),...pRoster()].filter(m=>!(p.paper_voters||[]).includes(m.id)).map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}
-      </select></div>`:''}
+      ${/* no "＋ Mark member" picker: new Vote Counters mistook it for adding a
+           candidate. Anyone already marked still shows, so they can be unmarked. */
+        (p.paper_voters||[]).length?`<span class="muted" style="margin-left:10px">🧾 Voted on paper:</span>
+      ${(p.paper_voters||[]).map(pid=>{const mm=pMemberById(pid);return `<span class="chip bad" title="${esc(mm?mm.name:'?')}">${esc(vcShortName(mm?mm.name:'?'))} <a style="cursor:pointer" onclick="pPaper('${p.id}','${pid}',false)">✕</a></span>`;}).join('')}`:''}</div>`:''}
   </div>`;
 }
 function viewPractice(){
@@ -2282,7 +2336,7 @@ async function addPastMeeting(){
   if(state.meetings.some(m=>m.date===d)){toast('A meeting on that date already exists');return;}
   try{
     const row=await api.insertMeeting({date:d});
-    S.meetings.push(row); rebuild(); render();
+    addOnce(S.meetings,row); rebuild(); render();
     toast('Past meeting added — open “Edit / add role players” below to fill it');
   }catch(e){ toast('Could not add: '+(e.message||e)); }
 }
@@ -2855,7 +2909,7 @@ async function sugAnnounce(id){
   const s=S.suggestions.find(s=>s.id===id); if(!s)return;
   const text=`💡 You said: “${s.text}” → ${s.admin_note||'Done!'}`;
   try{
-    const row=await api.addAnnouncement(text); S.announcements.push(row);
+    const row=await api.addAnnouncement(text); addOnce(S.announcements,row);
     if(s.status!=='done'){ s.status='done'; sync(api.updSuggestion(id,{status:'done'})); }
     render(); toast('Posted to the whole club 📣');
   }catch(e){ toast('Could not post: '+(e.message||e)); }
@@ -4390,10 +4444,10 @@ const AgendaApp=(function(){
           actTd.appendChild(del);
         } else if(row.kind==='evaluator'){
           evalN++;
-          /* `n` pins a moved evaluator to its speaker: the label and the
-             booked name follow the row, so "Evaluator 2" can go first */
+          /* `n` pins a moved evaluator's booked name to the row; the label
+             always numbers by position on the sheet (the club's wish) */
           const lbl=document.createElement('span');
-          lbl.innerHTML=`${agT('l_evaluator','Speech Evaluator')} ${row.n!=null?row.n+1:evalN}`;
+          lbl.innerHTML=`${agT('l_evaluator','Speech Evaluator')} ${evalN}`;
           actTd.appendChild(lbl);
           const evBtn=(txt,title,fn)=>{
             const b=document.createElement('button');
@@ -4882,6 +4936,39 @@ const AgendaApp=(function(){
   }
   window.addEventListener('beforeprint',fitToPage);
   window.addEventListener('afterprint',unfit);
+  /* ---- agenda images (badge, ExCom banner) ----
+     They used to live inside the settings row, which EVERY phone downloads
+     on every open and reload — megabytes per member, on meeting-day wifi,
+     for pictures only admins ever see. With the agenda_assets table in place
+     they are loaded only here, once per session, and any copy still in
+     settings is moved across and stripped from the row. Without the table
+     the old place keeps working. */
+  let agAssets=null,agAssetsTable=false,agAssetsLoading=null;
+  function applyAgAssets(){
+    const a={...((state.settings&&state.settings.agendaAssets)||{}),...(agAssets||{})};
+    document.querySelectorAll('#agWrap img.agswap').forEach(img=>{
+      if(a[img.dataset.asset])img.src=a[img.dataset.asset];
+    });
+  }
+  function loadAgAssets(){
+    if(agAssetsLoading)return agAssetsLoading;
+    agAssetsLoading=(async()=>{
+      try{ agAssets=await api.loadAssets(); agAssetsTable=true; }
+      catch(e){ agAssets={}; agAssetsTable=false; return; }
+      /* move any images still in settings into the table, then strip them —
+         settings wins: only an older app version still writes there */
+      const old=(state.settings&&state.settings.agendaAssets)||{};
+      const keys=Object.keys(old).filter(k=>old[k]);
+      if(keys.length&&isAdmin){
+        try{
+          for(const k of keys){ await api.saveAsset(k,old[k]); agAssets[k]=old[k]; }
+          delete state.settings.agendaAssets; S.settings=state.settings;
+          saveSettingsFields(['agendaAssets']);   /* undefined → key dropped from the row */
+        }catch(e){ console.warn('asset move failed',e); }
+      }
+    })().finally(()=>{ applyAgAssets(); });
+    return agAssetsLoading;
+  }
   /* ---- the club's standard layout ----
      A new meeting's sheet used to start from the built-in defaults, so every
      week the timings and line order had to be fixed again by hand. An admin
@@ -4939,10 +5026,8 @@ const AgendaApp=(function(){
       if(r.k==='r_eduTalk')r.fill='edu';
       if(r.k==='r_eduQa')r.fill='eduQa';
     }
-    const assets=(state.settings.agendaAssets)||{};
-    document.querySelectorAll('#agWrap img.agswap').forEach(img=>{
-      if(assets[img.dataset.asset])img.src=assets[img.dataset.asset];
-    });
+    applyAgAssets();
+    if(agAssets===null)loadAgAssets();
     showTT=g('agTT').checked; showSpeech=g('agSp').checked;
     swapOrder=g('agSwap').checked; juniorFirstOn=g('agJr').checked;
     /* the shell is fresh so the checkbox is the truth: a previous meeting may
@@ -5074,9 +5159,16 @@ const AgendaApp=(function(){
             const key=img.dataset.asset;
             const url=await shrinkImage(r.result,key==='excom');
             img.src=url;
+            toast('Saving the image…');
+            if(agAssetsTable){
+              agAssets={...(agAssets||{}),[key]:url};
+              api.saveAsset(key,url).then(()=>toast('Image saved for all admins ✓'))
+                .catch(e=>toast('Image NOT saved: '+(e.message||e)));
+              return;
+            }
+            /* the images table is not set up yet — the old place */
             state.settings.agendaAssets={...(state.settings.agendaAssets||{}),[key]:url};
             S.settings=state.settings;
-            toast('Saving the image…');
             saveSettingsFields(['agendaAssets'],{agendaAssets:[key]},
               ok=>{ if(ok)toast('Image saved for all admins ✓'); });
           };
@@ -5138,12 +5230,7 @@ function applyDelta(table,p){
      wipe the field the admin is typing in. agendas is a map by meeting. */
   if(table==='settings'){
     const d=p&&p.new&&p.new.data;
-    if(d&&d.roles&&!settingsDirty){
-      /* the images can push this row past the realtime size cap; an event
-         that arrives without them must not blank the banner on screen */
-      if(!d.agendaAssets&&S.settings&&S.settings.agendaAssets)d.agendaAssets=S.settings.agendaAssets;
-      S.settings=d;
-    }
+    if(d&&d.roles&&!settingsDirty)S.settings=d;
     return true;
   }
   if(table==='agendas'){
@@ -5260,6 +5347,10 @@ function paintSnapshot(profileId){
   }catch(e){ return false; }
 }
 let entered=false;
+/* votes are readable only by admins and the meeting's Vote Counter (secret
+   ballot) — only their screens listen for them; see api.subscribe */
+let liveOpts={};
+function wantVotesLive(){ return !!(me&&(isAdmin||vcMeetings().length)); }
 async function enterApp(profile){
   me={profileId:profile.id,name:profile.name};
   isAdmin=profile.role==='admin';
@@ -5325,10 +5416,11 @@ async function enterApp(profile){
       dtTimer=setTimeout(()=>{
         overlayPendingVotes(); rebuild();
         if(['book','schedule','voting'].includes(tab))renderLive();
+        /* booked as Vote Counter after opening the app: start receiving votes */
+        if(!liveOpts.votes&&wantVotesLive())startLive();
       },250);
     };
-    api.subscribe(
-      (table,p)=>{
+    const onLive=(table,p)=>{
         if(!applyDelta(table,p)){ scheduleReload(); return; }
         if(table==='agendas'){
           if(tab==='agenda')AgendaApp.remoteChanged(p&&p.new&&p.new.meeting_id);
@@ -5339,9 +5431,13 @@ async function enterApp(profile){
           if(pid&&tallyPatch(pid))return;   /* numbers patched in place */
         }
         renderSoon();
-      },
-      why=>{ authLog('realtime:'+why); if(why==='rejoined')scheduleReload(); }
-    );
+      };
+    const onLiveStatus=why=>{ authLog('realtime:'+why); if(why==='rejoined')scheduleReload(); };
+    const startLive=()=>{
+      liveOpts={votes:wantVotesLive(),agendas:isAdmin};
+      api.subscribe(onLive,onLiveStatus,liveOpts);
+    };
+    startLive();
     setInterval(()=>{ if(!document.hidden)scheduleReload(); },300000);
     setInterval(dateRollCheck,60000);
     window.addEventListener('online',()=>{ authLog('browser:online'); flushVotes(); route(); });

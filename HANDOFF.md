@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=104**.
+   every deploy or browsers serve the old `app.js`. Currently **v=105**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-10-02
 
-**Live at v104, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v105, repo clean, nothing half-built.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **How to work on this app (each rule exists because breaking it once hurt the club):**
@@ -74,6 +74,9 @@ key — never copy it into this repo.
 
 ## Outstanding — needs the user, not code
 
+- **Run `migrations/2026-10-02-voting.sql`** (SQL Editor). Creates `agenda_assets` (images leave the
+  settings row every phone downloads) and the one-poll-per-award unique index. If old duplicate
+  polls exist the index is skipped and the notice lists them. App works either way.
 - **Backups are built but not switched on.** Add repo secrets `SUPABASE_SERVICE_KEY` and
   `BACKUP_PASSPHRASE`, then run the `backup` workflow once from the Actions tab. Steps are in
   the private setup sheet. Until then, nothing is backed up.
@@ -155,6 +158,30 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Fixed 2026-10-02 later — voting-night load, double polls, birthdays (v105)
+
+- **Voting hang.** Every phone subscribed to `votes` realtime. Realtime checks RLS for EVERY
+  subscriber on EVERY change, so 50 voters = 2,500 permission checks for events members may not
+  even receive (secret ballot) — Supabase's documented postgres_changes bottleneck. Now
+  `api.subscribe(onChange,onStatus,opts)` adds `votes` only when `wantVotesLive()` (admin or
+  Vote Counter of a meeting in `vcMeetings()`), `agendas` only for admins; re-subscribes (old
+  channel removed) when a member gets booked as VC. Members' own votes are unaffected (optimistic
+  queue). NOT load-tested against the live server — watch the next meeting.
+- **Agenda images out of settings.** `agenda_assets` table (migration above), loaded only by the
+  Agenda tab (`loadAgAssets`), which moves any images still in settings into the table and strips
+  `agendaAssets` from the row (settings wins: only old app versions write there). Falls back to the
+  settings path while the table is missing. The settings row every phone downloads was megabytes.
+- **Double polls.** (1) `startPoll` had no in-flight guard: a second tap on a slow connection
+  created a real second poll (`pollsStarting`); (2) the realtime echo of an insert can land before
+  the insert's reply, and the reply was then pushed again — same poll twice on the VC screen, and
+  deleting the "duplicate" deleted the real poll and its votes. `addOnce()` now used for every
+  insert-then-push (polls, meetings, announcements). Unique index catches two devices at once.
+- **"＋ Mark member" (paper voter) picker removed** from the VC card and the practice mirror — new
+  Vote Counters used it to add candidates. Already-marked voters still show, to unmark.
+- **Evaluator labels** number by position (names still follow the row via `n`).
+- **Birthday notice 7 days ahead** (`BDAY_NOTICE_DAYS`): cake alert gate 4→7 days, plus a
+  "Birthdays this coming week" admin banner counted from each birthday, not from meetings.
 
 ## Fixed 2026-10-02 — agenda reverts; standard layout; evaluator arrows; checklist (v104)
 
