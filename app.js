@@ -79,6 +79,13 @@ function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function dstr(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function todayStr(){ return dstr(new Date()); }
+/* The BOOKING day turns over at 8 pm, not midnight: the meeting is long over
+   by then, and members wanted to book the newly opened week the same evening
+   instead of waiting until 12 am. Only the booking lists use it (upcoming /
+   past meetings, meeting generation) — voting, birthdays and the release
+   cutoff still go by the calendar date. */
+const ROLLOVER_HOUR=20;
+function bookingDayStr(){ const d=new Date(); if(d.getHours()>=ROLLOVER_HOUR)d.setDate(d.getDate()+1); return dstr(d); }
 function parseD(s){ const p=s.split('-').map(Number); return new Date(p[0],p[1]-1,p[2]); }
 function fmtDate(s){ try{ return parseD(s).toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short',year:'numeric'});}catch(e){return s;} }
 function clubYearOf(s){ const p=s.split('-').map(Number); return p[1]>=7?p[0]:p[0]-1; }
@@ -631,12 +638,12 @@ function meetingOutcomes(m){
   }
   return out;
 }
-function pastMeetings(){ const t=todayStr(); return state.meetings.filter(m=>!m.cancelled&&m.date<t).sort((a,b)=>a.date<b.date?1:-1); }
+function pastMeetings(){ const t=bookingDayStr(); return state.meetings.filter(m=>!m.cancelled&&m.date<t).sort((a,b)=>a.date<b.date?1:-1); }
 /* Members only ever plan three meetings ahead — more is noise on a phone.
    Officers need a longer runway to shuffle speakers between meetings. */
 const MEMBER_HORIZON=3, ADMIN_HORIZON=8;
 function upcomingMeetings(n){
-  const t=todayStr();
+  const t=bookingDayStr();
   return state.meetings.filter(m=>!m.cancelled&&m.date>=t)
     .sort((a,b)=>a.date<b.date?-1:1).slice(0,n||MEMBER_HORIZON);
 }
@@ -758,7 +765,7 @@ function candidatesByGoal(){
 /* ---------- meetings auto-generation (admin writes; all read) ---------- */
 async function ensureMeetings(){
   if(!isAdmin)return;
-  const t=todayStr();
+  const t=bookingDayStr();
   const step=state.settings.cadence==='biweekly'?14:7;
   let count=S.meetings.filter(m=>!m.cancelled&&m.date>=t).length;
   const futureDates=S.meetings.map(m=>m.date).filter(d=>d>=t).sort();
@@ -5512,9 +5519,9 @@ async function enterApp(profile){
     document.addEventListener('visibilitychange',()=>{ if(!document.hidden)dateRollCheck(); });
   }
 }
-let _renderedDate=todayStr();
+let _renderedDate=todayStr()+'|'+bookingDayStr();
 async function dateRollCheck(){
-  const t=todayStr();
+  const t=todayStr()+'|'+bookingDayStr();   /* also redraws at the 8 pm booking rollover */
   if(t===_renderedDate)return;
   _renderedDate=t;
   await ensureMeetings(); autoFillStanding(); render();
