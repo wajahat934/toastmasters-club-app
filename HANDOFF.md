@@ -177,6 +177,7 @@ by officers (`settings.gameRules`, whole-object save). Toastmaster of the Month:
 the leader of a finished month (ties → pick) → `settings.gameWinners[ym]` (per-month merge) =
 the Wall of Fame. Defaults not in the doc: SAA/PO/Camera Master 3, any other role 2.
 Members' lite load keeps 60 days of polls — enough for the current and previous month.
+"Wordsmith of the Day" in the rules sheet = the Grammarian role (owner confirmed) — no separate award.
 
 ## Changed 2026-10-02 — one birthday cake a month (v108)
 
