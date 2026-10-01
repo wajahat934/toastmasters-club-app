@@ -1469,10 +1469,13 @@ const GAME_ROLES=[
   {k:'jm',label:'Joke Master',re:/joke/i,pts:2},
   {k:'vc',label:'Vote Counter',re:/vote counter/i,pts:2},
   {k:'panel',label:'Panelist',re:/panel/i,pts:3},
-  {k:'saa',label:'Sergeant at Arms',re:/sergeant|\bsaa\b/i,pts:3,extra:true},
-  {k:'po',label:'Presiding Officer',re:/presiding/i,pts:3,extra:true},
-  {k:'cam',label:'Camera Master',re:/camera/i,pts:3,extra:true},
-  {k:'other',label:'Any other role',re:null,pts:2,extra:true}
+  /* the club's call: roles not on the rules sheet carry NO points (still
+     recognised by name so they don't fall into "other"); a member who only
+     held one of these still gets the attendance point */
+  {k:'saa',label:'Sergeant at Arms',re:/sergeant|\bsaa\b/i,pts:0,hidden:true},
+  {k:'po',label:'Presiding Officer',re:/presiding/i,pts:0,hidden:true},
+  {k:'cam',label:'Camera Master',re:/camera/i,pts:0,hidden:true},
+  {k:'other',label:'Any other role',re:null,pts:0,hidden:true}
 ];
 const GAME_DEFAULTS={start:'2026-10-01',ttSpeaker:3,attend:1,award:3,streakN:6,streakBonus:10,multMax:2,multMonths:6};
 function gameRules(){
@@ -1509,7 +1512,8 @@ function gameScores(){
   for(const m of meetings){
     if(!m.reviewed){ pending++; continue; }
     const ym=m.date.slice(0,7), best={};
-    const take=(id,k,label,pts)=>{ if(!best[id]||pts>best[id].pts)best[id]={k,label,pts}; };
+    /* a no-points role neither scores nor blocks the attendance point */
+    const take=(id,k,label,pts)=>{ if(!(pts>0))return; if(!best[id]||pts>best[id].pts)best[id]={k,label,pts}; };
     /* booked roles that were actually done */
     for(const [key,a] of Object.entries(m.assignments||{})){
       if(!a||!a.memberId||a.status==='absent')continue;
@@ -1618,7 +1622,7 @@ function viewPoints(){
       <li>Points count once officers mark the meeting reviewed. Highest total in a month = <b>Toastmaster of the Month</b>.</li>
     </ul>
     <div class="tblwrap"><table><thead><tr><th>Role</th><th class="num">Points</th></tr></thead><tbody>
-      ${GAME_ROLES.map(g=>`<tr><td>${esc(g.label)}${g.extra?' <span class="muted small">(not in the rules sheet)</span>':''}</td>
+      ${GAME_ROLES.filter(g=>!g.hidden).map(g=>`<tr><td>${esc(g.label)}</td>
         <td class="num">${admin&&gameEditing?`<input type="number" min="0" step="0.5" style="width:70px" value="${R.pts[g.k]}" onchange="gameSet('pts.${g.k}',this.value)">`:fmtPts(R.pts[g.k])}</td></tr>`).join('')}
       ${admin&&gameEditing?[['ttSpeaker','Table Topics speaker'],['attend','Attendance, no role'],['award','Bonus per vote won'],['streakN','Meetings for the streak bonus'],['streakBonus','Streak bonus'],['multMax','Newcomer multiplier at month 0'],['multMonths','Months until the boost ends']]
         .map(([k,l])=>`<tr><td>${l}</td><td class="num"><input type="number" min="0" step="0.5" style="width:70px" value="${R[k]}" onchange="gameSet('${k}',this.value)"></td></tr>`).join('')
