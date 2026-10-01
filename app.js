@@ -268,6 +268,7 @@ const SupabaseApi={
   async delGoal(id){ const {error}=await sb.from('goals').delete().eq('id',id); if(error)throw error; },
   async saveDcp(year,data){ const {error}=await sb.from('dcp').upsert({year,data}); if(error)throw error; },
   async saveAgenda(meeting_id,data){ const {error}=await sb.from('agendas').upsert({meeting_id,data}); if(error)throw error; },
+  async loadAgenda(meeting_id){ const {data,error}=await sb.from('agendas').select('data').eq('meeting_id',meeting_id).maybeSingle(); if(error)throw error; return data?data.data:null; },
   async savePushSub(row){ const {error}=await sb.from('push_subscriptions').upsert(row); if(error)throw error; },
   async deletePushSub(endpoint){ const {error}=await sb.from('push_subscriptions').delete().eq('endpoint',endpoint); if(error)throw error; },
   /* fire-and-forget by design: a notification send must NEVER sit inside the
@@ -396,8 +397,8 @@ const DemoApi=(function(){
   let settingsRows=[{id:1,data:defaultSettings()}];
   /* events arriving from another sandbox window: patch our own tables first
      (so tallies and later loads agree), then hand the event to the app */
-  const BC_PK={votes:r=>r.poll_id+'|'+r.voter,polls:r=>r.id,assignments:r=>r.meeting_id+'|'+r.slot_key,meetings:r=>r.id,announcements:r=>r.id};
-  const BC_ARR={votes,polls,assignments,meetings,announcements};
+  const BC_PK={votes:r=>r.poll_id+'|'+r.voter,polls:r=>r.id,assignments:r=>r.meeting_id+'|'+r.slot_key,meetings:r=>r.id,announcements:r=>r.id,agendas:r=>r.meeting_id};
+  const BC_ARR={votes,polls,assignments,meetings,announcements,agendas:agendaRows};
   if(bch)bch.onmessage=ev=>{
     const m=ev.data; if(!m||m.from===TAB_TOKEN)return;
     const {table,payload}=m;
@@ -497,7 +498,8 @@ const DemoApi=(function(){
     async updGoal(id,f){ Object.assign(goals.find(g=>g.id===id)||{},f); },
     async delGoal(id){ const i=goals.findIndex(g=>g.id===id); if(i>=0)goals.splice(i,1); },
     async saveDcp(year,data){ const ex=dcpRows.find(r=>r.year===year); if(ex)ex.data=data; else dcpRows.push({year,data}); },
-    async saveAgenda(mid,data){ const ex=agendaRows.find(r=>r.meeting_id===mid); if(ex)ex.data=data; else agendaRows.push({meeting_id:mid,data}); },
+    async saveAgenda(mid,data){ const ex=agendaRows.find(r=>r.meeting_id===mid); if(ex)ex.data=data; else agendaRows.push({meeting_id:mid,data}); emit('agendas','UPDATE',{meeting_id:mid,data}); },
+    async loadAgenda(mid){ const r=agendaRows.find(r=>r.meeting_id===mid); return r?JSON.parse(JSON.stringify(r.data)):null; },
     subscribe(onChange){ onEvt=onChange; },
     async savePushSub(){}, async deletePushSub(){}, notifyPush(){},
     _tables:T
@@ -3533,10 +3535,15 @@ function urduNamesHtml(){
    settingsDirty guards local edits against being clobbered by a slower fetch
    or live update; it clears when the last outstanding save has landed. */
 let settingsSaving=0,sfQueue=Promise.resolve(),settingsWriteGen=0;
-function saveSettingsFields(keys){
+/* `sub` narrows a map-valued field to the entries this edit touched:
+   {agendaAssets:['excom']} saves the banner alone, merged into the server's
+   map — saving the whole map let a device holding an old banner put it back
+   when someone replaced the badge. `done(ok)` reports the outcome. */
+function saveSettingsFields(keys,sub,done){
   settingsDirty=true; settingsSaving++; settingsWriteGen++;
-  const vals={}; for(const k of keys)vals[k]=state.settings[k];
+  const vals={}; for(const k of keys)vals[k]=agCloneSettingsVal(state.settings[k]);
   sfQueue=sfQueue.then(async()=>{
+    let ok=false;
     try{
       let base=null,fetched=false;
       try{
@@ -3544,12 +3551,45 @@ function saveSettingsFields(keys){
         base=(row&&row.data&&row.data.roles)?row.data:null;
       }catch(e){}
       if(!fetched){ toast('Could not save — no connection. The change stays on this screen; try again once online.'); return; }
+      const put={...vals};
+      if(base&&sub)for(const k in sub){
+        const mine={}; for(const s of sub[k])mine[s]=(vals[k]||{})[s];
+        put[k]={...(base[k]||{}),...mine};
+      }
       /* no row yet = first-ever save; otherwise merge onto the server's copy */
-      await api.saveSettings(base?{...base,...vals}:{...state.settings,...vals});
+      await api.saveSettings(base?{...base,...put}:{...state.settings,...put});
+      ok=true;
     }catch(e){ console.error(e); toast('Sync failed: '+(e.message||e)); }
-    finally{ settingsWriteGen++; if(--settingsSaving===0)settingsDirty=false; }
+    finally{ settingsWriteGen++; if(--settingsSaving===0)settingsDirty=false; if(done)try{done(ok);}catch(e){} }
   });
 }
+/* Agenda images live inside the settings row, which every phone downloads on
+   every load — a raw phone photo or a print-size PNG can run to several MB
+   and makes the save slow or fail on weak internet. Anything over ~1 MB is
+   redrawn at most 2400 px wide (≈290 dpi across A4, still crisp in print).
+   Photos (the ExCom banner) become JPEG; the badge stays PNG for its
+   transparency. Small images pass through untouched. */
+function shrinkImage(dataUrl,photo){
+  return new Promise(res=>{
+    if(dataUrl.length<1.4e6)return res(dataUrl);
+    const im=new Image();
+    im.onload=()=>{
+      try{
+        const sc=Math.min(1,2400/im.naturalWidth);
+        const c=document.createElement('canvas');
+        c.width=Math.round(im.naturalWidth*sc); c.height=Math.round(im.naturalHeight*sc);
+        const cx=c.getContext('2d');
+        if(photo){ cx.fillStyle='#fff'; cx.fillRect(0,0,c.width,c.height); }
+        cx.drawImage(im,0,0,c.width,c.height);
+        const out=photo?c.toDataURL('image/jpeg',0.9):c.toDataURL('image/png');
+        res(out.length<dataUrl.length?out:dataUrl);
+      }catch(e){ res(dataUrl); }
+    };
+    im.onerror=()=>res(dataUrl);
+    im.src=dataUrl;
+  });
+}
+function agCloneSettingsVal(v){ return (v&&typeof v==='object')?(Array.isArray(v)?[...v]:{...v}):v; }
 function s_set(k,v){ state.settings[k]=typeof v==='string'?v.trim():v; S.settings=state.settings; saveSettingsFields([k]); render(); }
 function setRoleGap(role,v){ s_set('roleGaps',{...(state.settings.roleGaps||{}),[role]:Math.max(0,Number(v)||0)}); }
 /* Role edits are read-modify-write against the SERVER'S current roles list,
@@ -3897,9 +3937,12 @@ const AgendaApp=(function(){
           <option value="pk">🇵🇰 Independence Day</option>
         </select></label>
         <button class="btn ghost small" id="agPkKit" style="display:none" title="Add the National Anthem, Milli Naghma and a Quiz in the usual places">🇵🇰 Independence Day layout</button>
+        <button class="btn ghost small" id="agTplSave" title="Every NEW meeting's agenda will start from this sheet's timings, line order and start time">⭐ Save as standard layout</button>
+        <button class="btn ghost small" id="agTplUse" title="Replace this meeting's layout with the standard one, then refill the names from bookings">⭐ Use standard layout</button>
       </div>
       <p class="small muted" style="margin:8px 0 0">Role players fill automatically from the meeting's bookings. Click any text on the sheet to edit — changes save per meeting for all admins. The PDF auto-scales to one A4 page.</p>
     </div>
+    <div class="agstage"><aside id="agCheck" class="agcheck no-print"></aside>
     <div id="agSheet">
       <div class="masthead">
         <div class="badge"><img class="agswap" data-asset="badge" src="${window.AG_BADGE}" alt="Toastmasters International"></div>
@@ -3974,7 +4017,7 @@ const AgendaApp=(function(){
         <img class="agswap" data-asset="excom" src="${window.AG_EXCOM}" alt="ExCom officers">
       </div>
       <div class="foot"><span class="motto" contenteditable="true" data-k="motto">“For better listening, for better thinking, for better speaking — we learn by doing.”</span></div>
-    </div></div>`;
+    </div></div></div>`;
   }
   function fmtT(mins){ const h24=Math.floor(mins/60),mm=String(Math.round(mins%60)).padStart(2,'0'); return `${((h24+11)%12)+1}:${mm}`; }
   function ampm(mins){ return Math.floor(mins/60)%24>=12?'PM':'AM'; }
@@ -4239,6 +4282,9 @@ const AgendaApp=(function(){
   function syncEvaluators(){
     const rows=evalBlock().rows;
     let diff=speakerCount()-rows.filter(r=>r.kind==='evaluator').length;
+    /* a changed speaker count renumbers: a pinned order would point at
+       speakers that no longer exist */
+    if(diff)for(const r of rows)if(r.kind==='evaluator')delete r.n;
     while(diff>0){
       const lastIdx=rows.map(r=>r.kind).lastIndexOf('evaluator');
       const insertAt=lastIdx>=0?lastIdx+1:rows.findIndex(r=>r.kind==='tteval')+1;
@@ -4343,7 +4389,30 @@ const AgendaApp=(function(){
           });
           actTd.appendChild(del);
         } else if(row.kind==='evaluator'){
-          evalN++; actTd.innerHTML=`${agT('l_evaluator','Speech Evaluator')} ${evalN}`;
+          evalN++;
+          /* `n` pins a moved evaluator to its speaker: the label and the
+             booked name follow the row, so "Evaluator 2" can go first */
+          const lbl=document.createElement('span');
+          lbl.innerHTML=`${agT('l_evaluator','Speech Evaluator')} ${row.n!=null?row.n+1:evalN}`;
+          actTd.appendChild(lbl);
+          const evBtn=(txt,title,fn)=>{
+            const b=document.createElement('button');
+            b.className='del no-print'; b.style.background='#4a6572';
+            b.textContent=txt; b.title=title;
+            b.addEventListener('click',fn); actTd.appendChild(b);
+          };
+          /* stays inside the Evaluation Session — the evaluator count is kept
+             in step with the speakers there */
+          const evShift=dir=>{
+            const rows=block.rows,i=rows.indexOf(row),j=i+dir;
+            if(i<0||j<0||j>=rows.length)return;
+            if(!rows.some(r=>r.kind==='evaluator'&&r.n!=null)){
+              let k=0; for(const r of rows)if(r.kind==='evaluator')r.n=k++;
+            }
+            rows.splice(j,0,rows.splice(i,1)[0]); agRender();
+          };
+          evBtn('↑','Move this evaluator up',()=>evShift(-1));
+          evBtn('↓','Move this evaluator down',()=>evShift(1));
         } else {
           const lbl=document.createElement('span');
           lbl.innerHTML=row.act;
@@ -4418,7 +4487,7 @@ const AgendaApp=(function(){
         applyLights(row); body.appendChild(tr);
       });
     });
-    updateTimes(); queueAgSave();
+    updateTimes(); renderChecklist(); queueAgSave();
   }
   function updateTimes(){
     if(!g('agBody'))return;
@@ -4529,7 +4598,7 @@ const AgendaApp=(function(){
     for(const b of blocks){ if(b.type==='break')continue;
       for(const r of b.rows){
         if(r.fill==='spk'){ if(map.spk[si])r.who=map.spk[si]; si++; }
-        else if(r.fill==='eval'){ if(map.eval[ei])r.who=map.eval[ei]; ei++; }
+        else if(r.fill==='eval'){ const n=r.n!=null?r.n:ei; if(map.eval[n])r.who=map.eval[n]; ei++; }
         /* composite Q&A line: only rewritten once a session speaker is booked,
            so a hand-typed guest name is never clobbered by a blank */
         else if(r.fill==='eduQa'){ if(map.edu)r.who=map.edu+' &amp; '+eduTmod(); }
@@ -4575,14 +4644,15 @@ const AgendaApp=(function(){
     return {
       blocks:blocks.map(b=>b.type==='break'?{type:'break',dur:b.dur,moved:b.moved}
         :{type:b.type,id:b.id,k:b.k,_pk:b._pk,title:b.title,removable:b.removable,
-          rows:b.rows.map(r=>({kind:r.kind,k:r.k,fill:r.fill,act:r.act,label:r.label,introRow:r.introRow,who:r.who,dur:r.dur,preset:r.preset,autoMode:r.autoMode,lights:[...(r.lights||['','',''])]}))}),
+          rows:b.rows.map(r=>({kind:r.kind,n:r.n,k:r.k,fill:r.fill,act:r.act,label:r.label,introRow:r.introRow,who:r.who,dur:r.dur,preset:r.preset,autoMode:r.autoMode,lights:[...(r.lights||['','',''])]}))}),
       inputs:{date:g('agDate').value,start:g('agStart').value,no:g('agNo').value,
               buf:g('agBuf').value,bufE:g('agBufE').value,bufO:g('agBufO').value,
               tt:g('agTT').checked,sp:g('agSp').checked,
               swap:g('agSwap').checked,jr:g('agJr').checked,urdu:g('agUr').checked,theme:g('agTheme2').value},
       texts:staticEditables().map(el=>el.innerHTML),
       camText:(document.querySelector('#agSheet [data-sup="cam"]')||{innerHTML:null}).innerHTML,
-      excom:[g('agExcomSec').classList.contains('nobar'),g('agExcomSec').classList.contains('nosec')]
+      excom:[g('agExcomSec').classList.contains('nobar'),g('agExcomSec').classList.contains('nosec')],
+      checks:{...agChecks}
     };
   }
   function applyAgState(st){
@@ -4623,21 +4693,149 @@ const AgendaApp=(function(){
         if(mt===''||/^(TM|DTM)\s+\S/.test(mt)||/ExCom/i.test(mt))
           mis.innerHTML=agT('mission','We provide a supportive and positive learning experience in which members are empowered to develop communication and leadership skills, resulting in greater self-confidence and personal growth.');
       }
+      agChecks=(st.checks&&typeof st.checks==='object')?{...st.checks}:{};
       if(st.excom){
         g('agExcomSec').classList.toggle('nobar',!!st.excom[0]);
         g('agExcomSec').classList.toggle('nosec',!!st.excom[1]);
       }
     }catch(e){ console.warn('Could not restore agenda state:',e); }
   }
+  /* A sheet is saved WHOLE, so a second device holding an older copy on
+     screen (an admin's phone left on this tab, or anyone switching meetings
+     in the dropdown) used to write that old copy back over a newer one — the
+     club set 3:30 and kept finding 4:30 again. Every save now writes only
+     what THIS screen changed since it loaded: `agBase` is the sheet as it
+     was loaded, and any part still equal to it is taken from the server's
+     current copy (fetched at save time) instead of from this screen. */
+  let agBase=null,agSaving=0,agQueue=Promise.resolve(),agChecks={},agCheckEdit=false;
+  const agClone=o=>o==null?o:JSON.parse(JSON.stringify(o));
+  const agSame=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  function mergeAg(base,local,server){
+    if(!server||!base)return local;
+    const pick=(l,b,s)=>agSame(l,b)&&s!==undefined?agClone(s):l;
+    const out={...local};
+    out.blocks=pick(local.blocks,base.blocks,server.blocks);
+    out.inputs={...(local.inputs||{})};
+    const bi=base.inputs||{},si=server.inputs||{};
+    for(const k in out.inputs)out.inputs[k]=pick(out.inputs[k],bi[k],si[k]);
+    const lt=local.texts||[],bt=base.texts||[],st=server.texts||[];
+    out.texts=(lt.length===bt.length&&lt.length===st.length)?lt.map((h,i)=>pick(h,bt[i],st[i])):lt;
+    out.camText=pick(local.camText,base.camText,server.camText);
+    out.excom=pick(local.excom,base.excom,server.excom);
+    out.checks=pick(local.checks,base.checks,server.checks);
+    return out;
+  }
+  /* the sheet's state is captured NOW (the caller may be about to remount or
+     switch meeting); the server read and the write run behind, one at a time */
+  function saveAgNow(){
+    clearTimeout(saveTimer); saveTimer=null;
+    if(!mid||!g('agBody'))return;
+    if(!agendasLoaded)return;   /* never save a sheet built without the saved truth */
+    const m=mid,local=collectAgState(),base=agBase;
+    agBase=agClone(local);
+    state.agendas[m]=local; S.agendas=state.agendas;
+    agSaving++;
+    agQueue=agQueue.then(async()=>{
+      let differs=false;
+      try{
+        let server=null;
+        try{ server=await api.loadAgenda(m); }
+        catch(e){ server=null; }   /* offline: the save still goes, as before */
+        const data=mergeAg(base,local,server);
+        await api.saveAgenda(m,data);
+        S.agendas[m]=data; state.agendas=S.agendas;
+        differs=!agSame(data,local);
+      }catch(e){ console.error(e); toast('Agenda not saved: '+(e.message||e)); }
+      finally{ agSaving--; }
+      /* someone else's newer values won — show them, unless the officer is
+         mid-edit (their next save still keeps the newer values, because
+         untouched parts always defer to the server) */
+      if(differs&&m===mid)refreshFromSaved();
+    });
+  }
   function queueAgSave(){
     clearTimeout(saveTimer);
-    saveTimer=setTimeout(()=>{
-      if(!mid||!g('agBody'))return;
-      if(!agendasLoaded)return;   /* never save a sheet built without the saved truth */
-      const data=collectAgState();
-      state.agendas[mid]=data; S.agendas=state.agendas;
-      sync(api.saveAgenda(mid,data));
-    },500);
+    saveTimer=setTimeout(saveAgNow,500);
+  }
+  function agBusy(){
+    const a=document.activeElement;
+    return !!(a&&container&&container.contains(a)&&(a.isContentEditable||/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)));
+  }
+  /* ---- pre-issue checklist ----
+     Ticked before the agenda goes out. The LIST is club-wide (settings,
+     editable by any admin); the TICKS belong to each meeting's sheet, so
+     every week starts unticked and the other admins see what is done.
+     The TBD line counts open names on the sheet for you. */
+  const AG_CHECK_DEFAULT=[
+    'Meeting number and date are right',
+    'Start time is right',
+    'Theme and Word of the Day are filled in',
+    'Pressed “Fill from bookings” — every name is right',
+    'No role still says TBD',
+    'Each speaker’s minutes match their project',
+    'Evaluators line up with their speakers',
+    'The meeting ends on time (check the last row)',
+    'Next meeting’s planner box is right',
+    'ExCom banner is the current one',
+    'Download PDF fits on one page'
+  ].map((t,i)=>({id:'d'+i,text:t}));
+  function checkItems(){
+    const l=state.settings&&state.settings.agendaChecklist;
+    return Array.isArray(l)?l:AG_CHECK_DEFAULT;
+  }
+  function tbdCount(){
+    let n=0;
+    for(const b of blocks)if(b.rows&&!blockHidden(b))for(const r of visibleRows(b))
+      if(/^\s*(TBD|—|-)?\s*$/i.test(String(r.who||'').replace(/<[^>]*>/g,'')))n++;
+    return n;
+  }
+  function saveCheckItems(list){
+    state.settings.agendaChecklist=list; S.settings=state.settings;
+    saveSettingsFields(['agendaChecklist']); renderChecklist();
+  }
+  function renderChecklist(){
+    const box=g('agCheck'); if(!box)return;
+    const items=checkItems(), done=items.filter(it=>agChecks[it.id]).length;
+    const tbd=tbdCount();
+    const wasOpen=box.querySelector('details');
+    const open=wasOpen?wasOpen.open:window.innerWidth>=1440;
+    box.innerHTML=`<details ${open?'open':''}><summary><b>✅ Before issuing</b>
+        <span class="small ${done===items.length?'okc':'muted'}">${done}/${items.length}</span></summary>
+      <ul>${items.map(it=>`<li><label><input type="checkbox" data-ck="${esc(it.id)}" ${agChecks[it.id]?'checked':''}>
+        <span>${esc(it.text)}${/TBD/.test(it.text)&&tbd?` <span class="pill absent">${tbd} left</span>`:''}</span></label>
+        ${agCheckEdit?`<button class="del" data-ckdel="${esc(it.id)}" title="Remove this point">✕</button>`:''}</li>`).join('')}</ul>
+      ${agCheckEdit?`<div class="row"><input type="text" id="agCkNew" placeholder="Add a point…" style="flex:1"><button class="btn small" id="agCkAdd">Add</button></div>
+        <button class="btn ghost small" id="agCkReset" title="Go back to the built-in list">Reset list</button>`:''}
+      <div class="row" style="margin-top:6px">
+        <button class="btn ghost small" id="agCkClear">Untick all</button>
+        <button class="btn ghost small" id="agCkEdit">${agCheckEdit?'Done editing':'✎ Edit list'}</button>
+      </div></details>`;
+    box.querySelectorAll('[data-ck]').forEach(cb=>cb.addEventListener('change',e=>{
+      e.stopPropagation();   /* the sheet's own change listener would save twice */
+      if(cb.checked)agChecks[cb.dataset.ck]=true; else delete agChecks[cb.dataset.ck];
+      renderChecklist(); queueAgSave();
+    }));
+    box.querySelectorAll('[data-ckdel]').forEach(b=>b.addEventListener('click',()=>{
+      saveCheckItems(checkItems().filter(it=>it.id!==b.dataset.ckdel));
+    }));
+    const add=()=>{
+      const inp=g('agCkNew'), t=inp&&inp.value.trim(); if(!t)return;
+      saveCheckItems([...checkItems(),{id:'c'+Date.now().toString(36),text:t}]);
+      const n=g('agCkNew'); if(n)n.focus();
+    };
+    if(g('agCkAdd'))g('agCkAdd').addEventListener('click',add);
+    if(g('agCkNew'))g('agCkNew').addEventListener('keydown',e=>{ if(e.key==='Enter')add(); });
+    if(g('agCkReset'))g('agCkReset').addEventListener('click',()=>{ if(confirm('Go back to the built-in checklist?'))saveCheckItems(AG_CHECK_DEFAULT); });
+    g('agCkClear').addEventListener('click',()=>{ agChecks={}; renderChecklist(); queueAgSave(); });
+    g('agCkEdit').addEventListener('click',()=>{ agCheckEdit=!agCheckEdit; renderChecklist(); });
+  }
+  /* bring the sheet on screen up to the saved copy, when it is safe to */
+  function refreshFromSaved(){
+    if(tab!=='agenda'||!mid||!g('agBody'))return;
+    if(saveTimer||agSaving||agBusy())return;
+    const saved=state.agendas&&state.agendas[mid];
+    if(!saved||agSame(saved,collectAgState()))return;
+    loadMeeting();
   }
   /* Target a few mm short of true A4 (297mm): printer rendering differs
      slightly from screen, and a sub-mm overflow spills a near-empty page 2. */
@@ -4684,12 +4882,47 @@ const AgendaApp=(function(){
   }
   window.addEventListener('beforeprint',fitToPage);
   window.addEventListener('afterprint',unfit);
+  /* ---- the club's standard layout ----
+     A new meeting's sheet used to start from the built-in defaults, so every
+     week the timings and line order had to be fixed again by hand. An admin
+     can now save a sheet as the standard (settings.agendaTemplate) and every
+     NEW sheet starts from it. Only the layout is kept: names are blanked (the
+     bookings refill them), speakers reset to standard speeches (their count
+     and length change weekly), and the 🎓 session and Speakathon line are left
+     out because the meeting itself decides those. */
+  function templateFromSheet(){
+    const st=collectAgState();
+    return {
+      blocks:st.blocks.filter(b=>b.type==='break'||b.k!=='s_edu').map(b=>b.type==='break'?b:{...b,
+        rows:b.rows.filter(r=>r.k!=='r_tmodGe').map(r=>{
+          if(r.kind==='speaker')return {kind:'speaker',fill:'spk',who:'TBD',preset:'std',dur:7};
+          const x={...r}; delete x.n;
+          if(x.fill)x.who=agT('p_blank','TBD');
+          return x;
+        })}),
+      inputs:{start:st.inputs.start,buf:st.inputs.buf,bufE:st.inputs.bufE,bufO:st.inputs.bufO},
+      savedAt:new Date().toISOString(),savedBy:me&&me.name
+    };
+  }
+  function agTemplate(){
+    const t=state.settings&&state.settings.agendaTemplate;
+    return t&&Array.isArray(t.blocks)&&t.blocks.length?t:null;
+  }
+  function useTemplate(t){
+    blocks=agClone(t.blocks);
+    const i=t.inputs||{};
+    if(i.start)g('agStart').value=i.start;
+    if(i.buf!=null)g('agBuf').value=i.buf;
+    if(i.bufE!=null)g('agBufE').value=i.bufE;
+    if(i.bufO!=null)g('agBufO').value=i.bufO;
+  }
   function loadMeeting(){
     const m=state.meetings.find(x=>x.id===mid);
     const saved=state.agendas&&state.agendas[mid];
-    blocks=agDefaultBlocks();
+    blocks=agDefaultBlocks(); agChecks={};
     if(saved){ applyAgState(saved); }
     else{
+      const tpl=agTemplate(); if(tpl)useTemplate(tpl);
       if(m)g('agDate').value=m.date;
       const no=nextNo(); g('agNo').value=no; g('agChipNo').innerText='No. '+no;
       applyBookings();
@@ -4723,8 +4956,16 @@ const AgendaApp=(function(){
     placeIntroRow(); placeTTEvalRow(); placeSpeakathonTmodRow();
     g('agChipSpk').style.display=(!showTT&&showSpeech)?'inline-block':'none';
     agRender(); updateDates();
+    agBase=agClone(collectAgState());   /* what this screen loaded — see saveAgNow */
+    /* agRender queues a save; merely OPENING a saved sheet must not write it
+       back (that is how a stale screen kept re-saving 4:30). A brand-new
+       meeting's sheet still saves, so it exists for the other admins. */
+    if(saved){ clearTimeout(saveTimer); saveTimer=null; }
   }
   function mount(main){
+    /* a remount (any app redraw while on this tab) must not drop an edit
+       still waiting out its 500 ms — save it from the old sheet first */
+    if(saveTimer&&g('agBody'))saveAgNow();
     container=main;
     if(!mid||!state.meetings.some(m=>m.id===mid&&!m.cancelled)){
       const up=upcomingMeetings(); mid=up.length?up[0].id:(state.meetings[0]&&state.meetings[0].id);
@@ -4732,8 +4973,10 @@ const AgendaApp=(function(){
     main.innerHTML=shell();
     if(!mid){ g('agBody').innerHTML='<tr><td colspan="6">No meetings yet.</td></tr>'; return; }
     g('agMeeting').addEventListener('change',e=>{
-      clearTimeout(saveTimer);
-      if(g('agBody')){ const data=collectAgState(); state.agendas[mid]=data; sync(api.saveAgenda(mid,data)); }
+      /* only a pending edit is saved on the way out — switching meetings used
+         to save the whole sheet unasked, and from a stale screen that wrote
+         an old copy back over everyone else's changes */
+      if(saveTimer)saveAgNow();
       mid=e.target.value; mount(container);
     });
     g('agFill').addEventListener('click',()=>{ applyBookings(); agRender(); updateDates(); toast('Role players refreshed from bookings'); });
@@ -4767,6 +5010,21 @@ const AgendaApp=(function(){
       if(sheetTheme==='pk'&&confirm('Also add the Independence Day items — National Anthem, Milli Naghma and the Quiz?'))addPkKit();
     });
     g('agPkKit').addEventListener('click',addPkKit);
+    g('agTplSave').addEventListener('click',()=>{
+      if(!confirm('Make this sheet the standard layout?\n\nEvery NEW meeting\'s agenda will start with these timings, this line order and this start time. Names still fill from the bookings. Agendas already made are not changed.'))return;
+      state.settings.agendaTemplate=templateFromSheet(); S.settings=state.settings;
+      saveSettingsFields(['agendaTemplate'],null,ok=>{ if(ok)toast('Standard layout saved ✓ — new agendas will start from it'); });
+    });
+    g('agTplUse').addEventListener('click',()=>{
+      const t=agTemplate();
+      if(!t){ toast('No standard layout yet — set up a sheet and press ⭐ Save as standard layout'); return; }
+      if(!confirm('Replace this meeting\'s layout with the standard one?\n\nTimings and line order on this sheet will change. Names are refilled from the bookings.'))return;
+      useTemplate(t); ensureEduBlock(); applyBookings();
+      placeIntroRow(); placeTTEvalRow(); placeSpeakathonTmodRow();
+      agUrdu=g('agUr').checked; applyLanguage();
+      agRender(); updateDates();
+      toast('Standard layout applied');
+    });
     g('agUr').addEventListener('change',()=>{ agUrdu=g('agUr').checked; applyLanguage(); agRender(); queueAgSave(); });
     g('agAdd').addEventListener('click',()=>{
       const rows=speechBlock().rows;
@@ -4812,11 +5070,15 @@ const AgendaApp=(function(){
         inp.onchange=e=>{
           const f=e.target.files[0]; if(!f)return;
           const r=new FileReader();
-          r.onload=()=>{
-            img.src=r.result;
-            state.settings.agendaAssets=state.settings.agendaAssets||{};
-            state.settings.agendaAssets[img.dataset.asset]=r.result;
-            saveSettingsFields(['agendaAssets']);
+          r.onload=async()=>{
+            const key=img.dataset.asset;
+            const url=await shrinkImage(r.result,key==='excom');
+            img.src=url;
+            state.settings.agendaAssets={...(state.settings.agendaAssets||{}),[key]:url};
+            S.settings=state.settings;
+            toast('Saving the image…');
+            saveSettingsFields(['agendaAssets'],{agendaAssets:[key]},
+              ok=>{ if(ok)toast('Image saved for all admins ✓'); });
           };
           r.readAsDataURL(f);
         };
@@ -4842,7 +5104,12 @@ const AgendaApp=(function(){
     wrap.addEventListener('change',queueAgSave);
     loadMeeting();
   }
-  return {mount};
+  /* another device saved a sheet (realtime) or a reload brought new ones */
+  function remoteChanged(meetingId){
+    if(meetingId&&meetingId!==mid)return;
+    refreshFromSaved();
+  }
+  return {mount,remoteChanged};
 })();
 
 /* ============================================================
@@ -4871,7 +5138,12 @@ function applyDelta(table,p){
      wipe the field the admin is typing in. agendas is a map by meeting. */
   if(table==='settings'){
     const d=p&&p.new&&p.new.data;
-    if(d&&d.roles&&!settingsDirty)S.settings=d;
+    if(d&&d.roles&&!settingsDirty){
+      /* the images can push this row past the realtime size cap; an event
+         that arrives without them must not blank the banner on screen */
+      if(!d.agendaAssets&&S.settings&&S.settings.agendaAssets)d.agendaAssets=S.settings.agendaAssets;
+      S.settings=d;
+    }
     return true;
   }
   if(table==='agendas'){
@@ -4950,6 +5222,7 @@ async function doReload(){
   agendasLoaded=true;
   rebuild();
   if(firstAgendas&&entered&&tab==='agenda')render();   /* replace the loading note with the real sheet */
+  else if(entered&&tab==='agenda')AgendaApp.remoteChanged();   /* a sheet left open must not stay stale */
   saveSnapshot();
 }
 /* the agenda tab may not mount, and must never SAVE, before the saved sheets
@@ -5005,7 +5278,12 @@ async function enterApp(profile){
     toast('Could not refresh — showing the last saved data. Reconnecting…');
   }
   if(isAdmin){
-    if(!S._hadSettings)sync(api.saveSettings(S.settings));
+    /* first-ever run only: an EMPTY answer can also be a read the server
+       filtered out, and writing the defaults then would wipe the club's
+       roles, header and banner — so confirm the row is really missing */
+    if(!S._hadSettings)sync(api.loadSettings().then(row=>{
+      if(!(row&&row.data))return api.saveSettings(S.settings);
+    }));
     await ensureMeetings();
     autoFillStanding();
   }
@@ -5052,6 +5330,10 @@ async function enterApp(profile){
     api.subscribe(
       (table,p)=>{
         if(!applyDelta(table,p)){ scheduleReload(); return; }
+        if(table==='agendas'){
+          if(tab==='agenda')AgendaApp.remoteChanged(p&&p.new&&p.new.meeting_id);
+          return;
+        }
         if(table==='votes'){
           const pid=(p.new&&p.new.poll_id)||(p.old&&p.old.poll_id);
           if(pid&&tallyPatch(pid))return;   /* numbers patched in place */

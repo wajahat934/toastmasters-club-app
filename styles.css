@@ -159,6 +159,26 @@ details.mem .body{padding:12px 16px}
 #agWrap .agctrl label{display:flex;align-items:center;gap:6px;font-weight:600;font-size:.85rem}
 #agWrap .agctrl input[type=date],#agWrap .agctrl input[type=time]{width:auto}
 #agWrap .agctrl input[type=number]{width:64px}
+/* pre-issue checklist: beside the sheet when the screen has room, above it otherwise */
+.agstage{position:relative}
+.agcheck{margin:10px auto;max-width:210mm;color:var(--ink);font-size:.86rem}
+.agcheck details{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.agcheck summary{cursor:pointer;display:flex;gap:8px;align-items:baseline;list-style:none}
+.agcheck summary::-webkit-details-marker{display:none}
+.agcheck summary::before{content:'▸';color:var(--muted)}
+.agcheck details[open] summary::before{content:'▾'}
+.agcheck ul{list-style:none;margin:8px 0 0;padding:0}
+.agcheck li{display:flex;align-items:flex-start;gap:4px;padding:4px 0;border-top:1px solid var(--line)}
+.agcheck li label{display:flex;gap:8px;align-items:flex-start;cursor:pointer;flex:1}
+.agcheck li input{margin-top:3px;width:auto}
+.agcheck li input:checked+span{color:var(--muted);text-decoration:line-through}
+.agcheck .okc{color:#2e8b57;font-weight:700}
+.agcheck .row input[type=text]{min-width:0}
+/* wide screens: a column to the right of the centred sheet that stays in view while scrolling */
+@media (min-width:1440px){
+  .agcheck{position:absolute;top:10px;bottom:0;left:calc(50% + 105mm + 18px);width:280px;max-width:none;margin:0}
+  .agcheck details{position:sticky;top:12px}
+}
 #agSheet{
   --blue:#004165; --tmmaroon:#772432; --yellow:#F2DF74;
   --pink:#1c2733; --pline:#d8dee4;

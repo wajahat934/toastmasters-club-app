@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=103**.
+   every deploy or browsers serve the old `app.js`. Currently **v=104**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-10-02
 
-**Live at v103, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v104, repo clean, nothing half-built.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **How to work on this app (each rule exists because breaking it once hurt the club):**
@@ -155,6 +155,37 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Fixed 2026-10-02 — agenda reverts; standard layout; evaluator arrows; checklist (v104)
+
+- **Agenda edits kept reverting (3:30 → 4:30).** Two causes. (1) `agRender()` queues a save, and
+  `loadMeeting()` calls it — so merely OPENING a sheet wrote it back 500 ms later; the meeting
+  dropdown also saved the sheet being left, unasked. A device with an old copy on screen (a phone
+  left on the agenda tab) re-saved it over newer edits. (2) agenda realtime events updated `S.agendas`
+  but never redrew an open sheet, so that screen stayed stale indefinitely. Fixes: opening a SAVED
+  sheet no longer saves; the dropdown only flushes a pending edit; every save is a three-way merge
+  (`saveAgNow` / `mergeAg`) — `agBase` is the sheet as loaded, anything this screen did not change
+  is taken from the server copy fetched at save time (`api.loadAgenda`), per toolbar input, per
+  static text, blocks as one unit; an open sheet redraws on remote changes when idle
+  (`AgendaApp.remoteChanged`, skipped while typing or saving). Tested with two windows, one stale.
+- **Banner reverting.** `agendaAssets` was saved as a whole map, so any image save from a device
+  holding an old map put the old banner back. `saveSettingsFields(keys, sub, done)` now merges only
+  the touched entries (`{agendaAssets:['excom']}`) and reports success ("Image saved for all admins
+  ✓"). Uploads over ~1 MB are redrawn ≤2400 px wide (`shrinkImage`; banner→JPEG, badge stays PNG).
+  A settings realtime event missing `agendaAssets` (size cap) no longer blanks it. The first-run
+  "no settings row → write defaults" path now re-checks the row first (it would have wiped roles,
+  header and banner on an empty read). Root cause on the live data NOT confirmed — if it recurs,
+  check whether the owner saw a "Sync failed" toast at upload time.
+- **⭐ Standard layout** (`settings.agendaTemplate`): "Save as standard layout" stores timings, line
+  order, start time and buffers; every NEW sheet starts from it (`useTemplate` in loadMeeting).
+  Names blanked, speakers reset to standard, 🎓 block and Speakathon row left out. "Use standard
+  layout" applies it to an existing sheet. Sheets already saved are untouched.
+- **Speech evaluator ↑↓** (inside the Evaluation Session only). The first move stamps `row.n` on
+  every evaluator row so label + booked name follow the row (applyBookings uses `r.n`); a speaker
+  count change clears the stamps.
+- **✅ Before-issuing checklist** beside the sheet (≥1440 px wide, sticky) or above it (narrower).
+  List club-wide in `settings.agendaChecklist` (editable, resettable); ticks per meeting in the
+  agenda's `checks` (merged like everything else). The TBD line shows a live count. no-print.
 
 ## Fixed 2026-09-25 — speaker "−" compacts open slots; Speakathon TMOD row (v103)
 
