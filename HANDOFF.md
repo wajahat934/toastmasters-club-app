@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=111**.
+   every deploy or browsers serve the old `app.js`. Currently **v=112**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-10-02
 
-**Live at v111, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v112, repo clean, nothing half-built.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **How to work on this app (each rule exists because breaking it once hurt the club):**
@@ -161,6 +161,15 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Added 2026-10-03 — DCP print + member progress table (v112)
+
+DCP tab: "🖨 Print" (`printDcp`) adds `html.dcpprint` for the print only (removed on afterprint):
+light colours forced via CSS vars, inputs shown as plain values, buttons hidden, cards/rows kept
+whole, member progress starts on a new page; page margin comes from padding because the
+agenda's `@page{margin:0}` is global. New `memberProgressHtml(yr)` card (on screen too): every
+active member × pathway — level done (`pathLevel`), projects into the next level, levels earned
+this club year. `.print-only` class for print-only lines (the "Printed <date>" line).
 
 ## Added 2026-10-02 — 🏆 Points / gamification (v110)
 

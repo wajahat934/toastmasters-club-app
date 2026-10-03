@@ -3605,7 +3605,9 @@ function viewDCP(){
     <select style="width:auto" onchange="dcpSelYear=Number(this.value);render()">
       ${years.map(y=>`<option value="${y}" ${y===yr?'selected':''}>${y}–${String(y+1).slice(2)}</option>`).join('')}
     </select>
+    <button class="btn small no-print" style="margin-left:auto" onclick="printDcp()" title="Goals, standing and every member's pathway progress — on paper or as a PDF">🖨 Print</button>
   </div>
+  <p class="print-only small">Printed ${fmtDate(todayStr())} · Club year ${yr}–${String(yr+1).slice(2)}</p>
   <div class="banner">
     <div class="row">
       <strong>${met}/10 goals met</strong>
@@ -3662,6 +3664,7 @@ function viewDCP(){
       </div>`).join('')}</div>`;
   }
   if(!any)html+=`<div class="empty">Add members with paths and levels to see predictions.</div>`;
+  html+=memberProgressHtml(yr);
   /* nobody should be invisible here: members without a pathway can't be
      ranked, so list them so an officer can ask what path they're on */
   const noPath=state.members.filter(m=>!m.external&&!m.archived&&!activePaths(m).length);
@@ -3673,6 +3676,40 @@ function viewDCP(){
         <button class="btn ghost small" onclick="setTab('members');setTimeout(()=>{keepOpen('${m.id}');document.getElementById('mem-${m.id}')?.scrollIntoView()},50)">open</button></div>`).join('')}
     </div>`;
   return html;
+}
+/* every member's pathway standing in one table — the "members progress"
+   half of the DCP printout (the likely-contributor lists above only show
+   people close to a goal) */
+function memberProgressHtml(yr){
+  const mems=state.members.filter(m=>!m.archived&&!m.external&&m.approved!==false)
+    .sort((a,b)=>a.name.localeCompare(b.name));
+  const rows=[];
+  for(const m of mems){
+    const paths=memPaths(m);
+    const yrAwards=(m.awards||[]).filter(a=>a.date&&clubYearOf(a.date)===yr)
+      .map(a=>(a.level==='DTM'?'DTM':'L'+a.level)+(a.path?' '+a.path:'')).join(', ');
+    if(!paths.length){ rows.push(`<tr><td><b>${esc(m.name)}</b></td><td class="muted">no pathway yet</td><td></td><td></td><td>${esc(yrAwards)}</td></tr>`); continue; }
+    paths.forEach((pe,i)=>{
+      const lv=pathLevel(m,pe);
+      rows.push(`<tr><td>${i?'':`<b>${esc(m.name)}</b>`}</td><td>${esc(pe.name)}${pe.done?' 🎓':''}</td>
+        <td class="num">${pe.done?'done':'L'+lv}</td>
+        <td class="num">${pe.done||lv>=5?'—':(pe.projectsDone||0)+' into L'+(lv+1)}</td>
+        <td>${i?'':esc(yrAwards)}</td></tr>`);
+    });
+  }
+  return `<div class="card dcp-progress"><h3 style="margin:0 0 6px">Member progress <span class="muted small">(${mems.length} members)</span></h3>
+    <div class="tblwrap"><table><thead><tr><th>Member</th><th>Pathway</th><th class="num">Level done</th><th class="num">Projects</th><th>Levels this club year</th></tr></thead>
+    <tbody>${rows.join('')}</tbody></table></div></div>`;
+}
+/* print the DCP tab on its own: light colours, no inputs or buttons, cards
+   kept whole across page breaks (the .dcpprint rules in styles.css) */
+function printDcp(){
+  const html=document.documentElement, t=document.title;
+  html.classList.add('dcpprint');
+  document.title='RTC_DCP_'+todayStr();
+  const done=()=>{ html.classList.remove('dcpprint'); document.title=t; window.removeEventListener('afterprint',done); };
+  window.addEventListener('afterprint',done);
+  window.print();
 }
 function goalControls(n,yr,d){
   if(n===7||n===8)return `<div class="row small" style="margin-top:6px"><label class="muted">New members this year</label><input type="number" min="0" value="${d.newMembers}" onchange="setDcp(${yr},'newMembers',Number(this.value))"></div>`;
@@ -5891,7 +5928,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{printDcp,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,

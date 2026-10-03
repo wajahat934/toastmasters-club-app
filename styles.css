@@ -320,7 +320,23 @@ details.mem .body{padding:12px 16px}
   html.agprint,html.agprint body{height:296mm;overflow:hidden;margin:0}
   html.agprint #appWrap,html.agprint main.wrap,html.agprint #agWrap{height:296mm;overflow:hidden}
   @page{size:A4 portrait;margin:0}
+  /* DCP printout: always light (paper), page margin made by padding because
+     @page margin is 0 for the agenda; inputs show as plain values */
+  html.dcpprint{
+    --bg:#fff; --surface:#fff; --surface2:#fff; --ink:#17242F; --muted:#5B6B77;
+    --line:#C9D3DA; --accent:#004165; --accent-soft:#E1EAF1;
+    --gold:#C99A2E; --gold-soft:#F6ECD3; --good:#2E7D4F; --good-soft:#E2F0E8;
+  }
+  html.dcpprint body{background:#fff;color:#17242F;font-size:12px}
+  html.dcpprint main.wrap{padding:12mm 12mm 8mm}
+  html.dcpprint #main button,html.dcpprint nav,html.dcpprint .tabs,html.dcpprint #installBar{display:none !important}
+  html.dcpprint #main input,html.dcpprint #main select{border:none;background:none;color:inherit;padding:0;width:auto;-webkit-appearance:none;appearance:none}
+  html.dcpprint .card,html.dcpprint .goal,html.dcpprint .banner,html.dcpprint tr{break-inside:avoid}
+  html.dcpprint .dcp-progress{break-before:page}
+  html.dcpprint .print-only{display:block !important}
+  html.dcpprint *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
+.print-only{display:none}
 
 /* the add-to-home-screen offer: a bar along the bottom so it is visible on the
    sign-in screen and inside the app alike, and above the safe area on phones */
