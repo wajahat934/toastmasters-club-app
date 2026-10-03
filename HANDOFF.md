@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=112**.
+   every deploy or browsers serve the old `app.js`. Currently **v=113**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-10-02
 
-**Live at v112, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v113, repo clean, nothing half-built.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **How to work on this app (each rule exists because breaking it once hurt the club):**
@@ -187,6 +187,7 @@ the leader of a finished month (ties → pick) → `settings.gameWinners[ym]` (p
 the Wall of Fame. Roles not on the rules sheet (SAA, PO, Camera Master, anything else) score 0 and are hidden from the table (owner, v111); holding only one of them still earns the attendance point (`take` ignores 0-point roles).
 Members' lite load keeps 60 days of polls — enough for the current and previous month.
 "Wordsmith of the Day" in the rules sheet = the Grammarian role (owner confirmed) — no separate award.
+v113: tapping a leaderboard row opens that member's per-meeting breakdown under it (`gameToggleMember`, `gameLogHtml`), for everyone. Owner confirmed the multiplier stays as is (roles only; attendance and wins flat).
 
 ## Changed 2026-10-02 — one birthday cake a month (v108)
 

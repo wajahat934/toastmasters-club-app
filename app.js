@@ -1587,24 +1587,27 @@ function viewPoints(){
     html+=`<div class="banner" style="margin-top:10px">🏅 <b>${esc(ymLabel(ym))} is over.</b> ${top.length>1?'Tie at the top — pick the Toastmaster of the Month:':'Confirm the Toastmaster of the Month:'}
       ${top.map(r=>`<button class="btn small" onclick="gameConfirm('${ym}','${r.mem.id}')">${esc(r.mem.name)} · ${fmtPts(r.pts)}</button>`).join(' ')}</div>`;
   }
-  html+=`<div class="tblwrap" style="margin-top:10px"><table><thead><tr><th>#</th><th>Member</th><th class="num">Points</th></tr></thead><tbody>
+  /* tap a name to open that member's breakdown right under their row —
+     the ranking is public, so the "why" behind each number is too */
+  const logOf=id=>((sc.byMember[id]||{}).log||[]).filter(e=>e.date.slice(0,7)===ym);
+  html+=`<div class="tblwrap" style="margin-top:10px"><table><thead><tr><th>#</th><th>Member <span class="muted small" style="text-transform:none;letter-spacing:0">— tap a name for the breakdown</span></th><th class="num">Points</th></tr></thead><tbody>
     ${rank.length?rank.map(r=>{
       const pos=rank.findIndex(x=>x.pts===r.pts)+1;
       const boost=gameMultiplier(r.mem,todayStr(),R);
-      return `<tr ${r.mem.id===me.profileId?'style="background:var(--accent-soft)"':''}><td>${pos}</td>
-        <td>${pos===1?'🥇 ':pos===2?'🥈 ':pos===3?'🥉 ':''}${esc(r.mem.name)}${boost>1?` <span class="pill" title="Newcomer boost on role points">×${boost.toFixed(2)}</span>`:''}</td>
-        <td class="num"><b>${fmtPts(r.pts)}</b></td></tr>`;}).join('')
+      const open=gameOpenId===r.mem.id;
+      return `<tr style="cursor:pointer;${r.mem.id===me.profileId?'background:var(--accent-soft)':''}" onclick="gameToggleMember('${r.mem.id}')"><td>${pos}</td>
+        <td>${open?'▾':'▸'} ${pos===1?'🥇 ':pos===2?'🥈 ':pos===3?'🥉 ':''}${esc(r.mem.name)}${boost>1?` <span class="pill" title="Newcomer boost on role points">×${boost.toFixed(2)}</span>`:''}</td>
+        <td class="num"><b>${fmtPts(r.pts)}</b></td></tr>
+        ${open?`<tr><td></td><td colspan="2">${gameLogHtml(logOf(r.mem.id))}</td></tr>`:''}`;}).join('')
       :`<tr><td colspan="3" class="muted">No points yet for ${esc(ymLabel(ym))}. Points appear once a meeting is marked reviewed.</td></tr>`}
     </tbody></table></div></div>`;
   /* my own breakdown — the "why" behind the number */
   if(myMem&&!myMem.external){
-    const log=(mine&&mine.log||[]).filter(e=>e.date.slice(0,7)===ym);
+    const log=logOf(myMem.id);
     const boost=gameMultiplier(myMem,todayStr(),R);
     html+=`<div class="card"><h3 style="margin:0 0 6px">My points — ${esc(ymLabel(ym))}: ${fmtPts((mine&&mine.months[ym])||0)}</h3>
       ${boost>1?`<p class="small muted">Newcomer boost right now: ×${boost.toFixed(2)} on role points.</p>`:''}
-      ${log.length?`<div class="tblwrap"><table><thead><tr><th>Meeting</th><th>For</th><th class="num">Points</th></tr></thead><tbody>
-        ${log.map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${esc(e.what)}${e.mult>1?` <span class="muted small">(${fmtPts(e.base)} × ${e.mult.toFixed(2)})</span>`:''}</td><td class="num">${fmtPts(e.pts)}</td></tr>`).join('')}
-      </tbody></table></div>`:'<p class="small muted">Nothing yet this month — book a role!</p>'}</div>`;
+      ${log.length?gameLogHtml(log):'<p class="small muted">Nothing yet this month — book a role!</p>'}</div>`;
   }
   /* Wall of Fame */
   const wall=Object.entries(winners).sort((a,b)=>a[0]<b[0]?1:-1);
@@ -1634,7 +1637,15 @@ function viewPoints(){
     html+=`<p class="small muted">⚠ Joining dates aren't set up yet — run <code>migrations/2026-10-03-gamification.sql</code>. Until then nobody gets the newcomer boost.</p>`;
   return html;
 }
+function gameLogHtml(log){
+  if(!log.length)return '<p class="small muted">No points this month.</p>';
+  return `<div class="tblwrap"><table><thead><tr><th>Meeting</th><th>For</th><th class="num">Points</th></tr></thead><tbody>
+    ${log.map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${esc(e.what)}${e.mult>1?` <span class="muted small">(${fmtPts(e.base)} × ${e.mult.toFixed(2)})</span>`:''}</td><td class="num">${fmtPts(e.pts)}</td></tr>`).join('')}
+  </tbody></table></div>`;
+}
 /* app.js is a module: inline handlers can't assign its variables directly */
+let gameOpenId=null;
+function gameToggleMember(id){ gameOpenId=gameOpenId===id?null:id; render(); }
 function gamePickMonth(v){ gameMonth=v; render(); }
 function gameToggleEdit(){ gameEditing=!gameEditing; render(); }
 function gameSet(path,v){
@@ -5928,7 +5939,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{printDcp,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,
