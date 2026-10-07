@@ -335,6 +335,9 @@ details.mem .body{padding:12px 16px}
   html.dcpprint .dcp-progress{break-before:page}
   html.dcpprint .print-only{display:block !important}
   html.dcpprint *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  /* "Print plan": only the speech-plan card */
+  html.planprint #main > :not(#dcpPlanCard){display:none !important}
+  html.planprint #dcpPlanCard{border:none;padding:0}
 }
 .print-only{display:none}
 

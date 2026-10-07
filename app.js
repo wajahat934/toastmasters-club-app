@@ -3734,7 +3734,29 @@ function dcpPlanStatus(row){
   const past=m.date<bookingDayStr();
   if(a)return a[1].status==='absent'?'<span class="pill absent">missed</span>'
     :(past?'<span class="pill done">spoke ✓</span>':'<span class="pill done">booked ✓</span>');
-  return past?'<span class="pill absent">didn\'t speak</span>':'<span class="pill other">not booked yet</span>';
+  if(past)return '<span class="pill absent">didn\'t speak</span>';
+  return `<span class="pill other">not booked yet</span> <button class="btn small" onclick="dcpPlanBook('${m.id}','${mem.id}')" title="Book as a speaker on this meeting">Book</button>`;
+}
+/* one tap from the plan: an officer-reserved (🚫) empty speaker slot first —
+   that is what the reservation was for — else the first open one. Goes
+   through assign(), so the 3-week gap and same-meeting checks still ask. */
+function dcpPlanBook(mid,pid){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  const empty=slotListFor(m).filter(s=>s.key.startsWith('spk|')&&!((m.assignments||{})[s.key]||{}).memberId);
+  const key=(empty.find(s=>slotBlocked(m,s.key))||empty[0]||{}).key;
+  if(!key){ toast('No free speaker slot on '+fmtDate(m.date)+' — free or add one on Roles & Meetings first'); return; }
+  assign(mid,key,{value:pid});
+  const mem=memberById(pid); toast('Booked '+(mem?mem.name:'')+' to speak on '+fmtDate(m.date));
+}
+/* print the plan on its own page: same light print styles as the DCP
+   printout, everything else on the tab hidden */
+function printDcpPlan(){
+  const html=document.documentElement, t=document.title;
+  html.classList.add('dcpprint','planprint');
+  document.title='RTC_DCP_speech_plan_'+todayStr();
+  const done=()=>{ html.classList.remove('dcpprint','planprint'); document.title=t; window.removeEventListener('afterprint',done); };
+  window.addEventListener('afterprint',done);
+  window.print();
 }
 function dcpPlanHtml(yr){
   const rows=dcpPlan(yr);
@@ -3742,8 +3764,10 @@ function dcpPlanHtml(yr){
     <p class="small muted">No plan for this club year. <button class="btn ghost small" onclick="dcpPlanToggle()">✎ Make one</button></p></div>`;
   const opts=sel=>`<option value="">— free slot —</option>`+state.members.filter(m=>!m.archived&&!m.external)
     .map(m=>`<option ${m.name===sel?'selected':''}>${esc(m.name)}</option>`).join('');
-  return `<div class="card"><div class="row"><h3 style="margin:0" class="grow">📅 DCP speech plan <span class="muted small">— officers only · one reserved speaker slot per meeting</span></h3>
+  return `<div class="card" id="dcpPlanCard"><div class="row"><h3 style="margin:0" class="grow">📅 DCP speech plan <span class="muted small">— officers only · one reserved speaker slot per meeting</span></h3>
+      <button class="btn ghost small no-print" onclick="printDcpPlan()" title="Print just this plan">🖨 Print plan</button>
       <button class="btn ghost small no-print" onclick="dcpPlanToggle()">${dcpPlanEdit?'Done':'✎ Edit'}</button></div>
+    <p class="print-only small">Rawalpindi Toastmasters Club · printed ${fmtDate(todayStr())}</p>
     <div class="tblwrap" style="margin-top:8px"><table><thead><tr><th>Meeting</th><th>Candidate</th><th>Speech</th><th>Result</th><th>Status</th>${dcpPlanEdit?'<th></th>':''}</tr></thead><tbody>
     ${rows.map((r,i)=>dcpPlanEdit?`<tr>
         <td><input type="date" style="width:auto" value="${esc(r.date)}" onchange="dcpPlanSet(${yr},${i},'date',this.value)"></td>
@@ -6024,7 +6048,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,
