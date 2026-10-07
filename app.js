@@ -3675,7 +3675,7 @@ function viewDCP(){
       </div>`).join('')}</div>`;
   }
   if(!any)html+=`<div class="empty">Add members with paths and levels to see predictions.</div>`;
-  html+=memberProgressHtml(yr);
+  html+=dcpPlanHtml(yr)+memberProgressHtml(yr);
   /* nobody should be invisible here: members without a pathway can't be
      ranked, so list them so an officer can ask what path they're on */
   const noPath=state.members.filter(m=>!m.external&&!m.archived&&!activePaths(m).length);
@@ -3688,6 +3688,91 @@ function viewDCP(){
     </div>`;
   return html;
 }
+/* ---- DCP speech plan (officers only) ----
+   One reserved speaker slot per meeting, rotated through the DCP candidates
+   (plan agreed with the VPE on 2026-10-08, 3-week gap respected). Stored in
+   the year's dcp row — that table is admin-only by RLS and members' phones
+   never load it, so this adds nothing to the member app. Until an officer
+   edits it, the agreed plan below is shown. Status is read live from the
+   bookings: booked / spoke / missed. */
+const DCP_PLAN_DEFAULT={2026:[
+  ['2026-10-17','Taifoor Ahmad','L2 · 1/1','Level 2 ✓'],
+  ['2026-10-24','Sundas Sarfraz','L5 · 1/2',''],
+  ['2026-10-31','Shahnawaz Ali','L1 · 1/2',''],
+  ['2026-11-07','Muhammad Wajahat','L3 · 1/2',''],
+  ['2026-11-14','Shaique Ahmed Rizwan','L3 · 1/3',''],
+  ['2026-11-21','Amir Mahmood','L2 · 1/3',''],
+  ['2026-11-28','Laiba Abaidullah','L1 · 1/2',''],
+  ['2026-12-05','Sundas Sarfraz','L5 · 2/2','Level 5 ✓ — Goal 6'],
+  ['2026-12-12','Shahnawaz Ali','L1 · 2/2','Level 1 ✓'],
+  ['2026-12-19','Muhammad Wajahat','L3 · 2/2','Level 3 ✓'],
+  ['2026-12-26','','free (holiday week)',''],
+  ['2027-01-02','Shaique Ahmed Rizwan','L3 · 2/3',''],
+  ['2027-01-09','Amir Mahmood','L2 · 2/3',''],
+  ['2027-01-16','Laiba Abaidullah','L1 · 2/2','Level 1 ✓ — Goal 1'],
+  ['2027-01-23','Shaique Ahmed Rizwan','L3 · 3/3','Level 3 ✓ — Goal 4'],
+  ['2027-01-30','Amir Mahmood','L2 · 3/3','Level 2 ✓'],
+  ['2027-02-06','Laiba Abaidullah','L2 · 1/3',''],
+  ['2027-02-13','Shahnawaz Ali','L2 · 1/3 (backup)',''],
+  ['2027-02-20','','free — backup (Salman / Madiha / Osama)',''],
+  ['2027-02-27','Laiba Abaidullah','L2 · 2/3',''],
+  ['2027-03-06','Shahnawaz Ali','L2 · 2/3 (backup)',''],
+  ['2027-03-13','','free — backup',''],
+  ['2027-03-20','Laiba Abaidullah','L2 · 3/3','Level 2 ✓ — Goals 2 & 3'],
+  ['2027-03-27','Shahnawaz Ali','L2 · 3/3 (backup)','Level 2 ✓ (backup for Goal 3)']
+].map(([date,name,step,result])=>({date,name,step,result}))};
+let dcpPlanEdit=false;
+function dcpPlan(yr){ const d=dcpYear(yr); return Array.isArray(d.plan)?d.plan:(DCP_PLAN_DEFAULT[yr]||[]); }
+function dcpPlanStatus(row){
+  if(!row.name)return '';
+  const mem=state.members.find(m=>m.name.trim().toLowerCase()===row.name.trim().toLowerCase());
+  if(!mem)return '<span class="pill absent">name not found</span>';
+  const m=state.meetings.find(x=>x.date===row.date);
+  if(!m)return '<span class="muted small">not scheduled yet</span>';
+  if(m.cancelled)return '<span class="pill absent">meeting cancelled — move</span>';
+  const a=Object.entries(m.assignments||{}).find(([k,x])=>/^spk\|/.test(k)&&x&&x.memberId===mem.id);
+  const past=m.date<bookingDayStr();
+  if(a)return a[1].status==='absent'?'<span class="pill absent">missed</span>'
+    :(past?'<span class="pill done">spoke ✓</span>':'<span class="pill done">booked ✓</span>');
+  return past?'<span class="pill absent">didn\'t speak</span>':'<span class="pill other">not booked yet</span>';
+}
+function dcpPlanHtml(yr){
+  const rows=dcpPlan(yr);
+  if(!rows.length&&!dcpPlanEdit)return `<div class="card"><h3 style="margin:0">📅 DCP speech plan</h3>
+    <p class="small muted">No plan for this club year. <button class="btn ghost small" onclick="dcpPlanToggle()">✎ Make one</button></p></div>`;
+  const opts=sel=>`<option value="">— free slot —</option>`+state.members.filter(m=>!m.archived&&!m.external)
+    .map(m=>`<option ${m.name===sel?'selected':''}>${esc(m.name)}</option>`).join('');
+  return `<div class="card"><div class="row"><h3 style="margin:0" class="grow">📅 DCP speech plan <span class="muted small">— officers only · one reserved speaker slot per meeting</span></h3>
+      <button class="btn ghost small no-print" onclick="dcpPlanToggle()">${dcpPlanEdit?'Done':'✎ Edit'}</button></div>
+    <div class="tblwrap" style="margin-top:8px"><table><thead><tr><th>Meeting</th><th>Candidate</th><th>Speech</th><th>Result</th><th>Status</th>${dcpPlanEdit?'<th></th>':''}</tr></thead><tbody>
+    ${rows.map((r,i)=>dcpPlanEdit?`<tr>
+        <td><input type="date" style="width:auto" value="${esc(r.date)}" onchange="dcpPlanSet(${yr},${i},'date',this.value)"></td>
+        <td><select style="width:auto" onchange="dcpPlanSet(${yr},${i},'name',this.value)">${opts(r.name)}</select></td>
+        <td><input type="text" style="width:150px" value="${esc(r.step)}" onchange="dcpPlanSet(${yr},${i},'step',this.value)"></td>
+        <td><input type="text" style="width:170px" value="${esc(r.result)}" onchange="dcpPlanSet(${yr},${i},'result',this.value)"></td>
+        <td>${dcpPlanStatus(r)}</td>
+        <td><button class="del" onclick="dcpPlanDel(${yr},${i})" title="Remove this row">✕</button></td></tr>`
+      :`<tr ${r.date<bookingDayStr()?'style="opacity:.7"':''}><td>${fmtDate(r.date)}</td><td>${r.name?`<b>${esc(r.name)}</b>`:'<span class="muted">—</span>'}</td>
+        <td>${esc(r.step)}</td><td>${r.result?`<b>${esc(r.result)}</b>`:''}</td><td>${dcpPlanStatus(r)}</td></tr>`).join('')}
+    </tbody></table></div>
+    ${dcpPlanEdit?`<button class="btn ghost small" style="margin-top:6px" onclick="dcpPlanAdd(${yr})">＋ Add a meeting</button>`:''}
+    <p class="small muted" style="margin:6px 0 0">Book each candidate from Roles &amp; Meetings (officers see 8 meetings ahead), or reserve the slot with 🚫 until then. Keep 3 weeks between a member's speeches.</p>
+  </div>`;
+}
+function dcpPlanSave(yr,rows){
+  rows.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
+  dcpYear(yr).plan=rows; S.dcp=state.dcp;
+  sync(api.saveDcp(yr,state.dcp[yr])); render();
+}
+function dcpPlanSet(yr,i,k,v){ const rows=dcpPlan(yr).map(r=>({...r})); if(!rows[i])return; rows[i][k]=v; dcpPlanSave(yr,rows); }
+function dcpPlanDel(yr,i){ const rows=dcpPlan(yr).map(r=>({...r})); rows.splice(i,1); dcpPlanSave(yr,rows); }
+function dcpPlanAdd(yr){
+  const rows=dcpPlan(yr).map(r=>({...r}));
+  const last=rows.length?parseD(rows[rows.length-1].date):parseD(todayStr());
+  last.setDate(last.getDate()+7);
+  rows.push({date:dstr(last),name:'',step:'',result:''}); dcpPlanSave(yr,rows);
+}
+function dcpPlanToggle(){ dcpPlanEdit=!dcpPlanEdit; render(); }
 /* every member's pathway standing in one table — the "members progress"
    half of the DCP printout (the likely-contributor lists above only show
    people close to a goal) */
@@ -5939,7 +6024,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,
