@@ -3689,38 +3689,49 @@ function viewDCP(){
   return html;
 }
 /* ---- DCP speech plan (officers only) ----
-   One reserved speaker slot per meeting, rotated through the DCP candidates
-   (plan agreed with the VPE on 2026-10-08, 3-week gap respected). Stored in
+   Rotation of the DCP candidates fitted to the club's yearly meetings plan
+   (RTC_Revised_Meetings_Education_Plan_2026-27, revised with the VPE on
+   2026-10-08): no Pathways speeches at education sessions, Urdu and joint
+   meetings, the January contests or the Murree trip; speakathons take
+   several candidates; online Ramadan meetings count; 3-week gap kept. The
+   6-week January break is why Nov-Dec routine meetings carry two. Stored in
    the year's dcp row — that table is admin-only by RLS and members' phones
    never load it, so this adds nothing to the member app. Until an officer
    edits it, the agreed plan below is shown. Status is read live from the
    bookings: booked / spoke / missed. */
 const DCP_PLAN_DEFAULT={2026:[
-  ['2026-10-17','Taifoor Ahmad','L2 · 1/1','Level 2 ✓'],
-  ['2026-10-24','Sundas Sarfraz','L5 · 1/2',''],
-  ['2026-10-31','Shahnawaz Ali','L1 · 1/2',''],
+  ['2026-10-17','Laiba Abaidullah','L1 · 1/2 (already booked)',''],
+  ['2026-10-31','Taifoor Ahmad','L2 · 1/1 · Speakathon 3','Level 2 ✓'],
+  ['2026-10-31','Sundas Sarfraz','L5 · 1/2 · Speakathon 3',''],
+  ['2026-10-31','Shahnawaz Ali','L1 · 1/2 · Speakathon 3',''],
+  ['2026-11-07','Laiba Abaidullah','L1 · 2/2','Level 1 ✓ — Goal 1'],
   ['2026-11-07','Muhammad Wajahat','L3 · 1/2',''],
-  ['2026-11-14','Shaique Ahmed Rizwan','L3 · 1/3',''],
-  ['2026-11-21','Amir Mahmood','L2 · 1/3',''],
-  ['2026-11-28','Laiba Abaidullah','L1 · 1/2',''],
+  ['2026-11-28','Shaique Ahmed Rizwan','L3 · 1/3',''],
+  ['2026-11-28','Amir Mahmood','L2 · 1/3',''],
   ['2026-12-05','Sundas Sarfraz','L5 · 2/2','Level 5 ✓ — Goal 6'],
-  ['2026-12-12','Shahnawaz Ali','L1 · 2/2','Level 1 ✓'],
-  ['2026-12-19','Muhammad Wajahat','L3 · 2/2','Level 3 ✓'],
-  ['2026-12-26','','free (holiday week)',''],
-  ['2027-01-02','Shaique Ahmed Rizwan','L3 · 2/3',''],
-  ['2027-01-09','Amir Mahmood','L2 · 2/3',''],
-  ['2027-01-16','Laiba Abaidullah','L1 · 2/2','Level 1 ✓ — Goal 1'],
-  ['2027-01-23','Shaique Ahmed Rizwan','L3 · 3/3','Level 3 ✓ — Goal 4'],
-  ['2027-01-30','Amir Mahmood','L2 · 3/3','Level 2 ✓'],
-  ['2027-02-06','Laiba Abaidullah','L2 · 1/3',''],
-  ['2027-02-13','Shahnawaz Ali','L2 · 1/3 (backup)',''],
-  ['2027-02-20','','free — backup (Salman / Madiha / Osama)',''],
-  ['2027-02-27','Laiba Abaidullah','L2 · 2/3',''],
-  ['2027-03-06','Shahnawaz Ali','L2 · 2/3 (backup)',''],
-  ['2027-03-13','','free — backup',''],
-  ['2027-03-20','Laiba Abaidullah','L2 · 3/3','Level 2 ✓ — Goals 2 & 3'],
-  ['2027-03-27','Shahnawaz Ali','L2 · 3/3 (backup)','Level 2 ✓ (backup for Goal 3)']
+  ['2026-12-05','Shahnawaz Ali','L1 · 2/2','Level 1 ✓'],
+  ['2026-12-26','Laiba Abaidullah','L2 · 1/3 · Speakathon 4',''],
+  ['2026-12-26','Muhammad Wajahat','L3 · 2/2 · Speakathon 4','Level 3 ✓'],
+  ['2026-12-26','Shaique Ahmed Rizwan','L3 · 2/3 · Speakathon 4',''],
+  ['2027-01-02','','Jan 2–30: contests + Murree trip — no Pathways speeches',''],
+  ['2027-02-06','Shaique Ahmed Rizwan','L3 · 3/3','Level 3 ✓ — Goal 4'],
+  ['2027-02-06','Amir Mahmood','L2 · 2/3',''],
+  ['2027-02-13','Laiba Abaidullah','L2 · 2/3 · online',''],
+  ['2027-02-20','Shahnawaz Ali','L2 · 1/3 (backup) · online',''],
+  ['2027-02-27','Amir Mahmood','L2 · 3/3 · online','Level 2 ✓'],
+  ['2027-03-06','Laiba Abaidullah','L2 · 3/3 · online','Level 2 ✓ — Goals 2 & 3'],
+  ['2027-03-13','Shahnawaz Ali','L2 · 2/3 (backup)',''],
+  ['2027-03-20','','Speakathon 5 — buffer for anyone who missed a turn',''],
+  ['2027-04-10','Shahnawaz Ali','L2 · 3/3 (backup)','Level 2 ✓ (backup for Goal 3)'],
+  ['2027-04-17','','buffer — last routine meeting before April ends','']
 ].map(([date,name,step,result])=>({date,name,step,result}))};
+/* officers who edited an older version of the plan can go back to the
+   recommended one (it is only a default until someone saves) */
+function dcpPlanReset(yr){
+  if(!confirm('Replace this plan with the recommended one? Your edits to the plan are lost.'))return;
+  delete dcpYear(yr).plan; S.dcp=state.dcp;
+  sync(api.saveDcp(yr,state.dcp[yr])); render();
+}
 let dcpPlanEdit=false;
 function dcpPlan(yr){ const d=dcpYear(yr); return Array.isArray(d.plan)?d.plan:(DCP_PLAN_DEFAULT[yr]||[]); }
 function dcpPlanStatus(row){
@@ -3779,7 +3790,8 @@ function dcpPlanHtml(yr){
       :`<tr ${r.date<bookingDayStr()?'style="opacity:.7"':''}><td>${fmtDate(r.date)}</td><td>${r.name?`<b>${esc(r.name)}</b>`:'<span class="muted">—</span>'}</td>
         <td>${esc(r.step)}</td><td>${r.result?`<b>${esc(r.result)}</b>`:''}</td><td>${dcpPlanStatus(r)}</td></tr>`).join('')}
     </tbody></table></div>
-    ${dcpPlanEdit?`<button class="btn ghost small" style="margin-top:6px" onclick="dcpPlanAdd(${yr})">＋ Add a meeting</button>`:''}
+    ${dcpPlanEdit?`<button class="btn ghost small" style="margin-top:6px" onclick="dcpPlanAdd(${yr})">＋ Add a meeting</button>
+      ${DCP_PLAN_DEFAULT[yr]?`<button class="btn ghost small" style="margin-top:6px" onclick="dcpPlanReset(${yr})">↺ Use the recommended plan</button>`:''}`:''}
     <p class="small muted" style="margin:6px 0 0">Book each candidate from Roles &amp; Meetings (officers see 8 meetings ahead), or reserve the slot with 🚫 until then. Keep 3 weeks between a member's speeches.</p>
   </div>`;
 }
@@ -6048,7 +6060,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,
