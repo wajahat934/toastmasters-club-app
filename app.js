@@ -3793,7 +3793,61 @@ function dcpPlanHtml(yr){
     ${dcpPlanEdit?`<button class="btn ghost small" style="margin-top:6px" onclick="dcpPlanAdd(${yr})">＋ Add a meeting</button>
       ${DCP_PLAN_DEFAULT[yr]?`<button class="btn ghost small" style="margin-top:6px" onclick="dcpPlanReset(${yr})">↺ Use the recommended plan</button>`:''}`:''}
     <p class="small muted" style="margin:6px 0 0">Book each candidate from Roles &amp; Meetings (officers see 8 meetings ahead), or reserve the slot with 🚫 until then. Keep 3 weeks between a member's speeches.</p>
+    <div class="row no-print" style="margin-top:10px"><label class="small"><b>One speaker's plan:</b>
+      <select style="width:auto" onchange="dcpPersonPick(this.value)"><option value="">— pick a speaker —</option>
+        ${[...new Set(rows.filter(r=>r.name).map(r=>r.name))].map(n=>`<option ${n===dcpPerson?'selected':''}>${esc(n)}</option>`).join('')}
+      </select></label></div>
+  </div>
+  ${dcpPerson?dcpPersonHtml(yr,dcpPerson):''}`;
+}
+/* ---- one speaker's own plan, to print or send ----
+   Member-facing wording: the officers' goal numbers are left out, the step
+   code "L1 · 2/2 · Speakathon 3" becomes "Level 1 — speech 2 of 2
+   (Speakathon 3)", and a finishing speech says which level it completes. */
+let dcpPerson='';
+function dcpPersonPick(n){ dcpPerson=n; render(); }
+function dcpPersonRows(yr,name){
+  return dcpPlan(yr).filter(r=>r.name===name).map(r=>{
+    const m=/L(\d)\s*·\s*(\d+)\/(\d+)(.*)$/.exec(r.step||'');
+    const extra=m?m[4].replace(/[()]/g,'').replace(/^\s*·\s*/,'').replace(/\s*·\s*/g,', ').trim():'';
+    const what=m?`Level ${m[1]} — speech ${m[2]} of ${m[3]}${extra?` (${extra})`:''}`:(r.step||'');
+    const lv=/Level (\d)/.exec(r.result||'');
+    return {date:r.date,what,done:m&&m[2]===m[3]&&lv?`completes Level ${lv[1]} 🎉`:''};
+  });
+}
+function dcpPersonMessage(yr,name){
+  const first=name.split(/\s+/)[0];
+  const rows=dcpPersonRows(yr,name).filter(r=>r.date>=todayStr());
+  return `Hi TM ${first}! 🎯 Here is your speech plan for this club year:\n\n`
+    +rows.map(r=>`• ${fmtDate(r.date)} — ${r.what}${r.done?' — '+r.done:''}`).join('\n')
+    +`\n\nPlease prepare each project in Base Camp beforehand. If you can't make a date, let me know by the Wednesday before so the slot can go to someone else. You've got this! 💪`;
+}
+function dcpPersonHtml(yr,name){
+  const rows=dcpPersonRows(yr,name);
+  return `<div class="card" id="dcpPersonCard">
+    <div class="row"><h3 style="margin:0" class="grow">🎤 ${esc(name)} — speech plan</h3>
+      <button class="btn ghost small no-print" onclick="dcpPersonCopy(${yr})">📋 Copy as message</button>
+      <button class="btn ghost small no-print" onclick="printDcpPerson()">🖨 Print</button></div>
+    <p class="small">Rawalpindi Toastmasters Club · club year ${yr}–${String(yr+1).slice(2)}</p>
+    <div class="tblwrap"><table><thead><tr><th>Meeting</th><th>Speech</th><th></th></tr></thead><tbody>
+      ${rows.map(r=>`<tr ${r.date<todayStr()?'style="opacity:.6"':''}><td><b>${fmtDate(r.date)}</b></td><td>${esc(r.what)}</td><td>${r.done?`<b>${esc(r.done)}</b>`:''}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p class="small" style="margin:8px 0 0">Prepare each project in Base Camp beforehand. If you can't make a date, tell the VPE by the Wednesday before, so the slot can go to someone else.</p>
   </div>`;
+}
+function dcpPersonCopy(yr){
+  const txt=dcpPersonMessage(yr,dcpPerson);
+  const ok=()=>toast('Copied — paste it into WhatsApp');
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(ok,()=>prompt('Copy this message:',txt));
+  else prompt('Copy this message:',txt);
+}
+function printDcpPerson(){
+  const html=document.documentElement, t=document.title;
+  html.classList.add('dcpprint','personprint');
+  document.title='RTC_speech_plan_'+dcpPerson.replace(/\s+/g,'_');
+  const done=()=>{ html.classList.remove('dcpprint','personprint'); document.title=t; window.removeEventListener('afterprint',done); };
+  window.addEventListener('afterprint',done);
+  window.print();
 }
 function dcpPlanSave(yr,rows){
   rows.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
@@ -6060,7 +6114,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,

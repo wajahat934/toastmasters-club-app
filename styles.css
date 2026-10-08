@@ -338,6 +338,9 @@ details.mem .body{padding:12px 16px}
   /* "Print plan": only the speech-plan card */
   html.planprint #main > :not(#dcpPlanCard){display:none !important}
   html.planprint #dcpPlanCard{border:none;padding:0}
+  /* one speaker's plan */
+  html.personprint #main > :not(#dcpPersonCard){display:none !important}
+  html.personprint #dcpPersonCard{border:none;padding:0;font-size:14px}
 }
 .print-only{display:none}
 
