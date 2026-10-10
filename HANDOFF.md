@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=122**.
+   every deploy or browsers serve the old `app.js`. Currently **v=123**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-10-02
 
-**Live at v122, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v123, repo clean, nothing half-built.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **How to work on this app (each rule exists because breaking it once hurt the club):**
@@ -74,6 +74,8 @@ key — never copy it into this repo.
 
 ## Outstanding — needs the user, not code
 
+- **Run `migrations/2026-10-11-backup-speakers.sql`** — creates `speaker_backups` (private by
+  RLS). Until then the backup-speaker buttons stay hidden (`S.backupsOn` false).
 - **Run `migrations/2026-10-03-gamification.sql`** — adds `profiles.joined` + a trigger so only
   officers can change it. Until then the "Joined RTC" field is hidden and nobody gets the
   newcomer boost. Then officers fill in each member's joining month (Members → member card).
@@ -161,6 +163,18 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Added 2026-10-11 — anonymous backup speakers (v123)
+
+Member Book tab: "🙋 Be a backup speaker" per meeting with speaker slots (hidden if already
+speaking there) → "✓ You're a backup speaker… only the officers can see this" + Withdraw.
+Officer meeting card: "🙋 Backup speakers — officers only", first in line first (created_at),
+"Make speaker" (`backupPromote`: reserved 🚫 empty speaker slot first, else first empty, via
+`assign()` so the 3-week gap confirm applies; removed from the list only if the booking landed)
+and ✕. Stored in its own table `speaker_backups` — NOT assignments/meetings.config, which every
+member reads — RLS: a member reads/deletes only their own row, officers all. Loaded in loadRest
+(`backupsQ` returns null when the table is missing → feature hidden). Not realtime (officers see
+new backups on the next refresh), not on the agenda / open-roles message / grid / points / gap.
 
 ## Added 2026-10-11 — book the whole DCP plan; meeting generation fills gaps (v122)
 

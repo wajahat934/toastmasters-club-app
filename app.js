@@ -218,11 +218,17 @@ const SupabaseApi={
   async loadRest(lite,myId){
     const q=async(t,optional,f)=>{ let r=sb.from(t).select('*'); if(f)r=f(r); const {data,error}=await r; if(error){ if(optional)return []; throw error; } return data; };
     const none=async()=>[];
-    const [awards,goals,dcpRows,agendaRows,birthdayChanges,suggestions]=await Promise.all(
+    /* backups: null (not []) when the table is missing, so the feature stays
+       hidden until migration 2026-10-11-backup-speakers.sql is run. RLS
+       hands a member only their own rows, officers all of them. */
+    const backupsQ=async()=>{ const {data,error}=await sb.from('speaker_backups').select('*'); return error?null:data; };
+    const [awards,goals,dcpRows,agendaRows,birthdayChanges,suggestions,backups]=await Promise.all(
       [q('awards'),q('goals',false,lite&&myId?r=>r.eq('profile_id',myId):null),
-       lite?none():q('dcp'),lite?none():q('agendas'),lite?none():q('birthday_changes',true),q('suggestions',true)]);
-    return {awards,goals,dcpRows,agendaRows,birthdayChanges,suggestions};
+       lite?none():q('dcp'),lite?none():q('agendas'),lite?none():q('birthday_changes',true),q('suggestions',true),backupsQ()]);
+    return {awards,goals,dcpRows,agendaRows,birthdayChanges,suggestions,backups};
   },
+  async addBackup(meeting_id,profile_id){ const {error}=await sb.from('speaker_backups').insert({meeting_id,profile_id}); if(error)throw error; },
+  async delBackup(meeting_id,profile_id){ const {error}=await sb.from('speaker_backups').delete().eq('meeting_id',meeting_id).eq('profile_id',profile_id); if(error)throw error; },
   /* the voting catch-up: just the last 3 days' polls and their votes —
      a few KB, versus the whole club's data for a full reload */
   async loadVoting(){
@@ -433,7 +439,7 @@ const DemoApi=(function(){
   const announcements=[{id:'annDemo',text:'🧪 Welcome to the training sandbox — everything here is sample data. Play any role freely!',created_at:new Date().toISOString()}];
   const birthdayChanges=[];
   const suggestions=[{id:'sug1',profile_id:profiles[1].id,text:'Can we start meetings 10 minutes earlier?',hide_name:false,status:'new',admin_note:null,created_at:new Date().toISOString()}];
-  const dcpRows=[],agendaRows=[],demoAssets={};
+  const dcpRows=[],agendaRows=[],demoAssets={},demoBackups=[];
   let settingsRows=[{id:1,data:defaultSettings()}];
   /* events arriving from another sandbox window: patch our own tables first
      (so tallies and later loads agree), then hand the event to the app */
@@ -484,8 +490,10 @@ const DemoApi=(function(){
     async loadRest(){
       const cp=a=>a.map(o=>({...o}));
       return {awards:cp(awards),goals:cp(goals),dcpRows:cp(dcpRows),agendaRows:cp(agendaRows),
-        birthdayChanges:cp(birthdayChanges),suggestions:cp(suggestions)};
+        birthdayChanges:cp(birthdayChanges),suggestions:cp(suggestions),backups:cp(demoBackups)};
     },
+    async addBackup(mid,pid){ if(!demoBackups.some(b=>b.meeting_id===mid&&b.profile_id===pid))demoBackups.push({meeting_id:mid,profile_id:pid,created_at:new Date().toISOString()}); },
+    async delBackup(mid,pid){ const i=demoBackups.findIndex(b=>b.meeting_id===mid&&b.profile_id===pid); if(i>=0)demoBackups.splice(i,1); },
     async addSuggestion(f){ const row={id:uid(),status:'new',admin_note:null,created_at:new Date().toISOString(),...f}; suggestions.push(row); return row; },
     async updSuggestion(id,f){ Object.assign(suggestions.find(s=>s.id===id)||{},f); },
     async delSuggestion(id){ const i=suggestions.findIndex(s=>s.id===id); if(i>=0)suggestions.splice(i,1); },
@@ -556,7 +564,7 @@ const DemoApi=(function(){
    COMPAT STATE — same shape the single-user tracker used, so all
    read/render logic carries over. Mutations patch it AND call api.
    ============================================================ */
-let S={profiles:[],meetings:[],assignments:[],awards:[],goals:[],polls:[],votes:[],announcements:[],birthdayChanges:[],suggestions:[],settings:defaultSettings(),dcp:{},agendas:{}};
+let S={profiles:[],meetings:[],assignments:[],awards:[],goals:[],polls:[],votes:[],announcements:[],birthdayChanges:[],suggestions:[],settings:defaultSettings(),dcp:{},agendas:{},backups:[],backupsOn:false};
 let state=null, me=null, isAdmin=false;
 
 function rebuild(){
@@ -1990,9 +1998,69 @@ function viewBook(){
         return `<div class="bookslot open"><div><div class="rname">${esc(s.label)}</div><div class="holder muted">open</div></div>
           <button class="btn small" onclick="myBook('${m.id}','${s.key}',this)">Book</button></div>`;
       }).join('')}
-      </div></div>`;
+      </div>${backupMemberHtml(m)}</div>`;
   }
   return html;
+}
+/* ---- anonymous backup speakers ----
+   A member can stand by to speak if a speaker drops out. Kept in its own
+   table (speaker_backups) whose database rules show a member only their own
+   row and officers all of them — so nobody knows who else is on standby, and
+   standing by is no easy way out of a real slot. First in = first in line.
+   Not on the agenda, the open-roles message, the grid or the points; not
+   counted for the 3-week gap (being made a speaker goes through assign(),
+   which asks then). */
+const isBackup=(mid,pid)=>S.backups.some(b=>b.meeting_id===mid&&b.profile_id===pid);
+function backupMemberHtml(m){
+  if(!S.backupsOn||!speakersFor(m)||speaksAt(m,me.profileId))return '';
+  return isBackup(m.id,me.profileId)
+    ?`<div class="row small" style="margin-top:8px;padding:6px 10px;background:var(--good-soft);border-radius:8px">
+        <span class="grow">✓ <b>You're a backup speaker</b> for this meeting. Only the officers can see this.</span>
+        <button class="btn ghost small" onclick="backupLeave('${m.id}')">Withdraw</button></div>`
+    :`<div class="row small" style="margin-top:8px"><button class="btn ghost small" onclick="backupJoin('${m.id}')">🙋 Be a backup speaker</button>
+        <span class="muted">— speak only if someone drops out. Private: only the officers see it.</span></div>`;
+}
+function backupJoin(mid){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  if(!confirm(`Be a backup speaker for ${fmtDate(m.date)}?\n\nIf a speaker drops out, the officers may ask you to speak — have a speech ready. Only the officers can see that you are a backup.`))return;
+  S.backups.push({meeting_id:mid,profile_id:me.profileId,created_at:new Date().toISOString()});
+  sync(api.addBackup(mid,me.profileId));
+  render(); toast("You're booked as a backup speaker ✓");
+}
+function backupLeave(mid){
+  S.backups=S.backups.filter(b=>!(b.meeting_id===mid&&b.profile_id===me.profileId));
+  sync(api.delBackup(mid,me.profileId));
+  render(); toast('Withdrawn as backup speaker');
+}
+function backupAdminHtml(m){
+  if(!S.backupsOn)return '';
+  const list=S.backups.filter(b=>b.meeting_id===m.id&&!speaksAt(m,b.profile_id))
+    .sort((a,b)=>a.created_at<b.created_at?-1:1);
+  if(!list.length)return `<div class="small muted" style="margin-top:6px">🙋 No backup speakers yet <span title="Members can volunteer from their booking screen; only officers see the list">(officers only)</span></div>`;
+  return `<div class="card sub" style="margin-top:8px"><b class="small">🙋 Backup speakers — officers only, first in line first</b>
+    ${list.map((b,i)=>{const mem=memberById(b.profile_id);return `<div class="row small" style="margin-top:4px">
+      <span class="grow">${i+1}. ${esc(mem?mem.name:'(member)')} <span class="muted">· ${fmtDate(b.created_at.slice(0,10))}</span></span>
+      <button class="btn small" onclick="backupPromote('${m.id}','${b.profile_id}')">Make speaker</button>
+      <button class="btn ghost small" onclick="backupRemove('${m.id}','${b.profile_id}')" title="Take off the backup list">✕</button></div>`;}).join('')}
+  </div>`;
+}
+async function backupPromote(mid,pid){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  const empty=slotListFor(m).filter(s=>s.key.startsWith('spk|')&&!((m.assignments||{})[s.key]||{}).memberId);
+  const key=(empty.find(s=>slotBlocked(m,s.key))||empty[0]||{}).key;
+  if(!key){ toast('No open speaker slot — release one (or add a speaker) first'); return; }
+  await assign(mid,key,{value:pid});
+  if(speaksAt(state.meetings.find(x=>x.id===mid),pid)){
+    S.backups=S.backups.filter(b=>!(b.meeting_id===mid&&b.profile_id===pid));
+    sync(api.delBackup(mid,pid)); render();
+    const mem=memberById(pid); toast((mem?mem.name:'Backup')+' is now a speaker — let them know');
+  }
+}
+function backupRemove(mid,pid){
+  const mem=memberById(pid);
+  if(!confirm(`Take ${mem?mem.name:'this member'} off the backup list?`))return;
+  S.backups=S.backups.filter(b=>!(b.meeting_id===mid&&b.profile_id===pid));
+  sync(api.delBackup(mid,pid)); render();
 }
 /* Fair-use gaps: at most one booking of a role per member in a set number of
    weeks. The club's call of Sep 2026: speeches 3 weeks, Table Topics Master 6 —
@@ -2551,6 +2619,7 @@ function meetingBookingCard(m){
     ${orphans.length?`<div class="warnline">📎 Booked on ${orphans.length} slot${orphans.length>1?'s':''} this meeting no longer has:
       ${orphans.map(o=>esc(o.name)+' ('+esc(roleNameById(ridOf(o.key)))+')').join(', ')}
       <button class="btn ghost small" onclick="releaseOrphans('${m.id}')">Release</button></div>`:''}
+    ${nSpk?backupAdminHtml(m):''}
   </div>`;
 }
 /* Attendance is opt-out: everyone is present until someone says otherwise, so
@@ -5937,6 +6006,7 @@ async function doReload(){
   const rest=await restP;
   S.awards=rest.awards; S.goals=rest.goals;
   S.birthdayChanges=rest.birthdayChanges||[]; S.suggestions=rest.suggestions||[];
+  S.backupsOn=Array.isArray(rest.backups); S.backups=rest.backups||[];
   S.dcp={}; for(const r of rest.dcpRows)S.dcp[r.year]=r.data;
   S.agendas={}; for(const r of rest.agendaRows)S.agendas[r.meeting_id]=r.data;
   const firstAgendas=!agendasLoaded;
@@ -6235,7 +6305,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,
