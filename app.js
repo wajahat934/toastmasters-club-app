@@ -1182,17 +1182,17 @@ function vcPollCard(p){
         :`<button class="btn ghost small" onclick="reopenPoll('${p.id}')">Reopen</button>`}
       <button class="btn danger small" onclick="deletePoll('${p.id}')">✕</button>
     </div>
-    <div class="tblwrap" data-scroll="poll-${p.id}"><table><thead><tr><th>Candidate</th><th class="num">App votes</th><th class="num">Paper</th><th class="num">Total</th></tr></thead><tbody>
+    <div class="tblwrap" data-scroll="poll-${p.id}"><table class="vctbl"><thead><tr><th>Name</th><th class="num">App</th><th class="num">Paper</th><th class="num">Total</th></tr></thead><tbody>
       ${(p.candidates||[]).map(c=>`<tr>
         <td title="${esc(c.name)}">${esc(vcShortName(c.name))} ${p.winner_key===c.key?'🏆':''}
           ${p.status==='open'?`<button class="del no-print" title="Remove this candidate" onclick="removeCandidate('${p.id}','${c.key}')">✕</button>`:''}</td>
         <td class="num" data-app="${p.id}:${c.key}">${app[c.key]}</td>
-        <td class="num">
-          <button class="btn ghost small" onclick="adjustPoll('${p.id}','${c.key}',-1)">−</button>
-          ${Number((p.adjust||{})[c.key]||0)}
-          <button class="btn ghost small" onclick="adjustPoll('${p.id}','${c.key}',1)">＋</button>
+        <td class="num"><span class="pp">
+          <button class="btn ghost" onclick="adjustPoll('${p.id}','${c.key}',-1)" aria-label="One paper vote less">−</button>
+          <span>${Number((p.adjust||{})[c.key]||0)}</span>
+          <button class="btn ghost" onclick="adjustPoll('${p.id}','${c.key}',1)" aria-label="One paper vote more">＋</button></span>
         </td>
-        <td class="num"><b data-total="${p.id}:${c.key}">${total[c.key]}</b></td>
+        <td class="num tot"><b data-total="${p.id}:${c.key}">${total[c.key]}</b></td>
       </tr>`).join('')}
     </tbody></table></div>
     ${tie?`<div class="warnline">⚖ It's a tie — pick the winner:
@@ -1847,17 +1847,17 @@ function pPollCard(p){
         :`<button class="btn ghost small" onclick="pReopen('${p.id}')">Reopen</button>`}
       <button class="btn danger small" onclick="pDelete('${p.id}')">✕</button>
     </div>
-    <div class="tblwrap" data-scroll="prac-${p.id}"><table><thead><tr><th>Candidate</th><th class="num">App votes</th><th class="num">Paper</th><th class="num">Total</th></tr></thead><tbody>
+    <div class="tblwrap" data-scroll="prac-${p.id}"><table class="vctbl"><thead><tr><th>Name</th><th class="num">App</th><th class="num">Paper</th><th class="num">Total</th></tr></thead><tbody>
       ${p.candidates.map(c=>`<tr>
         <td title="${esc(c.name)}">${esc(vcShortName(c.name))} ${p.winner_key===c.key?'🏆':''}
           ${p.status==='open'?`<button class="del no-print" title="Remove this candidate" onclick="pRemove('${p.id}','${c.key}')">✕</button>`:''}</td>
         <td class="num">${app[c.key]}</td>
-        <td class="num">
-          <button class="btn ghost small" onclick="pAdjust('${p.id}','${c.key}',-1)">−</button>
-          ${Number((p.adjust||{})[c.key]||0)}
-          <button class="btn ghost small" onclick="pAdjust('${p.id}','${c.key}',1)">＋</button>
+        <td class="num"><span class="pp">
+          <button class="btn ghost" onclick="pAdjust('${p.id}','${c.key}',-1)" aria-label="One paper vote less">−</button>
+          <span>${Number((p.adjust||{})[c.key]||0)}</span>
+          <button class="btn ghost" onclick="pAdjust('${p.id}','${c.key}',1)" aria-label="One paper vote more">＋</button></span>
         </td>
-        <td class="num"><b>${total[c.key]}</b></td>
+        <td class="num tot"><b>${total[c.key]}</b></td>
       </tr>`).join('')}
     </tbody></table></div>
     ${tie?`<div class="warnline">⚖ It's a tie — pick the winner:

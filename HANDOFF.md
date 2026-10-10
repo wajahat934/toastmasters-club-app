@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=118**.
+   every deploy or browsers serve the old `app.js`. Currently **v=119**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-10-02
 
-**Live at v118, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v119, repo clean, nothing half-built.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **How to work on this app (each rule exists because breaking it once hurt the club):**
@@ -161,6 +161,14 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Changed 2026-10-11 — Vote Counter table fits a phone (v119)
+
+Real VC card and the Practice mirror (`vcPollCard` / `pPollCard`, PARITY kept) use `table.vctbl`:
+headings Name · App · Paper · Total, 4 px cell padding, names WRAP (not shrunk — older members),
+−/＋ as 36 px buttons in `.pp`, total bold and larger. Measured: no horizontal scroll at 375 px
+and 360 px with 5 candidates. Next ideas offered (not built): paper-ballot "tally clicker" mode,
+⋯ More menu for Reopen/✕ delete, step strip, full-screen announce card.
 
 ## Fixed 2026-10-11 — removed roles keep their name in the past (v118)
 

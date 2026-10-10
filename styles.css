@@ -93,6 +93,16 @@ table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
 th,td{border-bottom:1px solid var(--line);padding:6px 10px;text-align:left;font-size:.85rem;white-space:nowrap}
 th{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
 td.num,th.num{text-align:center}
+/* Vote Counter table: fits a phone with no sideways scroll — short headings,
+   tight columns, names WRAP rather than shrink (older eyes), a compact but
+   still thumb-sized −/＋ pair, and the total the counter reads out in bold */
+.vctbl th,.vctbl td{padding:6px 4px}
+.vctbl th{letter-spacing:.04em}
+.vctbl td:first-child{white-space:normal;min-width:7em;line-height:1.25}
+.vctbl .pp{display:inline-flex;align-items:center;gap:6px}
+.vctbl .pp>span{min-width:1.4em;text-align:center}
+.vctbl .pp .btn{min-width:36px;height:36px;padding:0;font-size:1.1rem;line-height:1}
+.vctbl td.tot b{font-size:1.15rem}
 .goalgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
 .goal{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
 .goal.met{border-color:var(--good)}
