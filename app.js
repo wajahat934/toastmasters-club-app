@@ -605,7 +605,15 @@ function ttOn(m){ return !(m&&m.config&&m.config.tt===false); }
    one saved sheet and vanished on "Fill from bookings" */
 function eduOn(m){ return !!(m&&m.config&&m.config.edu); }
 /* format swap: prepared speeches run before Table Topics */
-function speechFirstOn(m){ return !!(m&&m.config&&m.config.speechFirst); }
+/* Speeches first is the club's default from the 17 Oct 2026 meeting on (the
+   owner's call). A meeting's own tick still wins either way; older meetings
+   keep the order they were run in, so their saved agendas don't reshuffle. */
+const SPEECH_FIRST_FROM='2026-10-12';
+function speechFirstOn(m){
+  if(!m)return false;
+  const v=m.config&&m.config.speechFirst;
+  return v===undefined?m.date>=SPEECH_FIRST_FROM:!!v;
+}
 /* attendance is opt-out: everyone counts as present unless listed here */
 function absentList(m){ return (m&&m.config&&m.config.absent)||[]; }
 function isAbsent(m,pid){ return absentList(m).includes(pid); }
@@ -1201,8 +1209,10 @@ function vcPollCard(p){
     ${p.status==='open'?`<div class="row small" style="margin-top:8px">
       <select style="width:auto" onchange="if(this.value){addCandidate('${p.id}',this.value);}">
         <option value="">＋ Add candidate…</option>
+        <option value="__custom">✍ Guest — type their name…</option>
+        <optgroup label="Members">
         ${state.members.filter(x=>!x.archived&&!(p.candidates||[]).some(c=>c.profileId===x.id)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
-        <option value="__custom">Custom name…</option>
+        </optgroup>
       </select>
       ${/* no "＋ Mark member" picker: new Vote Counters mistook it for adding a
            candidate. Anyone already marked still shows, so they can be unmarked. */
@@ -1249,7 +1259,7 @@ async function addCandidate(pollId,v){
   const p=S.polls.find(p=>p.id===pollId); if(!p)return;
   let cand;
   if(v==='__custom'){
-    const name=prompt('Candidate name (e.g. a Table Topics guest):'); if(!name){render();return;}
+    const name=prompt("Guest's name, as it should appear on the vote:"); if(!name){render();return;}
     cand={key:'c'+uid(),name:name.trim(),profileId:null};
   }else{
     const mem=memberById(v); if(!mem)return;
@@ -1739,7 +1749,7 @@ function pStart(cat){
 function pAdd(pollId,v){
   const p=pPolls.find(x=>x.id===pollId); if(!p)return;
   if(v==='__custom'){
-    const name=prompt('Practice candidate name:'); if(!name){render();return;}
+    const name=prompt("Guest's name, as it should appear on the vote:"); if(!name){render();return;}
     p.candidates.push({key:'pc'+uid(),name:name.trim()});
   } else {
     const m=pMemberById(v); if(!m||p.candidates.some(c=>c.key===m.id)){render();return;}
@@ -1868,8 +1878,10 @@ function pPollCard(p){
       <button class="btn ${pTrickle?'good':'ghost'} small" onclick="pTrickleToggle('${p.id}')">${pTrickle?'⏸ Stop live votes':'▶ Votes rolling in'}</button>
       <select style="width:auto" onchange="if(this.value){pAdd('${p.id}',this.value);}">
         <option value="">＋ Add candidate…</option>
+        <option value="__custom">✍ Guest — type their name…</option>
+        <optgroup label="Members">
         ${pRoster().filter(m=>!p.candidates.some(c=>c.key===m.id)).map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}
-        <option value="__custom">Custom name…</option>
+        </optgroup>
       </select>
       ${/* no "＋ Mark member" picker: new Vote Counters mistook it for adding a
            candidate. Anyone already marked still shows, so they can be unmarked. */
@@ -2599,9 +2611,11 @@ function meetingReviewCard(m,compact){
         return `<label class="muted">${esc(cat.replace(/^Best (of )?/,''))}</label>
         <select style="width:auto" onchange="setWinner('${m.id}','${esc(cat)}',this)">
           <option value="">—</option>
-          ${state.members.filter(x=>!x.archived).map(x=>`<option value="${x.id}" ${cur===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}
+          <option value="__custom">✍ Guest — type their name…</option>
           ${cur&&!memberById(cur)?`<option value="${cur}" selected>${esc(winnerName(p))}</option>`:''}
-          <option value="__custom">Custom name…</option>
+          <optgroup label="Members">
+          ${state.members.filter(x=>!x.archived).map(x=>`<option value="${x.id}" ${cur===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}
+          </optgroup>
         </select>`;
       }).join('')}
     </div>
