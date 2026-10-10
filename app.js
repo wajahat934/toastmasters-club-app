@@ -2039,7 +2039,7 @@ function backupAdminHtml(m){
   if(!list.length)return `<div class="small muted" style="margin-top:6px">🙋 No backup speakers yet <span title="Members can volunteer from their booking screen; only officers see the list">(officers only)</span></div>`;
   return `<div class="card sub" style="margin-top:8px"><b class="small">🙋 Backup speakers — officers only, first in line first</b>
     ${list.map((b,i)=>{const mem=memberById(b.profile_id);return `<div class="row small" style="margin-top:4px">
-      <span class="grow">${i+1}. ${esc(mem?mem.name:'(member)')} <span class="muted">· ${fmtDate(b.created_at.slice(0,10))}</span></span>
+      <span class="grow">${i+1}. ${esc(mem?mem.name:'(member)')} <span class="muted">· ${fmtDate(dstr(new Date(b.created_at)))}</span></span>
       <button class="btn small" onclick="backupPromote('${m.id}','${b.profile_id}')">Make speaker</button>
       <button class="btn ghost small" onclick="backupRemove('${m.id}','${b.profile_id}')" title="Take off the backup list">✕</button></div>`;}).join('')}
   </div>`;
