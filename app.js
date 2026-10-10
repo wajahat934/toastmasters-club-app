@@ -92,6 +92,40 @@ function clubYearOf(s){ const p=s.split('-').map(Number); return p[1]>=7?p[0]:p[
 function currentClubYear(){ return clubYearOf(todayStr()); }
 function inClubYear(dateS,yr){ return clubYearOf(dateS)===yr; }
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2500); }
+/* The app's own confirm/prompt. The browser's confirm() heads every box with
+   "wajahat934.github.io says", which puzzled members — and no page can turn
+   that off. Promise-based: `if(!await appConfirm(msg))return;`. First
+   paragraph of msg (split on blank lines) is the bold question. Esc or a tap
+   outside = cancel; Enter = OK. Used on every member-facing question; the
+   officer-only flows still use the browser box. */
+function appDialog({msg,ok='OK',cancel='Cancel',input=null}){
+  return new Promise(res=>{
+    const prev=document.activeElement;
+    const ov=document.createElement('div'); ov.className='appdlg';
+    const paras=String(msg).split(/\n\s*\n/).map((t,i)=>`<p${i?'':' class="lead"'}>${esc(t).replace(/\n/g,'<br>')}</p>`).join('');
+    ov.innerHTML=`<div class="appdlg-box" role="dialog" aria-modal="true">${paras}
+      ${input!==null?`<input type="text" class="appdlg-in" value="${esc(input)}">`:''}
+      <div class="appdlg-btns">${cancel?`<button class="btn ghost" data-a="0">${esc(cancel)}</button>`:''}<button class="btn" data-a="1">${esc(ok)}</button></div></div>`;
+    const inp=ov.querySelector('.appdlg-in');
+    const no=input!==null?null:false;
+    const done=v=>{ ov.remove(); document.removeEventListener('keydown',key,true); try{ if(prev&&prev.focus)prev.focus(); }catch(e){} res(v); };
+    const yes=()=>done(input!==null?inp.value:true);
+    const key=e=>{
+      if(e.key==='Escape'){ e.preventDefault(); done(no); }
+      else if(e.key==='Enter'){ e.preventDefault(); yes(); }
+    };
+    ov.addEventListener('click',e=>{
+      const b=e.target.closest('[data-a]');
+      if(b)b.dataset.a==='1'?yes():done(no);
+      else if(e.target===ov)done(no);
+    });
+    document.addEventListener('keydown',key,true);
+    document.body.appendChild(ov);
+    const f=inp||ov.querySelector('[data-a="1"]'); f.focus(); if(inp)inp.select();
+  });
+}
+function appConfirm(msg,ok,cancel){ return appDialog({msg,ok,cancel}); }
+function appPrompt(msg,def){ return appDialog({msg,input:def==null?'':String(def)}); }
 function rtcRoleSet(){
   return [
     {id:'saa',name:'Sergeant at Arms (SAA)',count:1},
@@ -1272,7 +1306,7 @@ async function addCandidate(pollId,v){
   const p=S.polls.find(p=>p.id===pollId); if(!p)return;
   let cand;
   if(v==='__custom'){
-    const name=prompt("Guest's name, as it should appear on the vote:"); if(!name){render();return;}
+    const name=await appPrompt("Guest's name\n\nType it as it should appear on the vote."); if(!name||!name.trim()){render();return;}
     cand={key:'c'+uid(),name:name.trim(),profileId:null};
   }else{
     const mem=memberById(v); if(!mem)return;
@@ -1309,22 +1343,22 @@ function reopenPoll(pollId){
   sync(api.updatePoll(pollId,{status:'open',winner_key:null}));
   render();
 }
-function deletePoll(pollId){
+async function deletePoll(pollId){
   const p=S.polls.find(p=>p.id===pollId); if(!p)return;
-  if(!confirm('Delete the '+p.category+' vote entirely?'))return;
+  if(!await appConfirm('Delete the '+p.category+' vote?\n\nAll its votes are deleted too. This cannot be undone.','Delete'))return;
   S.polls=S.polls.filter(x=>x.id!==pollId);
   S.votes=S.votes.filter(v=>v.poll_id!==pollId);
   sync(api.deletePoll(pollId));
   render();
 }
-function removeCandidate(pollId,key){
+async function removeCandidate(pollId,key){
   const p=S.polls.find(p=>p.id===pollId); if(!p)return;
   const c=(p.candidates||[]).find(c=>c.key===key); if(!c)return;
   /* votes for a removed candidate are simply no longer counted — appVotes only
      tallies keys still on the list — so there is nothing to delete server-side */
   const cast=appVotes(p)[key]||0, paper=Number((p.adjust||{})[key]||0);
   const held=cast+paper;
-  if(held&&!confirm(`${c.name} already has ${held} vote${held>1?'s':''}.\n\nRemove them anyway? Those votes are discarded.`))return;
+  if(held&&!await appConfirm(`${c.name} already has ${held} vote${held>1?'s':''}.\n\nRemove them anyway? Those votes are discarded.`,'Remove'))return;
   p.candidates=p.candidates.filter(x=>x.key!==key);
   if(p.adjust)delete p.adjust[key];
   sync(api.updatePoll(pollId,{candidates:p.candidates,adjust:p.adjust||{}}));
@@ -1759,10 +1793,10 @@ function pStart(cat){
     candidates:prefillCandidates(pMeeting(),cat,pMemberById)});
   render();
 }
-function pAdd(pollId,v){
+async function pAdd(pollId,v){
   const p=pPolls.find(x=>x.id===pollId); if(!p)return;
   if(v==='__custom'){
-    const name=prompt("Guest's name, as it should appear on the vote:"); if(!name){render();return;}
+    const name=await appPrompt("Guest's name\n\nType it as it should appear on the vote."); if(!name||!name.trim()){render();return;}
     p.candidates.push({key:'pc'+uid(),name:name.trim()});
   } else {
     const m=pMemberById(v); if(!m||p.candidates.some(c=>c.key===m.id)){render();return;}
@@ -1770,11 +1804,11 @@ function pAdd(pollId,v){
   }
   render();
 }
-function pRemove(pollId,key){
+async function pRemove(pollId,key){
   const p=pPolls.find(x=>x.id===pollId); if(!p)return;
   const c=p.candidates.find(x=>x.key===key); if(!c)return;
   const held=(pAppVotes(p)[key]||0)+Number((p.adjust||{})[key]||0);
-  if(held&&!confirm(`${c.name} already has ${held} vote${held>1?'s':''}.\n\nRemove them anyway? Those votes are discarded.`))return;
+  if(held&&!await appConfirm(`${c.name} already has ${held} vote${held>1?'s':''}.\n\nRemove them anyway? Those votes are discarded.`,'Remove'))return;
   p.candidates=p.candidates.filter(x=>x.key!==key);
   if(p.adjust)delete p.adjust[key];
   render();
@@ -1855,8 +1889,8 @@ function pDelete(pollId){
   pVotes=pVotes.filter(v=>v.poll_id!==pollId);
   render();
 }
-function pReset(){
-  if(pPolls.length&&!confirm('Clear the whole practice run and start fresh?'))return;
+async function pReset(){
+  if(pPolls.length&&!await appConfirm('Clear the whole practice run and start fresh?','Clear'))return;
   if(pTrickle){ clearInterval(pTrickle); pTrickle=null; }
   pPolls=[]; pVotes=[]; pTie={}; render();
 }
@@ -2020,9 +2054,10 @@ function backupMemberHtml(m){
     :`<div style="margin-top:10px"><button class="btn ghost backupbtn" onclick="backupJoin('${m.id}')">🙋 Be a backup speaker</button>
         <div class="small muted" style="margin-top:4px">Speak only if someone drops out. Private — only the officers see it.</div></div>`;
 }
-function backupJoin(mid){
+async function backupJoin(mid){
   const m=state.meetings.find(x=>x.id===mid); if(!m)return;
-  if(!confirm(`Be a backup speaker for ${fmtDate(m.date)}?\n\nIf a speaker drops out, the officers may ask you to speak — have a speech ready. Only the officers can see that you are a backup.`))return;
+  if(!await appConfirm(`Be a backup speaker for ${fmtDate(m.date)}?\n\nIf a speaker drops out, the officers may ask you to speak — have a speech ready. Only the officers can see that you are a backup.`,'Yes, count me in','Not now'))return;
+  if(isBackup(mid,me.profileId))return;   /* a double tap must not add a second row */
   S.backups.push({meeting_id:mid,profile_id:me.profileId,created_at:new Date().toISOString()});
   sync(api.addBackup(mid,me.profileId));
   render(); toast("You're booked as a backup speaker ✓");
@@ -2191,8 +2226,8 @@ async function myBook(mid,key,btn){
     if(clash){ toast(`You're speaking on ${fmtDate(clash.date)} — back-to-back speeches are off so more members get a turn. Pick a later meeting 🙏`); return; }
     const mem=memberById(me.profileId);
     if(durTracked()&&mem&&currentLevel(mem)>=3
-       &&confirm('Is this a long-format project speech — longer than the standard 5–7 minutes?')){
-      const v=parseInt(prompt('Planned length in minutes (e.g. 15):','15'),10);
+       &&await appConfirm('Is this a long speech?\n\nLonger than the standard 5–7 minutes — for example a 10 or 15-minute project.','Yes, it\'s long','No, standard')){
+      const v=parseInt(await appPrompt('How many minutes will it be?\n\nFor example 15.','15'),10);
       if(v&&v>=8&&v<=40)dur=v;
       else toast('Length not recognised — booking as a standard speech');
     }
@@ -2202,7 +2237,7 @@ async function myBook(mid,key,btn){
          even though members only see 3 ahead */
       const alt=upcomingMeetings(MEMBER_HORIZON+1)
         .find(x=>x.id!==mid&&longRoomIn(x)&&!consecutiveSpeech(x.id,me.profileId));
-      if(alt&&confirm(`A ${dur}-minute speech needs a double slot and ${fmtDate(m.date)} has no room for one. Book it for ${fmtDate(alt.date)} instead?`)){
+      if(alt&&await appConfirm(`Book it for ${fmtDate(alt.date)} instead?\n\nA ${dur}-minute speech needs a double slot, and ${fmtDate(m.date)} has no room for one.`,'Book '+fmtDate(alt.date))){
         mid=alt.id; key=openSpkKey(alt);
       }else{ toast('No room for a long-format speech in the coming meetings — ask an officer to fit you in.'); return; }
     }else if(m&&(dur||0)<LONG_MIN&&slotReserved(m,key)){

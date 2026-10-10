@@ -374,3 +374,14 @@ details.mem .body{padding:12px 16px}
 
 /* backup-speaker opt-in: a full-width, thumb-sized button like the ballot */
 .backupbtn{width:100%;min-height:48px;font-size:1rem;font-weight:600}
+
+/* the app's own confirm/prompt (appDialog) — replaces the browser box and its
+   "…github.io says" heading on member-facing questions */
+.appdlg{position:fixed;inset:0;z-index:200;background:rgba(10,18,26,.55);display:flex;align-items:center;justify-content:center;padding:16px}
+.appdlg-box{background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:14px;width:100%;max-width:420px;padding:18px 18px 14px;box-shadow:0 12px 40px rgba(0,0,0,.35)}
+.appdlg-box p{margin:0 0 10px;line-height:1.45}
+.appdlg-box p.lead{font-weight:700;font-size:1.05rem}
+.appdlg-in{width:100%;min-height:44px;font-size:1rem;margin:4px 0 2px}
+.appdlg-btns{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+.appdlg-btns .btn{min-height:44px;min-width:96px;font-size:1rem}
+@media (max-width:520px){ .appdlg-btns .btn{flex:1} }
