@@ -784,25 +784,30 @@ function candidatesByGoal(){
 /* ---------- meetings auto-generation (admin writes; all read) ---------- */
 async function ensureMeetings(){
   if(!isAdmin)return;
+  /* Walk the club's regular meeting days from now and make sure the next
+     ADMIN_HORIZON exist. It used to append only AFTER the last future
+     meeting — fine until meetings far ahead exist (the DCP plan pre-books
+     into April), after which every week in between would never be made.
+     A week that already has a meeting within 3 days (moved to another
+     day) counts as covered, so no duplicate gets created beside it. */
   const t=bookingDayStr();
   const step=state.settings.cadence==='biweekly'?14:7;
-  let count=S.meetings.filter(m=>!m.cancelled&&m.date>=t).length;
-  const futureDates=S.meetings.map(m=>m.date).filter(d=>d>=t).sort();
-  let d;
-  if(futureDates.length){ d=parseD(futureDates[futureDates.length-1]); }
-  else{
-    d=parseD(t);
-    const off=(state.settings.meetingDay-d.getDay()+7)%7;
-    d.setDate(d.getDate()+off-step);
+  const d=parseD(t);
+  d.setDate(d.getDate()+(state.settings.meetingDay-d.getDay()+7)%7);
+  if(step===14){   /* keep the fortnight in step with the meetings already held */
+    const anchor=S.meetings.map(m=>m.date).filter(x=>x<t).sort().pop();
+    if(anchor&&Math.round((d-parseD(anchor))/864e5)%14)d.setDate(d.getDate()+7);
   }
-  let guard=0;
-  while(count<ADMIN_HORIZON&&guard++<30){
-    d.setDate(d.getDate()+step);
-    const ds=dstr(d);
-    if(!S.meetings.some(m=>m.date===ds)){
-      try{ const row=await api.insertMeeting({date:ds}); addOnce(S.meetings,row); count++; }
+  const near=ds=>S.meetings.find(m=>Math.abs((parseD(m.date)-parseD(ds))/864e5)<=3);
+  let have=0,guard=0;
+  while(have<ADMIN_HORIZON&&guard++<60){
+    const ds=dstr(d), ex=near(ds);
+    if(ex){ if(!ex.cancelled)have++; }
+    else{
+      try{ const row=await api.insertMeeting({date:ds}); addOnce(S.meetings,row); have++; }
       catch(e){ console.error(e); break; }
     }
+    d.setDate(d.getDate()+step);
   }
   rebuild();
 }
@@ -3763,7 +3768,7 @@ function dcpPlanStatus(row){
   if(!row.name)return '';
   const mem=state.members.find(m=>m.name.trim().toLowerCase()===row.name.trim().toLowerCase());
   if(!mem)return '<span class="pill absent">name not found</span>';
-  const m=state.meetings.find(x=>x.date===row.date);
+  const m=planMeeting(row.date);
   if(!m)return '<span class="muted small">not scheduled yet</span>';
   if(m.cancelled)return '<span class="pill absent">meeting cancelled — move</span>';
   const a=Object.entries(m.assignments||{}).find(([k,x])=>/^spk\|/.test(k)&&x&&x.memberId===mem.id);
@@ -3784,6 +3789,56 @@ function dcpPlanBook(mid,pid){
   assign(mid,key,{value:pid});
   const mem=memberById(pid); toast('Booked '+(mem?mem.name:'')+' to speak on '+fmtDate(m.date));
 }
+/* Book every remaining row of the plan in one go (the VPE agreed the dates
+   with the speakers). Meetings beyond the 8-week horizon don't exist yet, so
+   they are created on the plan's date (or the meeting already within 3 days
+   of it is used). Bookings are written like an officer's assignment, with
+   no per-row confirm: the plan itself keeps the 3-week gap, and anything
+   that could not be booked — or clashes with another booking of the same
+   member — is listed at the end instead. */
+/* the plan's meeting for a date: that date, or the meeting within 3 days of
+   it when the club moved that week's meeting — one rule for status, the
+   already-booked check and Book the whole plan */
+function planMeeting(ds){
+  return state.meetings.find(x=>x.date===ds)
+    ||state.meetings.find(x=>Math.abs((parseD(x.date)-parseD(ds))/864e5)<=3);
+}
+const speaksAt=(m,pid)=>Object.entries((m&&m.assignments)||{}).some(([k,a])=>/^spk\|/.test(k)&&a&&a.memberId===pid);
+async function dcpPlanBookAll(yr){
+  const from=bookingDayStr();
+  const rows=dcpPlan(yr).filter(r=>r.name&&r.date>=from);
+  const byName=n=>state.members.find(m=>m.name.trim().toLowerCase()===n.trim().toLowerCase());
+  const todo=rows.filter(r=>{ const mem=byName(r.name); return !(mem&&speaksAt(planMeeting(r.date),mem.id)); });
+  if(!todo.length){ toast('Everything in the plan is already booked ✓'); return; }
+  if(!confirm(`Book ${todo.length} speech${todo.length>1?'es':''} from the plan?\n\nMeetings that don't exist yet (up to ${fmtDate(todo[todo.length-1].date)}) will be created. Members see a booking once its meeting is within their 3-week view.`))return;
+  toast('Booking the plan…');
+  const done=[],skipped=[],warn=[];
+  for(const r of todo){
+    const mem=byName(r.name); if(!mem){ skipped.push(`${r.name} (${fmtDate(r.date)}): name not found`); continue; }
+    let m=S.meetings.find(x=>x.date===r.date)
+      ||S.meetings.find(x=>Math.abs((parseD(x.date)-parseD(r.date))/864e5)<=3);
+    if(!m){
+      try{ m=await api.insertMeeting({date:r.date}); addOnce(S.meetings,m); rebuild(); }
+      catch(e){ skipped.push(`${r.name} (${fmtDate(r.date)}): could not create the meeting`); continue; }
+    }
+    if(m.cancelled){ skipped.push(`${r.name} (${fmtDate(r.date)}): meeting cancelled`); continue; }
+    const sm=state.meetings.find(x=>x.id===m.id);
+    if(speaksAt(sm,mem.id))continue;   /* already speaking there — never twice */
+    const empty=slotListFor(sm).filter(s=>s.key.startsWith('spk|')&&!((sm.assignments||{})[s.key]||{}).memberId);
+    const key=(empty.find(s=>slotBlocked(sm,s.key))||empty[0]||{}).key;
+    if(!key){ skipped.push(`${r.name} (${fmtDate(r.date)}): no free speaker slot`); continue; }
+    const g=gapConflict(mem.id,'spk',sm.date,sm.id);
+    if(g)warn.push(`${mem.name} also speaks on ${fmtDate(g.date)} — inside the 3-week gap`);
+    S.assignments.push({meeting_id:sm.id,slot_key:key,profile_id:mem.id,status:'booked',actual_role:null,booked_at:new Date().toISOString()});
+    sync(api.adminAssign(sm.id,key,mem.id));
+    rebuild(); done.push(r);
+  }
+  render();
+  const msg=[`Booked ${done.length} of ${todo.length}.`];
+  if(skipped.length)msg.push('\nNot booked:\n• '+skipped.join('\n• '));
+  if(warn.length)msg.push('\nCheck:\n• '+warn.join('\n• '));
+  if(skipped.length||warn.length)alert(msg.join('\n')); else toast('✓ '+msg[0]);
+}
 /* print the plan on its own page: same light print styles as the DCP
    printout, everything else on the tab hidden */
 function printDcpPlan(){
@@ -3801,6 +3856,7 @@ function dcpPlanHtml(yr){
   const opts=sel=>`<option value="">— free slot —</option>`+state.members.filter(m=>!m.archived&&!m.external)
     .map(m=>`<option ${m.name===sel?'selected':''}>${esc(m.name)}</option>`).join('');
   return `<div class="card" id="dcpPlanCard"><div class="row"><h3 style="margin:0" class="grow">📅 DCP speech plan <span class="muted small">— officers only · one reserved speaker slot per meeting</span></h3>
+      <button class="btn small no-print" onclick="dcpPlanBookAll(${yr})" title="Book every remaining speech in this plan, creating future meetings as needed">📌 Book the whole plan</button>
       <button class="btn ghost small no-print" onclick="printDcpPlan()" title="Print just this plan">🖨 Print plan</button>
       <button class="btn ghost small no-print" onclick="dcpPlanToggle()">${dcpPlanEdit?'Done':'✎ Edit'}</button></div>
     <p class="print-only small">Rawalpindi Toastmasters Club · printed ${fmtDate(todayStr())}</p>
@@ -6179,7 +6235,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,
