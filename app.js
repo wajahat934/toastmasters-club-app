@@ -2017,8 +2017,8 @@ function backupMemberHtml(m){
     ?`<div class="row small" style="margin-top:8px;padding:6px 10px;background:var(--good-soft);border-radius:8px">
         <span class="grow">✓ <b>You're a backup speaker</b> for this meeting. Only the officers can see this.</span>
         <button class="btn ghost small" onclick="backupLeave('${m.id}')">Withdraw</button></div>`
-    :`<div class="row small" style="margin-top:8px"><button class="btn ghost small" onclick="backupJoin('${m.id}')">🙋 Be a backup speaker</button>
-        <span class="muted">— speak only if someone drops out. Private: only the officers see it.</span></div>`;
+    :`<div style="margin-top:10px"><button class="btn ghost backupbtn" onclick="backupJoin('${m.id}')">🙋 Be a backup speaker</button>
+        <div class="small muted" style="margin-top:4px">Speak only if someone drops out. Private — only the officers see it.</div></div>`;
 }
 function backupJoin(mid){
   const m=state.meetings.find(x=>x.id===mid); if(!m)return;

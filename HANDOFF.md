@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=124**.
+   every deploy or browsers serve the old `app.js`. Currently **v=125**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-10-02
 
-**Live at v124, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v125, repo clean, nothing half-built.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **How to work on this app (each rule exists because breaking it once hurt the club):**
@@ -74,8 +74,7 @@ key — never copy it into this repo.
 
 ## Outstanding — needs the user, not code
 
-- **Run `migrations/2026-10-11-backup-speakers.sql`** — creates `speaker_backups` (private by
-  RLS). Until then the backup-speaker buttons stay hidden (`S.backupsOn` false).
+- ~~**Run `migrations/2026-10-11-backup-speakers.sql`**~~ **Done** (2026-10-11).
 - **Run `migrations/2026-10-03-gamification.sql`** — adds `profiles.joined` + a trigger so only
   officers can change it. Until then the "Joined RTC" field is hidden and nobody gets the
   newcomer boost. Then officers fill in each member's joining month (Members → member card).
@@ -175,6 +174,7 @@ and ✕. Stored in its own table `speaker_backups` — NOT assignments/meetings.
 member reads — RLS: a member reads/deletes only their own row, officers all. Loaded in loadRest
 (`backupsQ` returns null when the table is missing → feature hidden). Not realtime (officers see
 new backups on the next refresh), not on the agenda / open-roles message / grid / points / gap.
+v125: the member's opt-in is a full-width 48 px `.backupbtn` with the privacy note under it.
 
 ## Added 2026-10-11 — book the whole DCP plan; meeting generation fills gaps (v122)
 
