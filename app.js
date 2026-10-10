@@ -4345,7 +4345,9 @@ function agDefaultBlocks(){
     {type:'session',id:'tt',k:'s_tt',title:agT('s_tt','Table Topics Session'),rows:[
       {k:'r_ttm',act:agT('r_ttm','Table Topics Master'),fill:'ttm',who:P,dur:2},
       {k:'r_tt',act:agT('r_tt','Table Topics <span class="role-note">(speakers: 1 – 2 min each)</span>'),who:agT('p_guests','Non-Role Players &amp; Guests'),dur:25,autoMode:'manual',lights:['1','1.5','2']},
-      {k:'r_timer',act:agT('r_timer','Timer’s Report &amp; Voting'),who:agT('p_timerVc','Timer &amp; Vote Counter'),dur:2}
+      /* the TMOD runs the report and vote at the end of Table Topics, as at the
+         end of the speeches (owner, Oct 2026 — older sheets healed in loadMeeting) */
+      {k:'r_timer',act:agT('r_timer','Timer’s Report &amp; Voting'),fill:'tmod',who:P,dur:2}
     ]},
     {type:'break',dur:15},
     {type:'session',id:'speech',k:'s_speech',title:agT('s_speech','Prepared Speech Session'),rows:[
@@ -4448,21 +4450,21 @@ const AgendaApp=(function(){
      slots are sorted — empty ones stay at the end so the blanks don't shuffle
      about, and an evaluator whose speaker is unbooked goes with them. */
   function speechOrder(m){
-    const spk=[],ev=[];
+    const spk=[],ev=[],dur=[];
     for(const s of slotListFor(m)){
       const nm=s.role.name.trim();
       const a=(m.assignments||{})[s.key];
       const who=(a&&a.memberId&&memberById(a.memberId))||null;
-      if(/^speaker$/i.test(nm))spk.push(who);
+      if(/^speaker$/i.test(nm)){ spk.push(who); dur.push(who&&a.durationMin||null); }
       else if(/^(speech )?evaluator$/i.test(nm))ev.push(who);
     }
-    const pairs=spk.map((sp,i)=>({sp,ev:i<ev.length?ev[i]:null}));
+    const pairs=spk.map((sp,i)=>({sp,dur:dur[i],ev:i<ev.length?ev[i]:null}));
     const filled=pairs.filter(p=>p.sp),blanks=pairs.filter(p=>!p.sp);
     if(juniorFirstOn)filled.sort((a,b)=>juniorFirst(a.sp,b.sp));
     const ordered=[...filled,...blanks];
     const nameOf=x=>x?tmName(x):null;
     /* any evaluator slot past the last speaker slot keeps its own place */
-    return {spk:ordered.map(p=>nameOf(p.sp)),
+    return {spk:ordered.map(p=>nameOf(p.sp)),spkDur:ordered.map(p=>p.dur),
             ev:[...ordered.map(p=>nameOf(p.ev)),...ev.slice(spk.length).map(nameOf)]};
   }
   function roleMap(m){
@@ -4471,7 +4473,7 @@ const AgendaApp=(function(){
       saa:oneD(m,/sergeant|saa/i),po:oneD(m,/presiding|president/i),
       tmod:oneD(m,/toastmaster of the day|^tmod$/i),ttm:oneD(m,/table topics master/i),
       ge:oneD(m,/general evaluator/i),tte:oneD(m,/table topics evaluator/i),
-      spk:speech.spk,eval:speech.ev,
+      spk:speech.spk,spkDur:speech.spkDur,eval:speech.ev,
       timer:oneD(m,/^timer$/i),vc:oneD(m,/vote counter/i),gram:oneD(m,/grammarian/i),
       al:oneD(m,/active listener/i),ah:oneD(m,/ah[- ]?counter/i),jm:oneD(m,/joke/i),
       cam:oneD(m,/camera/i),edu:oneD(m,/educational session speaker/i)
@@ -5191,7 +5193,17 @@ const AgendaApp=(function(){
     let si=0,ei=0;
     for(const b of blocks){ if(b.type==='break')continue;
       for(const r of b.rows){
-        if(r.fill==='spk'){ if(map.spk[si])r.who=map.spk[si]; si++; }
+        if(r.fill==='spk'){
+          if(map.spk[si])r.who=map.spk[si];
+          /* a long-format booking (⏱ 15m) carries its length onto the sheet —
+             it used to fill the name only and print a standard 5–7 slot.
+             autoDur marks a length the booking set, so a later standard
+             booking in that row goes back to 5–7; a hand-set custom stays. */
+          const bd=(map.spkDur||[])[si];
+          if(bd){ r.preset='custom'; r.dur=bd; r.autoDur=bd; r.autoMode=undefined; }
+          else if(r.autoDur){ r.preset='std'; r.dur=AG_PRESETS.std.dur; delete r.autoDur; r.autoMode=undefined; }
+          si++;
+        }
         else if(r.fill==='eval'){ const n=r.n!=null?r.n:ei; if(map.eval[n])r.who=map.eval[n]; ei++; }
         /* composite Q&A line: only rewritten once a session speaker is booked,
            so a hand-typed guest name is never clobbered by a blank */
@@ -5200,6 +5212,7 @@ const AgendaApp=(function(){
       }
     }
     document.querySelectorAll('#agSheet [data-sup]').forEach(el=>{ const v=map[el.dataset.sup]; if(v)el.innerText=v; });
+    placeSupRoles(m);
     if(m.theme)g('agTheme').innerText=m.theme;
     if(m.wod&&m.wod.word)g('agWodWord').innerText='“'+m.wod.word.replace(/^[\s"“”']+|[\s"“”']+$/g,'')+'”';
     if(m.wod&&(m.wod.def||m.wod.sent)){
@@ -5225,6 +5238,24 @@ const AgendaApp=(function(){
       });
     }
   }
+  /* The Supporting Roles panel is fixed markup, so a role the club removed
+     (Active Listener and Joke Master, Oct 2026) kept showing as "TBD".
+     A box now shows only while the club has that role — or the meeting
+     actually booked someone in it (an older meeting's sheet). Boxes are
+     HIDDEN, never removed: their text is saved by position (staticEditables),
+     and dropping one shifts every saved agenda by one place. The 😄 toolbar
+     button follows the Joke Master role the same way. */
+  const SUP_RE={timer:/^timer$/i,vc:/vote counter/i,gram:/grammarian/i,al:/active listener/i,
+                ah:/ah[- ]?counter/i,jm:/joke/i,cam:/camera/i};
+  function placeSupRoles(m){
+    const map=m?roleMap(m):{};
+    const has=k=>SUP_RE[k]&&state.settings.roles.some(r=>SUP_RE[k].test(String(r.name).trim()));
+    document.querySelectorAll('#agSheet [data-sup]').forEach(el=>{
+      const k=el.dataset.sup;
+      el.parentElement.style.display=(!SUP_RE[k]||has(k)||map[k])?'':'none';
+    });
+    const jb=g('agJoke'); if(jb)jb.style.display=has('jm')?'':'none';
+  }
   function staticEditables(){
     /* saved as a POSITIONAL array — inserting a new editable mid-order shifts
        every older agenda's restore by one (the Camera Master field did exactly
@@ -5238,7 +5269,7 @@ const AgendaApp=(function(){
     return {
       blocks:blocks.map(b=>b.type==='break'?{type:'break',dur:b.dur,moved:b.moved}
         :{type:b.type,id:b.id,k:b.k,_pk:b._pk,title:b.title,removable:b.removable,
-          rows:b.rows.map(r=>({kind:r.kind,n:r.n,k:r.k,fill:r.fill,act:r.act,label:r.label,introRow:r.introRow,who:r.who,dur:r.dur,preset:r.preset,autoMode:r.autoMode,lights:[...(r.lights||['','',''])]}))}),
+          rows:b.rows.map(r=>({kind:r.kind,n:r.n,k:r.k,fill:r.fill,act:r.act,label:r.label,introRow:r.introRow,who:r.who,dur:r.dur,preset:r.preset,autoDur:r.autoDur,autoMode:r.autoMode,lights:[...(r.lights||['','',''])]}))}),
       inputs:{date:g('agDate').value,start:g('agStart').value,no:g('agNo').value,
               buf:g('agBuf').value,bufE:g('agBufE').value,bufO:g('agBufO').value,
               tt:g('agTT').checked,sp:g('agSp').checked,
@@ -5566,6 +5597,11 @@ const AgendaApp=(function(){
       if(r.k==='r_eduTalk')r.fill='edu';
       if(r.k==='r_eduQa')r.fill='eduQa';
     }
+    /* sheets (and the standard layout) saved before the Table Topics report
+       row carried the TMOD: give it the fill key and the booked name now */
+    const tmodName=m&&roleMap(m).tmod;
+    for(const b of blocks)if(b.k==='s_tt')for(const r of b.rows)
+      if(r.k==='r_timer'&&!r.fill){ r.fill='tmod'; if(tmodName)r.who=tmodName; }
     applyAgAssets();
     if(agAssets===null)loadAgAssets();
     showTT=g('agTT').checked; showSpeech=g('agSp').checked;
@@ -5580,6 +5616,7 @@ const AgendaApp=(function(){
     sheetTheme=g('agTheme2').value; applyTheme();
     placeIntroRow(); placeTTEvalRow(); placeSpeakathonTmodRow();
     g('agChipSpk').style.display=(!showTT&&showSpeech)?'inline-block':'none';
+    placeSupRoles(m);
     agRender(); updateDates();
     agBase=agClone(collectAgState());   /* what this screen loaded — see saveAgNow */
     /* agRender queues a save; merely OPENING a saved sheet must not write it
