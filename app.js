@@ -624,7 +624,18 @@ function slotListFor(m){
   if(m&&eduOn(m))out.push({key:'edu|0',role:EDU_ROLE,label:EDU_ROLE.name});
   return out;
 }
-function roleNameById(id){ if(id==='edu')return EDU_ROLE.name; const r=state.settings.roles.find(r=>r.id===id); return r?r.name:'(removed role)'; }
+/* A removed role's bookings stay in the database, so past meetings still
+   need its NAME — the history matrix, the review cards and the points
+   (gameRoleKey matches by name; "(removed role)" scored 0, which is how
+   Active Listener and Joke Master lost their points on 2026-10-10).
+   roleDel records the name in settings.retiredRoles; the club's original
+   set covers roles removed before that existed. */
+function roleNameById(id){
+  if(id==='edu')return EDU_ROLE.name;
+  const r=state.settings.roles.find(r=>r.id===id); if(r)return r.name;
+  const old=(state.settings.retiredRoles||{})[id]||(rtcRoleSet().find(x=>x.id===id)||{}).name;
+  return old||'(removed role)';
+}
 function memberById(id){ return state.members.find(m=>m.id===id); }
 const UNTRACKED_ROLES=['saa','po'];   // standing roles — booked and on agendas, but not counted as history
 function meetingOutcomes(m){
@@ -4182,7 +4193,10 @@ function roleEdit(id,k,v){
 }
 function roleDel(id){
   const r=state.settings.roles.find(x=>x.id===id); if(!r)return;
-  if(!confirm('Remove the role "'+r.name+'" from all meetings?'))return;
+  if(!confirm('Remove the role "'+r.name+'" from all meetings?\n\nPast meetings keep it — history and points still count it.'))return;
+  /* remember the name for past bookings (see roleNameById) */
+  state.settings.retiredRoles={...(state.settings.retiredRoles||{}),[id]:r.name}; S.settings=state.settings;
+  saveSettingsFields(['retiredRoles'],{retiredRoles:[id]});
   mutateRoles(roles=>{
     const i=roles.findIndex(x=>x.id===id); if(i<0)return false;
     roles.splice(i,1);
