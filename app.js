@@ -124,6 +124,19 @@ function appDialog({msg,ok='OK',cancel='Cancel',input=null}){
     const f=inp||ov.querySelector('[data-a="1"]'); f.focus(); if(inp)inp.select();
   });
 }
+/* A friend's Table Topics practice tool (random topic, timer lights,
+   feedback on fillers / pace / structure). Linked, never embedded: it opens
+   in its own tab, so nothing of it loads with the app — members' phones stay
+   as light as ever. */
+const PRACTICE_TOOL_URL='https://riseaboveandbelieve.netlify.app';
+function practiceToolHtml(){
+  return `<div class="card" style="margin-top:14px">
+    <h3 style="margin:0 0 4px">🎤 Practise Table Topics</h3>
+    <p class="small muted" style="margin:0 0 10px">Draw a random topic, speak to the timing lights, and get feedback on fillers, pace and structure. Your recordings stay on your phone.</p>
+    <a class="btn linkbtn" href="${PRACTICE_TOOL_URL}" target="_blank" rel="noopener">Open the practice tool ↗</a>
+    <p class="small muted" style="margin:6px 0 0">Opens in a new tab. The first time, it downloads about 77 MB — use Wi-Fi.</p>
+  </div>`;
+}
 function appConfirm(msg,ok,cancel){ return appDialog({msg,ok,cancel}); }
 function appPrompt(msg,def){ return appDialog({msg,input:def==null?'':String(def)}); }
 function rtcRoleSet(){
@@ -924,8 +937,8 @@ function render(){
   else if(tab==='members')main.innerHTML=viewMembers();
   else if(tab==='dcp')main.innerHTML=viewDCP();
   else if(tab==='settings')main.innerHTML=viewSettings();
-  else if(tab==='book')main.innerHTML=openVoteCardsHtml()+congratsHtml()+noticesHtml()+winnersBoardHtml()+viewBook();   /* an open ballot comes first — nothing to scroll past */
-  else if(tab==='me')main.innerHTML=congratsHtml()+noticesHtml()+viewMe();
+  else if(tab==='book')main.innerHTML=openVoteCardsHtml()+congratsHtml()+noticesHtml()+winnersBoardHtml()+viewBook()+practiceToolHtml();   /* an open ballot comes first — nothing to scroll past */
+  else if(tab==='me')main.innerHTML=congratsHtml()+noticesHtml()+viewMe()+practiceToolHtml();
   else if(tab==='practice')main.innerHTML=viewPractice();
   else if(tab==='points')main.innerHTML=viewPoints();
   putScroll(keepScroll);

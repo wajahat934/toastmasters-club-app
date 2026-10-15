@@ -385,3 +385,7 @@ details.mem .body{padding:12px 16px}
 .appdlg-btns{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
 .appdlg-btns .btn{min-height:44px;min-width:96px;font-size:1rem}
 @media (max-width:520px){ .appdlg-btns .btn{flex:1} }
+
+/* a link that looks like the app's main button (the practice-tool card) */
+a.btn.linkbtn{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;
+  background:var(--accent);color:var(--accent-ink);border-radius:6px;font-weight:600;font-size:1rem;text-decoration:none}

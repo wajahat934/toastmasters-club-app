@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=126**.
+   every deploy or browsers serve the old `app.js`. Currently **v=127**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-10-02
 
-**Live at v126, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v127, repo clean, nothing half-built.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **How to work on this app (each rule exists because breaking it once hurt the club):**
@@ -162,6 +162,14 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Added 2026-10-15 — link to a Table Topics practice tool (v127)
+
+A friend's tool, https://riseaboveandbelieve.netlify.app (random topic, timing lights, feedback
+on fillers/pace/structure; recordings stay on the device; ~77 MB on first use). LINKED, never
+embedded: `practiceToolHtml()` card ("🎤 Practise Table Topics", `PRACTICE_TOOL_URL`) at the bottom
+of the member Book tab and of My Profile (so officers have it), `target=_blank rel=noopener`,
+styled with `a.btn.linkbtn`. Nothing of the tool loads with the app.
 
 ## Changed 2026-10-11 — the app's own confirm/prompt for members (v126)
 
