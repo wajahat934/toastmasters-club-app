@@ -2547,6 +2547,7 @@ function autoFillStanding(){
     for(const m of ms){
       if(m.date<t)continue;
       if(m.assignments[key]&&m.assignments[key].memberId)continue;
+      if(slotBlocked(m,key))continue;   /* an officer-reserved slot (a locked joint meeting) stays empty */
       S.assignments.push({meeting_id:m.id,slot_key:key,profile_id:pid,status:'booked',actual_role:null});
       sync(api.adminAssign(m.id,key,pid));
       changed=true;
