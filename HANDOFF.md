@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=127**.
+   every deploy or browsers serve the old `app.js`. Currently **v=128**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-10-02
 
-**Live at v127, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v128, repo clean, nothing half-built.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **How to work on this app (each rule exists because breaking it once hurt the club):**
@@ -162,6 +162,20 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Added 2026-10-25 — shift bookings forward when a meeting turns special (v128)
+
+31 Oct 2026 became a joint meeting (it replaces the Dec 12 joint meeting, which turns routine).
+"⏭ Shift bookings…" on each officer meeting card opens `shiftPanelHtml` at the top of Roles &
+Meetings: tick the later meetings that should take bookings (leave Urdu / education / contest
+days unticked), preview "A → B → C", optional lock of every slot on the start meeting.
+`shiftRun` works from the END of the chain backwards: a booking keeps its slot key if free, else
+any free slot of the same role, else it STAYS and is reported (never deleted); booked_at and
+duration_min travel; theme follows the TMOD, WOD the Grammarian; DCP plan rows on those dates are
+remapped; gap clashes listed; `snapshotBookings` → one ↩ Undo restores bookings (not themes /
+lock / plan). Planned use: Oct 31 → Nov 7 → Nov 28 → Dec 5 → Dec 12, lock Oct 31.
+Also: `autoFillStanding` now skips officer-reserved (🚫) slots — it would have re-filled SAA/PO
+on a locked meeting.
 
 ## Added 2026-10-15 — link to a Table Topics practice tool (v127)
 

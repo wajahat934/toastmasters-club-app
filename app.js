@@ -2569,7 +2569,8 @@ function viewSchedule(){
   let html=`<h2>Next ${up.length} meeting${up.length===1?'':'s'} — book roles</h2>
   <p class="small muted" style="margin:-6px 0 10px">Members see the next ${MEMBER_HORIZON} of these; you see further ahead so bookings can be moved between meetings.</p>
   ${lastMove?`<div class="warnline">⏩ Moved <b>${esc(lastMove.label)}</b> forward.
-    <button class="btn ghost small" onclick="undoMove()">↩ Undo</button></div>`:''}`;
+    <button class="btn ghost small" onclick="undoMove()">↩ Undo</button></div>`:''}
+  ${shiftPanelHtml()}`;
   for(const m of up)html+=meetingBookingCard(m);
   const needReview=pastMeetings().filter(m=>!m.reviewed);
   html+=`<h2>Past meetings — confirm what happened</h2>
@@ -2616,6 +2617,7 @@ function meetingBookingCard(m){
       <button class="btn ghost small" onclick="copyOpenRoles('${m.id}')" title="Copy a WhatsApp message listing this meeting's open roles">📋 Open roles</button>
       <button class="btn ghost small" onclick="copyRolePlayers('${m.id}')" title="Copy a WhatsApp message listing who has which role, with speakers asked to send their evaluation forms">📣 Role list</button>
       <button class="btn ghost small" onclick="cancelMeeting('${m.id}')">Cancel meeting</button>
+      <button class="btn ghost small" onclick="shiftOpen('${m.id}')" title="This meeting becomes a special one: move its bookings forward to later meetings">⏭ Shift bookings…</button>
     </div>
     <div class="row small" style="margin-top:8px;padding:6px 10px;background:var(--surface2);border:1px solid var(--line);border-radius:8px">
       <span class="muted">This meeting:</span>
@@ -2900,6 +2902,93 @@ function unbookLocal(mid,key){
    booking table rather than trying to retrace the individual hops. */
 let lastMove=null;
 const asgKey=a=>a.meeting_id+'|'+a.slot_key;
+/* ---- Shift bookings forward (a meeting turns special) ----
+   Oct 2026: the 31 Oct meeting became a joint meeting. Its bookings move to
+   the next meeting the officer ticks, that meeting's move to the next ticked
+   one, and so on — special days (Urdu, education, contests) are simply left
+   unticked, so they keep their own bookings. The LAST ticked meeting keeps
+   its own bookings and takes the incoming ones into free slots.
+   Worked from the end backwards, so every meeting has emptied before it
+   receives. A booking keeps its slot when free, else takes any free slot of
+   the same role; if none, it STAYS where it was and is reported — nothing
+   is ever deleted. booked_at (give-way order) and a long speech's minutes
+   travel with it; the theme follows the TMOD and the Word of the Day the
+   Grammarian; DCP plan rows on those dates move too. One ↩ Undo restores
+   the bookings. */
+let shiftStart=null, shiftPick=new Set(), shiftLock=true;
+function shiftOpen(mid){ shiftStart=mid; shiftPick=new Set(); shiftLock=true; render(); window.scrollTo(0,0); }
+function shiftClose(){ shiftStart=null; render(); }
+function shiftToggle(mid,on){ if(on)shiftPick.add(mid); else shiftPick.delete(mid); render(); }
+function shiftLockToggle(on){ shiftLock=on; }
+function shiftChain(){
+  const start=state.meetings.find(m=>m.id===shiftStart); if(!start)return [];
+  return [start,...state.meetings.filter(m=>!m.cancelled&&m.date>start.date&&shiftPick.has(m.id)).sort((a,b)=>a.date<b.date?-1:1)];
+}
+function shiftPanelHtml(){
+  const start=state.meetings.find(m=>m.id===shiftStart); if(!start)return '';
+  const later=S.meetings.filter(m=>!m.cancelled&&m.date>start.date).sort((a,b)=>a.date<b.date?-1:1).slice(0,12)
+    .map(x=>state.meetings.find(m=>m.id===x.id)).filter(Boolean);
+  const n=m=>Object.values(m.assignments||{}).filter(a=>a&&a.memberId).length;
+  const chain=shiftChain();
+  return `<div class="card" style="border-color:var(--gold)">
+    <div class="row"><h3 class="grow" style="margin:0">⏭ Shift bookings forward from ${fmtDate(start.date)}</h3>
+      <button class="btn ghost small" onclick="shiftClose()">Close</button></div>
+    <p class="small muted">Tick the meetings that should take bookings, in order. Leave special meetings (Urdu, education, contests) unticked — they keep their own bookings. The last ticked meeting keeps its bookings and takes the incoming ones into free slots.</p>
+    <div style="display:grid;gap:4px;margin:8px 0">
+      ${later.map(m=>`<label class="small" style="display:flex;gap:8px;align-items:center">
+        <input type="checkbox" ${shiftPick.has(m.id)?'checked':''} onchange="shiftToggle('${m.id}',this.checked)">
+        <b>${fmtDate(m.date)}</b> <span class="muted">· ${n(m)} booked${m.theme?' · '+esc(m.theme):''}${ttOn(m)?'':' · Speakathon'}</span></label>`).join('')}
+    </div>
+    <div class="small" style="margin:6px 0"><b>Bookings move:</b> ${chain.length>1?chain.map(m=>fmtDate(m.date).replace(/, \d{4}$/,'')).join(' → '):'<span class="muted">tick at least one meeting</span>'}</div>
+    <label class="small" style="display:flex;gap:8px;align-items:center"><input type="checkbox" ${shiftLock?'checked':''} onchange="shiftLockToggle(this.checked)">
+      Then lock every slot on ${fmtDate(start.date)} (🚫 reserved — open roles one by one later)</label>
+    <button class="btn" style="margin-top:10px" ${chain.length>1?'':'disabled'} onclick="shiftRun()">Shift ${n(start)} booking${n(start)===1?'':'s'} forward…</button>
+  </div>`;
+}
+async function shiftRun(){
+  const chain=shiftChain(); if(chain.length<2)return;
+  const total=chain.slice(0,-1).reduce((s,m)=>s+Object.values(m.assignments||{}).filter(a=>a&&a.memberId).length,0);
+  if(!await appConfirm(`Shift ${total} booking${total===1?'':'s'} forward?\n\n${chain.map(m=>fmtDate(m.date)).join(' → ')}\n\nNothing is deleted: a booking with no free slot stays where it is and is listed. You can undo the bookings afterwards.`,'Shift bookings'))return;
+  snapshotBookings('the bookings from '+fmtDate(chain[0].date));
+  const moved=[],stayed=[],warn=[];
+  const yr=currentClubYear(), dateMap={};
+  for(let k=chain.length-2;k>=0;k--){
+    const src=chain[k], dst=chain[k+1];
+    dateMap[src.date]=dst.date;
+    const rows=S.assignments.filter(a=>a.meeting_id===src.id&&a.profile_id).map(a=>({...a}));
+    for(const r of rows){
+      const d=state.meetings.find(x=>x.id===dst.id);
+      const free=slotListFor(d).filter(s=>!((d.assignments||{})[s.key]||{}).memberId);
+      const to=(free.find(s=>s.key===r.slot_key)||free.find(s=>ridOf(s.key)===ridOf(r.slot_key))||{}).key;
+      const mem=memberById(r.profile_id);
+      if(!to){ stayed.push(`${mem?mem.name:'?'} — ${roleNameById(ridOf(r.slot_key))} stays on ${fmtDate(src.date)} (no free slot on ${fmtDate(dst.date)})`); continue; }
+      unbookLocal(src.id,r.slot_key);
+      bookLocal(dst.id,to,r.profile_id,r.booked_at);
+      if(r.duration_min){ const nr=S.assignments.find(a=>a.meeting_id===dst.id&&a.slot_key===to); if(nr)nr.duration_min=r.duration_min; sync(api.setAsg(dst.id,to,{duration_min:r.duration_min})); rebuild(); }
+      /* the theme belongs to the TMOD, the Word of the Day to the Grammarian */
+      if(ridOf(r.slot_key)==='tmod'){ const sr=S.meetings.find(x=>x.id===src.id),dr=S.meetings.find(x=>x.id===dst.id);
+        if(sr&&dr){ dr.theme=sr.theme||''; sr.theme=''; sync(api.updateMeeting(dst.id,{theme:dr.theme})); sync(api.updateMeeting(src.id,{theme:''})); } }
+      if(ridOf(r.slot_key)==='gram'){ const sr=S.meetings.find(x=>x.id===src.id),dr=S.meetings.find(x=>x.id===dst.id);
+        if(sr&&dr){ dr.wod=sr.wod||{}; sr.wod={}; sync(api.updateMeeting(dst.id,{wod:dr.wod})); sync(api.updateMeeting(src.id,{wod:{}})); } }
+      if(/^spk\|/.test(to)){ const g=gapConflict(r.profile_id,'spk',dst.date,dst.id); if(g)warn.push(`${mem?mem.name:'?'} now speaks ${fmtDate(dst.date)} and ${fmtDate(g.date)} — inside the 3-week gap`); }
+      moved.push(r);
+    }
+    rebuild();
+  }
+  /* the DCP plan follows its speakers */
+  const plan=dcpPlan(yr);
+  if(plan.some(p=>dateMap[p.date]))dcpPlanSave(yr,plan.map(p=>dateMap[p.date]?{...p,date:dateMap[p.date]}:{...p}));
+  if(shiftLock){
+    const st=state.meetings.find(x=>x.id===chain[0].id);
+    const keys=slotListFor(st).filter(s=>!((st.assignments||{})[s.key]||{}).memberId).map(s=>s.key);
+    st.config={...(st.config||{}),blockedSlots:keys}; await saveMeetingConfig(st);
+  }
+  shiftStart=null; rebuild(); render();
+  const msg=[`Moved ${moved.length} booking${moved.length===1?'':'s'} forward.${shiftLock?' '+fmtDate(chain[0].date)+' is locked.':''}`];
+  if(stayed.length)msg.push('Stayed where they were:\n• '+stayed.join('\n• '));
+  if(warn.length)msg.push('Check:\n• '+warn.join('\n• '));
+  await appDialog({msg:msg.join('\n\n'),cancel:null});
+}
 function snapshotBookings(label){
   /* the cancelled flags come too: undoing a cancel-and-carry that only put the
      bookings back would restore them onto a meeting still marked cancelled,
@@ -6353,7 +6442,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{shiftOpen,shiftClose,shiftToggle,shiftLockToggle,shiftRun,backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,
