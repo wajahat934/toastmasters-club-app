@@ -673,12 +673,52 @@ function speechFirstOn(m){
 function absentList(m){ return (m&&m.config&&m.config.absent)||[]; }
 function isAbsent(m,pid){ return absentList(m).includes(pid); }
 const EDU_ROLE={id:'edu',name:'Educational Session Speaker'};
+/* ---- extra people for a role in ONE meeting ----
+   Oct 2026 joint meeting: two Sergeants at Arms and three presidents. Stored
+   per meeting in config.extra {roleId:n}, so it adds real bookable slots
+   ("Sergeant at Arms 2") — "Fill from bookings" keeps the names, unlike
+   hand-typed agenda text. Speakers/evaluators keep their own − / ＋. */
+function extraFor(m,rid){ return Math.max(0,Number((((m||{}).config||{}).extra||{})[rid])||0); }
+function extraCtl(m,s){
+  const rid=ridOf(s.key);
+  if(rid==='spk'||rid==='eval'||rid==='edu')return '';
+  const r=state.settings.roles.find(x=>x.id===rid); if(!r)return '';
+  const base=r.count||1, total=base+extraFor(m,rid), idx=Number(s.key.split('|')[1]);
+  if(idx!==total-1)return '';   /* controls on the role's last slot only */
+  return ` <button class="btn ghost small" style="padding:0 6px" title="Add one more ${esc(r.name)} for this meeting" onclick="roleExtra('${m.id}','${rid}',1)">＋</button>`
+    +(idx>=base?` <button class="btn ghost small" style="padding:0 6px" title="Remove this extra ${esc(r.name)} slot" onclick="roleExtra('${m.id}','${rid}',-1)">−</button>`:'');
+}
+async function roleExtra(mid,rid,d){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  const r=state.settings.roles.find(x=>x.id===rid); if(!r)return;
+  const n=extraFor(m,rid)+d; if(n<0||n>5)return;
+  if(d<0){
+    const key=rid+'|'+((r.count||1)+n);
+    const a=(m.assignments||{})[key];
+    if(a&&a.memberId){
+      const mem=memberById(a.memberId);
+      if(!await appConfirm(`Remove the extra ${r.name} slot?\n\n${mem?mem.name:'Someone'} is booked in it and will be released.`,'Remove'))return;
+      unbookLocal(mid,key);
+    }
+    const bl=((m.config||{}).blockedSlots||[]).filter(k=>k!==key);
+    m.config={...(m.config||{}),blockedSlots:bl};
+  }else if(slotBlocked(m,rid+'|0')){
+    /* a locked meeting stays locked: the new slot is reserved like its first */
+    const key=rid+'|'+((r.count||1)+n-1);
+    m.config={...(m.config||{}),blockedSlots:[...new Set([...((m.config||{}).blockedSlots||[]),key])]};
+  }
+  m.config={...(m.config||{}),extra:{...((m.config||{}).extra||{}),[rid]:n}};
+  saveMeetingConfig(m);
+}
 function slotListFor(m){
   const out=[];
   for(const r of state.settings.roles){
     if(m&&!ttOn(m)&&(r.id==='ttm'||r.id==='tte'))continue;
     let count=r.count||1;
     if(m&&(r.id==='spk'||r.id==='eval'))count=speakersFor(m);
+    /* per-meeting extra people for a role (joint meeting: two SAAs, three
+       presidents) — officers add them with ＋ on the meeting card */
+    else if(m)count+=extraFor(m,r.id);
     for(let i=0;i<count;i++)out.push({key:r.id+'|'+i,role:r,label:(count>1?r.name+' '+(i+1):r.name)});
   }
   /* a 🎓-flagged meeting carries a bookable slot for its guest/session
@@ -2657,7 +2697,7 @@ function meetingBookingCard(m){
         const when=at?`booked ${new Date(at).toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}`
                      :'booking time not recorded yet';
         const blocked=slotBlocked(m,s.key);
-        return `<div class="slot"><label>${esc(s.label)}${(a&&(a.durationMin||0)>=LONG_MIN)?` <span class="pill other" title="long-format speech — one speaker slot fewer this meeting">⏱ ${a.durationMin}m</span>`:''}${blocked?` <span class="pill absent" title="Members cannot book this slot — you assign it from the dropdown">🚫 reserved</span>`:''}${isNext?` <span class="pill other" title="Booked last of the ${esc(roleNameById(rid))}s — gives way first">gives way</span>`:''}${canDefer?`
+        return `<div class="slot"><label>${esc(s.label)}${extraCtl(m,s)}${(a&&(a.durationMin||0)>=LONG_MIN)?` <span class="pill other" title="long-format speech — one speaker slot fewer this meeting">⏱ ${a.durationMin}m</span>`:''}${blocked?` <span class="pill absent" title="Members cannot book this slot — you assign it from the dropdown">🚫 reserved</span>`:''}${isNext?` <span class="pill other" title="Booked last of the ${esc(roleNameById(rid))}s — gives way first">gives way</span>`:''}${canDefer?`
             <button class="btn ghost small" style="float:right;padding:0 6px"
               title="Move to a later meeting — ${esc(when)}" onclick="deferBooking('${m.id}','${s.key}')">⏩</button>`:''}${!(a&&a.memberId)?`
             <button class="btn ghost small" style="float:right;padding:0 6px"
@@ -4514,6 +4554,7 @@ const AG_UR={
   /* activity rows */
   r_call:'اجلاس کا آغاز — ناظمِ انتظامات',
   r_welcome:'خیرمقدمی کلمات — صدرِ اجلاس',
+  r_poAddr:'صدارتی خطاب',
   r_tmod:'میزبانِ اجلاس',
   r_ttm:'فی البدیہہ تقاریر کے میزبان',
   r_tt:'فی البدیہہ تقاریر <span class="role-note">(فی مقرر ۱–۲ منٹ)</span>',
@@ -4650,6 +4691,7 @@ const AG_EN={};
     p_timerVc:'Timer &amp; Vote Counter',p_rolePlayers:'Role Players',p_everyone:'Everyone',
     p_tmod:'TMOD',p_guestSpk:'Guest Speaker — ____________',p_guestTmod:'Guest Speaker &amp; TMOD',
     r_tmodGe:'TMOD invites the General Evaluator',
+    r_poAddr:'Presidential Address',
     s_edu:'Educational Session',r_eduIntro:'Introduction of Guest Speaker',
     r_eduTalk:'Educational Session <span class="role-note">(topic)</span>',
     r_eduQa:'Q&amp;A &amp; Vote of Thanks',
@@ -4733,7 +4775,10 @@ const AgendaApp=(function(){
   function roleMap(m){
     const speech=speechOrder(m);
     return {
-      saa:oneD(m,/sergeant|saa/i),po:oneD(m,/presiding|president/i),
+      /* several SAAs share the one agenda line; extra Presiding Officers get
+         a Presidential Address line each (placePoRows) */
+      saa:bookedNames(m,/sergeant|saa/i).filter(Boolean).join(' &amp; ')||oneD(m,/sergeant|saa/i),
+      po:oneD(m,/presiding|president/i),poAll:bookedNames(m,/presiding|president/i).filter(Boolean),
       tmod:oneD(m,/toastmaster of the day|^tmod$/i),ttm:oneD(m,/table topics master/i),
       ge:oneD(m,/general evaluator/i),tte:oneD(m,/table topics evaluator/i),
       spk:speech.spk,spkDur:speech.spkDur,eval:speech.ev,
@@ -4939,6 +4984,23 @@ const AgendaApp=(function(){
      TMOD calls the General Evaluator to the stage: one row at the head of the
      Evaluation Session, present only while Table Topics is off. Tagged so it
      is removed again (and never duplicated) when the format changes. */
+  /* a meeting with extra Presiding Officers (joint meeting: each club's
+     president) gets one "Presidential Address" line per extra president,
+     right under the Welcome Note. Rebuilt on every fill from the bookings —
+     names come from the booked slots, a line's own minutes are kept. */
+  function placePoRows(m){
+    const names=bookedNames(m,/presiding|president/i).slice(1);
+    let host=null,at=-1;
+    const durs=[];
+    for(const b of blocks)if(b.rows){
+      for(const r of b.rows)if(r.k==='r_poAddr')durs.push(r.dur);
+      b.rows=b.rows.filter(r=>r.k!=='r_poAddr');
+      const i=b.rows.findIndex(r=>r.k==='r_welcome'); if(i>=0){ host=b; at=i; }
+    }
+    if(!host)return;
+    host.rows.splice(at+1,0,...names.map((n,i)=>({k:'r_poAddr',act:agT('r_poAddr','Presidential Address'),
+      who:n||agT('p_blank','TBD'),dur:durs[i]!=null?durs[i]:3})));
+  }
   function placeSpeakathonTmodRow(){
     const ev=blocks.find(b=>b.id==='eval'); if(!ev)return;
     const i=ev.rows.findIndex(r=>r.k==='r_tmodGe');
@@ -5444,6 +5506,7 @@ const AgendaApp=(function(){
     g('agSwap').checked=speechFirstOn(m); swapOrder=speechFirstOn(m);
     juniorFirstOn=g('agJr').checked;
     placeSpeakathonTmodRow();
+    placePoRows(m);
     g('agChipSpk').style.display=(!showTT&&g('agSp').checked)?'inline-block':'none';
     const map=roleMap(m);
     /* respect a meeting configured with no prepared speeches */
@@ -6443,7 +6506,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{shiftOpen,shiftClose,shiftToggle,shiftLockToggle,shiftRun,backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{roleExtra,shiftOpen,shiftClose,shiftToggle,shiftLockToggle,shiftRun,backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,
