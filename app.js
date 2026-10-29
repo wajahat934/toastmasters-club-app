@@ -4566,6 +4566,7 @@ const AG_UR={
   r_ge:'مجموعی تجزیہ کار',
   r_tmodGe:'میزبانِ اجلاس کی جانب سے مجموعی تجزیہ کار کی دعوت',
   r_feedback:'مہمانوں کی رائے و انعامات',
+  r_certs:'اسناد کی تقسیم', r_closing:'اختتامی خطاب و اظہارِ تشکر',
   r_photo:'گروپ تصویر 📸',
   r_eduIntro:'مہمان مقرر کا تعارف', r_eduTalk:'تعلیمی نشست <span class="role-note">(موضوع)</span>',
   r_eduQa:'سوال و جواب و اظہارِ تشکر',
@@ -4691,7 +4692,7 @@ const AG_EN={};
     p_timerVc:'Timer &amp; Vote Counter',p_rolePlayers:'Role Players',p_everyone:'Everyone',
     p_tmod:'TMOD',p_guestSpk:'Guest Speaker — ____________',p_guestTmod:'Guest Speaker &amp; TMOD',
     r_tmodGe:'TMOD invites the General Evaluator',
-    r_poAddr:'Presidential Address',
+    r_poAddr:'Presidential Address',r_certs:'Certificate Distribution',r_closing:'Closing Address &amp; Vote of Thanks',
     s_edu:'Educational Session',r_eduIntro:'Introduction of Guest Speaker',
     r_eduTalk:'Educational Session <span class="role-note">(topic)</span>',
     r_eduQa:'Q&amp;A &amp; Vote of Thanks',
@@ -4779,6 +4780,7 @@ const AgendaApp=(function(){
          a Presidential Address line each (placePoRows) */
       saa:bookedNames(m,/sergeant|saa/i).filter(Boolean).join(' &amp; ')||oneD(m,/sergeant|saa/i),
       po:oneD(m,/presiding|president/i),poAll:bookedNames(m,/presiding|president/i).filter(Boolean),
+      poJoined:bookedNames(m,/presiding|president/i).filter(Boolean).join(' &amp; ')||null,
       tmod:oneD(m,/toastmaster of the day|^tmod$/i),ttm:oneD(m,/table topics master/i),
       ge:oneD(m,/general evaluator/i),tte:oneD(m,/table topics evaluator/i),
       spk:speech.spk,spkDur:speech.spkDur,eval:speech.ev,
@@ -4827,6 +4829,7 @@ const AgendaApp=(function(){
         <label title="Run the Prepared Speech Session before Table Topics">🔁 Speeches first <input type="checkbox" id="agSwap"></label>
         <label title="Order the speakers most junior first, by Pathways level then projects done">🎓 Junior first <input type="checkbox" id="agJr" checked></label>
         <label title="Render this agenda in Urdu, right to left">اردو Urdu <input type="checkbox" id="agUr"></label>
+        <label title="Joint meeting with other clubs: joint banner on top, no meeting number, planner or mission; certificates by the presidents">🤝 Joint meeting <input type="checkbox" id="agJoint"></label>
         <label title="Transition minutes after each prepared speech">🚶 Speech buffer <input type="number" id="agBuf" value="1" min="0" step="0.5"></label>
         <label title="Transition minutes after each evaluation">🚶 Eval buffer <input type="number" id="agBufE" value="1" min="0" step="0.5"></label>
         <label title="Transition minutes after each item in the Opening Session">🚶 Opening buffer <input type="number" id="agBufO" value="0" min="0" step="0.5"></label>
@@ -4853,10 +4856,11 @@ const AgendaApp=(function(){
         <div>
           <h1 contenteditable="true" data-k="h_club">Rawalpindi Toastmasters Club</h1>
           <div class="sub" contenteditable="true" data-sub="1">Club No. 07247940 &nbsp;•&nbsp; District 122 &nbsp;•&nbsp; Area A9 &nbsp;•&nbsp; Division B</div>
+          <div class="jointhead" contenteditable="true"><div class="jt">Joint Meeting</div><div class="jc">Rawalpindi Toastmasters Club &nbsp;•&nbsp; ICAP Toastmasters Club &nbsp;•&nbsp; ICAP Executive Toastmasters Club</div></div>
         </div>
         <div class="meet-chips">
           <span class="mchip spk" id="agChipSpk">🎤 <span data-k="h_speakathon">SPEAKATHON</span></span>
-          <span class="mchip"><span data-k="h_meeting">Meeting</span> <b id="agChipNo">No. 351</b></span>
+          <span class="mchip nojoint"><span data-k="h_meeting">Meeting</span> <b id="agChipNo">No. 351</b></span>
           <span class="mchip" id="agChipDate"></span><br>
           <span class="mchip" id="agChipTime"></span>
           <span class="mchip" contenteditable="true" data-k="h_inperson">In-Person</span>
@@ -4895,7 +4899,7 @@ const AgendaApp=(function(){
             <div><b data-k="sup_cam">Camera Master</b><br><span contenteditable="true" data-sup="cam">TBD</span></div>
           </div>
         </div>
-        <div class="panel">
+        <div class="panel nojoint">
           <h3><span data-k="h_planner">Forward Planner</span> — <span id="agFpDate"></span></h3>
           <div class="pbody fp"><ul style="list-style:none;margin:0;padding:0">
             <li><b><span data-k="fp_tmod">TMOD</span>:</b> <span contenteditable="true" data-fp="tmod">—</span></li>
@@ -4904,7 +4908,7 @@ const AgendaApp=(function(){
             <li><b><span data-k="fp_ge">General Evaluator</span>:</b> <span contenteditable="true" data-fp="ge">—</span></li>
           </ul></div>
         </div>
-        <div class="panel bluehead">
+        <div class="panel bluehead nojoint">
           <h3 data-k="h_mission">Club Mission</h3>
           <div class="pbody mission" contenteditable="true" data-k="mission">
             We provide a supportive and positive learning experience in which members are
@@ -4988,6 +4992,34 @@ const AgendaApp=(function(){
      president) gets one "Presidential Address" line per extra president,
      right under the Welcome Note. Rebuilt on every fill from the bookings —
      names come from the booked slots, a line's own minutes are kept. */
+  /* 🤝 Joint meeting (Oct 2026, with the two ICAP clubs): a per-sheet tick.
+     The sheet gets class "joint": the editable joint banner replaces the club
+     name / number line, and the meeting number, Forward Planner and Club
+     Mission are hidden (CSS .nojoint — hidden, not removed, because the
+     mission text is saved by position). With rows=true (the tick changed),
+     the closing swaps "Feedback from Guests & Awards" for Certificate
+     Distribution (all presidents, from the bookings) + Closing Address & Vote
+     of Thanks; unticking puts the feedback line back. */
+  function applyJoint(rows){
+    const on=g('agJoint').checked;
+    const sheet=g('agSheet'); if(sheet)sheet.classList.toggle('joint',on);
+    if(!rows)return;
+    const aw=blocks.find(b=>b.id==='awards'||b.k==='s_awards'); if(!aw||!aw.rows)return;
+    const m=state.meetings.find(x=>x.id===mid), map=m?roleMap(m):{};
+    const P=agT('p_blank','TBD');
+    if(on){
+      if(aw.rows.some(r=>r.k==='r_certs'))return;
+      const i=aw.rows.findIndex(r=>r.k==='r_feedback');
+      aw.rows.splice(i<0?0:i,i<0?0:1,
+        {k:'r_certs',act:agT('r_certs','Certificate Distribution'),fill:'poJoined',who:map.poJoined||P,dur:5},
+        {k:'r_closing',act:agT('r_closing','Closing Address &amp; Vote of Thanks'),who:'TM Fazal',dur:5});
+    }else{
+      const i=aw.rows.findIndex(r=>r.k==='r_certs'||r.k==='r_closing'); if(i<0)return;
+      aw.rows=aw.rows.filter(r=>r.k!=='r_certs'&&r.k!=='r_closing');
+      if(!aw.rows.some(r=>r.k==='r_feedback'))
+        aw.rows.splice(i,0,{k:'r_feedback',act:agT('r_feedback','Feedback from Guests &amp; Awards'),fill:'po',who:map.po||P,dur:5});
+    }
+  }
   function placePoRows(m){
     const names=bookedNames(m,/presiding|president/i).slice(1);
     let host=null,at=-1;
@@ -5589,7 +5621,7 @@ const AgendaApp=(function(){
        shipped are excluded here and persisted under their own keys instead.
        Any future editable must do the same, never join this list. */
     return [...document.querySelectorAll('#agSheet [contenteditable]')]
-      .filter(el=>!el.closest('#agBody')&&el.dataset.sup!=='cam');
+      .filter(el=>!el.closest('#agBody')&&el.dataset.sup!=='cam'&&!el.closest('.jointhead'));
   }
   function collectAgState(){
     return {
@@ -5599,9 +5631,11 @@ const AgendaApp=(function(){
       inputs:{date:g('agDate').value,start:g('agStart').value,no:g('agNo').value,
               buf:g('agBuf').value,bufE:g('agBufE').value,bufO:g('agBufO').value,
               tt:g('agTT').checked,sp:g('agSp').checked,
-              swap:g('agSwap').checked,jr:g('agJr').checked,urdu:g('agUr').checked,theme:g('agTheme2').value},
+              swap:g('agSwap').checked,jr:g('agJr').checked,urdu:g('agUr').checked,theme:g('agTheme2').value,
+              joint:g('agJoint').checked},
       texts:staticEditables().map(el=>el.innerHTML),
       camText:(document.querySelector('#agSheet [data-sup="cam"]')||{innerHTML:null}).innerHTML,
+      jointText:(document.querySelector('#agSheet .jointhead')||{innerHTML:null}).innerHTML,
       excom:[g('agExcomSec').classList.contains('nobar'),g('agExcomSec').classList.contains('nosec')],
       checks:{...agChecks}
     };
@@ -5632,10 +5666,12 @@ const AgendaApp=(function(){
       if(i.swap!=null)g('agSwap').checked=i.swap;
       if(i.jr!=null)g('agJr').checked=i.jr;
       if(i.urdu!=null){ g('agUr').checked=i.urdu; agUrdu=!!i.urdu; }
+      g('agJoint').checked=!!i.joint;
       if(i.theme!=null){ g('agTheme2').value=i.theme; sheetTheme=i.theme||''; }
       const els=staticEditables();
       (st.texts||[]).forEach((h,idx)=>{ if(els[idx]!=null&&h!=null)els[idx].innerHTML=h; });
       if(st.camText!=null){ const c=document.querySelector('#agSheet [data-sup="cam"]'); if(c)c.innerHTML=st.camText; }
+      if(st.jointText!=null){ const j=document.querySelector('#agSheet .jointhead'); if(j)j.innerHTML=st.jointText; }
       /* safety net: a mission box holding a member name or the ExCom line is
          shift damage, never a real mission — put the club mission back */
       const mis=document.querySelector('#agSheet [data-k="mission"]');
@@ -5672,6 +5708,7 @@ const AgendaApp=(function(){
     const lt=local.texts||[],bt=base.texts||[],st=server.texts||[];
     out.texts=(lt.length===bt.length&&lt.length===st.length)?lt.map((h,i)=>pick(h,bt[i],st[i])):lt;
     out.camText=pick(local.camText,base.camText,server.camText);
+    out.jointText=pick(local.jointText,base.jointText,server.jointText);
     out.excom=pick(local.excom,base.excom,server.excom);
     out.checks=pick(local.checks,base.checks,server.checks);
     return out;
@@ -5943,6 +5980,7 @@ const AgendaApp=(function(){
     placeIntroRow(); placeTTEvalRow(); placeSpeakathonTmodRow();
     g('agChipSpk').style.display=(!showTT&&showSpeech)?'inline-block':'none';
     placeSupRoles(m);
+    applyJoint(false);   /* banner / hidden panels follow the saved tick */
     agRender(); updateDates();
     agBase=agClone(collectAgState());   /* what this screen loaded — see saveAgNow */
     /* agRender queues a save; merely OPENING a saved sheet must not write it
@@ -6014,6 +6052,7 @@ const AgendaApp=(function(){
       toast('Standard layout applied');
     });
     g('agUr').addEventListener('change',()=>{ agUrdu=g('agUr').checked; applyLanguage(); agRender(); queueAgSave(); });
+    g('agJoint').addEventListener('change',()=>{ applyJoint(true); agRender(); queueAgSave(); });
     g('agAdd').addEventListener('click',()=>{
       const rows=speechBlock().rows;
       rows.splice(rows.length-1,0,{kind:'speaker',fill:'spk',who:'TBD',preset:'std',dur:7});

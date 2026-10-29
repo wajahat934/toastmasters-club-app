@@ -389,3 +389,11 @@ details.mem .body{padding:12px 16px}
 /* a link that looks like the app's main button (the practice-tool card) */
 a.btn.linkbtn{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;
   background:var(--accent);color:var(--accent-ink);border-radius:6px;font-weight:600;font-size:1rem;text-decoration:none}
+
+/* 🤝 joint-meeting agenda: joint banner instead of the club line; meeting No.,
+   Forward Planner and Club Mission hidden (applyJoint) */
+#agSheet .jointhead{display:none}
+#agSheet.joint .jointhead{display:block}
+#agSheet.joint .masthead h1,#agSheet.joint .masthead .sub,#agSheet.joint .nojoint{display:none !important}
+#agSheet .jointhead .jt{font-size:19px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:#fff}
+#agSheet .jointhead .jc{font-size:11px;font-weight:600;letter-spacing:.3px;opacity:.95;margin-top:3px}
