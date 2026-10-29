@@ -4792,9 +4792,20 @@ const AgendaApp=(function(){
   function nextMeetingAfter(dateS){
     return state.meetings.filter(x=>!x.cancelled&&x.date>dateS).sort((a,b)=>a.date<b.date?-1:1)[0]||null;
   }
-  function nextNo(){
+  /* The club numbers its own meetings: a 🤝 joint meeting is not one of
+     them, so its sheet never counts. And only sheets of EARLIER meetings
+     count — a sheet already made for a later meeting used to push this one's
+     number past it. */
+  function nextNo(m){
     let mx=350;
-    for(const k in (state.agendas||{})){ const n=Number(((state.agendas[k]||{}).inputs||{}).no); if(n>mx)mx=n; }
+    const before=m?m.date:'9999';
+    for(const k in (state.agendas||{})){
+      const ag=state.agendas[k]||{}, i=ag.inputs||{};
+      if(i.joint||i.theme==='joint')continue;
+      const mt=state.meetings.find(x=>x.id===k);
+      if(mt&&mt.date>=before)continue;
+      const n=Number(i.no); if(n>mx)mx=n;
+    }
     return mx+1;
   }
   function meetingOptions(){
@@ -5861,7 +5872,8 @@ const AgendaApp=(function(){
     savedTitle=document.title;
     const v=g('agDate').value; let datePart='';
     if(v){ const [y,m,d]=v.split('-').map(Number); datePart=`${String(d).padStart(2,'0')}${MONTHS[m-1]}${y}`; }
-    document.title=`RTC_Agenda_meeting no. ${g('agNo').value}_${datePart}`;
+    /* a joint meeting has no club number — say what it is in the file name */
+    document.title=g('agJoint').checked?`RTC_Joint_Meeting_${datePart}`:`RTC_Agenda_meeting no. ${g('agNo').value}_${datePart}`;
     if(!pxPerMm)measurePxPerMm();
     sheet.style.transform='';
     /* Converges on the page height from either side. It used to only ever
@@ -5967,7 +5979,7 @@ const AgendaApp=(function(){
     else{
       const tpl=agTemplate(); if(tpl)useTemplate(tpl);
       if(m)g('agDate').value=m.date;
-      const no=nextNo(); g('agNo').value=no; g('agChipNo').innerText='No. '+no;
+      const no=nextNo(m); g('agNo').value=no; g('agChipNo').innerText='No. '+no;
       applyBookings();
     }
     ensureEduBlock();   /* a 🎓-flagged meeting carries its block even on a saved sheet */

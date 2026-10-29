@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=134**.
+   every deploy or browsers serve the old `app.js`. Currently **v=135**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-10-02
 
-**Live at v134, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v135, repo clean, nothing half-built.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **How to work on this app (each rule exists because breaking it once hurt the club):**
@@ -176,6 +176,9 @@ key — never copy it into this repo.
 - v134: "TMOD invites the General Evaluator" (`r_tmodGe`) now also heads the Evaluation Session
   whenever the break sits right before it in the displayed order (not only at Speakathons);
   `moveBlock` re-runs `placeSpeakathonTmodRow` so moving the break adds/removes the line at once.
+- v135: `nextNo(m)` skips joint sheets (`inputs.joint` / theme `joint`) and counts only sheets of
+  EARLIER meetings; a joint sheet's PDF is named `RTC_Joint_Meeting_<date>`. Sheets already saved
+  keep their stored number — check the No. box on later sheets by hand.
 
 ## Added 2026-10-29 — 🤝 joint-meeting agenda (v131)
 
