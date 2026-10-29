@@ -4577,7 +4577,7 @@ const AG_UR={
   p_guestTmod:'مہمان مقرر و میزبانِ اجلاس',
   /* generated labels */
   l_speaker:'تیار شدہ مقرر', l_evaluator:'تقریر کے تجزیہ کار',
-  l_break:'☕ وقفہ و باہمی ملاقات', l_min:'منٹ',
+  l_break:'☕ باہمی ملاقات و ریفریشمنٹ', l_min:'منٹ',
   /* the changeover note under the table: the printed times leave room for
      people to walk to and from the lectern, which does not show in the Min
      column and made the sheet look as if it did not add up */
@@ -4697,7 +4697,7 @@ const AG_EN={};
     r_eduTalk:'Educational Session <span class="role-note">(topic)</span>',
     r_eduQa:'Q&amp;A &amp; Vote of Thanks',
     l_speaker:'Prepared Speaker',l_evaluator:'Speech Evaluator',
-    l_break:'☕ Networking Break',l_min:'min',
+    l_break:'☕ Networking &amp; Refreshments',l_min:'min',
     l_bufNote:'Changeover time is built into these timings',
     l_bufSpk:'{n} min after each speech',l_bufEval:'{n} min after each evaluation',
     l_bufOpen:'{n} min after each opening item',l_bufTotal:'{n} min in total',
@@ -4829,7 +4829,8 @@ const AgendaApp=(function(){
         <label title="Run the Prepared Speech Session before Table Topics">🔁 Speeches first <input type="checkbox" id="agSwap"></label>
         <label title="Order the speakers most junior first, by Pathways level then projects done">🎓 Junior first <input type="checkbox" id="agJr" checked></label>
         <label title="Render this agenda in Urdu, right to left">اردو Urdu <input type="checkbox" id="agUr"></label>
-        <label title="Joint meeting with other clubs: joint banner on top, no meeting number, planner or mission; certificates by the presidents">🤝 Joint meeting <input type="checkbox" id="agJoint"></label>
+        <!-- the joint layout is now chosen from the 🎨 template list; the box stays (hidden) as its saved state -->
+        <label style="display:none">🤝 Joint meeting <input type="checkbox" id="agJoint"></label>
         <label title="Transition minutes after each prepared speech">🚶 Speech buffer <input type="number" id="agBuf" value="1" min="0" step="0.5"></label>
         <label title="Transition minutes after each evaluation">🚶 Eval buffer <input type="number" id="agBufE" value="1" min="0" step="0.5"></label>
         <label title="Transition minutes after each item in the Opening Session">🚶 Opening buffer <input type="number" id="agBufO" value="0" min="0" step="0.5"></label>
@@ -4839,9 +4840,10 @@ const AgendaApp=(function(){
         <button class="btn ghost small" id="agEdu" style="display:none">🎓 Educational session</button>
         <button class="btn ghost small" id="agAddSession" title="A blank session you can name and fill — quiz, national anthem, anything">＋ Session</button>
         <button class="btn ghost small" id="agJoke" title="A one-minute Joke Master slot — move it anywhere with the arrows">😄 Joke Master</button>
-        <label title="Colour scheme for the printed sheet">🎨 <select id="agTheme2" style="width:auto">
+        <label title="Template for this agenda">🎨 <select id="agTheme2" style="width:auto">
           <option value="">Standard</option>
           <option value="pk">🇵🇰 Independence Day</option>
+          <option value="joint">🤝 Joint Meeting</option>
         </select></label>
         <button class="btn ghost small" id="agPkKit" style="display:none" title="Add the National Anthem, Milli Naghma and a Quiz in the usual places">🇵🇰 Independence Day layout</button>
         <button class="btn ghost small" id="agTplSave" title="Every NEW meeting's agenda will start from this sheet's timings, line order and start time">⭐ Save as standard layout</button>
@@ -5001,6 +5003,13 @@ const AgendaApp=(function(){
      Distribution (all presidents, from the bookings) + Closing Address & Vote
      of Thanks; unticking puts the feedback line back. */
   function applyJoint(rows){
+    /* the template list and the saved state agree: a sheet saved with the old
+       tick box (v131) shows "🤝 Joint Meeting" in the list */
+    const th=g('agTheme2');
+    if(th){
+      if(th.value==='joint')g('agJoint').checked=true;
+      else if(g('agJoint').checked&&!th.value){ th.value='joint'; sheetTheme='joint'; }
+    }
     const on=g('agJoint').checked;
     const sheet=g('agSheet'); if(sheet)sheet.classList.toggle('joint',on);
     if(!rows)return;
@@ -5142,7 +5151,7 @@ const AgendaApp=(function(){
   }
   function applyTheme(){
     const sheet=g('agSheet'); if(!sheet)return;
-    sheet.classList.remove('theme-pk');
+    sheet.classList.remove('theme-pk','theme-joint');
     if(sheetTheme)sheet.classList.add('theme-'+sheetTheme);
   }
   /* Drops the three Independence Day items into sensible places: the anthem
@@ -5256,7 +5265,9 @@ const AgendaApp=(function(){
     orderedBlocks().forEach(block=>{
       if(block.type==='break'){
         const tr=document.createElement('tr'); tr.className='break';
-        tr.innerHTML=`<td colspan="6">${agT('l_break','☕ Networking Break')} — <span class="bdur">${block.dur}</span> ${agT('l_min','min')} (<span class="bfrom"></span> – <span class="bto"></span>)</td>`;
+        /* the printed sheet shows just the words (club's call, Oct 2026); the
+           minutes stay editable on screen only and still count in the timings */
+        tr.innerHTML=`<td colspan="6">${agT('l_break','☕ Networking &amp; Refreshments')}<span class="no-print bmins"> · <span class="bdur">${block.dur}</span> ${agT('l_min','min')}</span></td>`;
         block._fromEl=tr.querySelector('.bfrom'); block._toEl=tr.querySelector('.bto');
         const durEl=tr.querySelector('.bdur');
         makeEditable(durEl,()=>{ block.dur=parseFloat(durEl.innerText)||0; updateTimes(); });
@@ -6029,7 +6040,12 @@ const AgendaApp=(function(){
     /* re-order needs the names refetched from the bookings, not just a redraw */
     g('agJr').addEventListener('change',()=>{ juniorFirstOn=g('agJr').checked; applyBookings(); agRender(); });
     g('agTheme2').addEventListener('change',()=>{
-      sheetTheme=g('agTheme2').value; applyTheme(); queueAgSave();
+      sheetTheme=g('agTheme2').value; applyTheme();
+      /* 🤝 Joint Meeting is a template: picking it (or leaving it) switches
+         the whole joint layout through the saved agJoint state */
+      const nowJoint=sheetTheme==='joint';
+      if(g('agJoint').checked!==nowJoint){ g('agJoint').checked=nowJoint; applyJoint(true); agRender(); }
+      queueAgSave();
       /* one control for the occasion: choosing the 🇵🇰 theme offers the
          layout items too (anthem, Milli Naghma, quiz) — the separate
          toolbar button is retired */
