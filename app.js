@@ -5042,10 +5042,16 @@ const AgendaApp=(function(){
     host.rows.splice(at+1,0,...names.map((n,i)=>({k:'r_poAddr',act:agT('r_poAddr','Presidential Address'),
       who:n||agT('p_blank','TBD'),dur:durs[i]!=null?durs[i]:3})));
   }
+  /* "TMOD invites the General Evaluator" heads the Evaluation Session when
+     the TMOD must hand over afresh: at a Speakathon, and (Oct 2026) whenever
+     the break sits right before the evaluations — the room comes back from
+     networking and the TMOD takes it into the GE's session. */
   function placeSpeakathonTmodRow(){
     const ev=blocks.find(b=>b.id==='eval'); if(!ev)return;
     const i=ev.rows.findIndex(r=>r.k==='r_tmodGe');
-    if(showTT){ if(i>=0)ev.rows.splice(i,1); return; }
+    const seen=orderedBlocks().filter(b=>b.type==='break'||!blockHidden(b));
+    const at=seen.indexOf(ev), afterBreak=at>0&&seen[at-1].type==='break';
+    if(showTT&&!afterBreak){ if(i>=0)ev.rows.splice(i,1); return; }
     if(i>=0)return;
     const mt=state.meetings.find(x=>x.id===mid);
     const who=(mt?roleMap(mt).tmod:null)||agT('p_blank','TBD');
@@ -5147,6 +5153,7 @@ const AgendaApp=(function(){
        next render, undoing the move a moment after it was made. */
     if(block.type==='break')block.moved=true;
     blocks.splice(j,0,blocks.splice(i,1)[0]);
+    placeSpeakathonTmodRow();   /* break now before / no longer before the evaluations */
     agRender();
   }
   function applyTheme(){
