@@ -4577,7 +4577,7 @@ const AG_UR={
   p_guestTmod:'مہمان مقرر و میزبانِ اجلاس',
   /* generated labels */
   l_speaker:'تیار شدہ مقرر', l_evaluator:'تقریر کے تجزیہ کار',
-  l_break:'☕ باہمی ملاقات و ریفریشمنٹ', l_min:'منٹ',
+  l_break:'☕ باہمی ملاقات و ریفریشمنٹ', l_min:'منٹ', l_end:'اجلاس کا اختتام',
   /* the changeover note under the table: the printed times leave room for
      people to walk to and from the lectern, which does not show in the Min
      column and made the sheet look as if it did not add up */
@@ -4697,7 +4697,7 @@ const AG_EN={};
     r_eduTalk:'Educational Session <span class="role-note">(topic)</span>',
     r_eduQa:'Q&amp;A &amp; Vote of Thanks',
     l_speaker:'Prepared Speaker',l_evaluator:'Speech Evaluator',
-    l_break:'☕ Networking &amp; Refreshments',l_min:'min',
+    l_break:'☕ Networking &amp; Refreshments',l_min:'min',l_end:'End of meeting',
     l_bufNote:'Changeover time is built into these timings',
     l_bufSpk:'{n} min after each speech',l_bufEval:'{n} min after each evaluation',
     l_bufOpen:'{n} min after each opening item',l_bufTotal:'{n} min in total',
@@ -5283,9 +5283,12 @@ const AgendaApp=(function(){
     orderedBlocks().forEach(block=>{
       if(block.type==='break'){
         const tr=document.createElement('tr'); tr.className='break';
-        /* the printed sheet shows just the words (club's call, Oct 2026); the
-           minutes stay editable on screen only and still count in the timings */
-        tr.innerHTML=`<td colspan="6"><span class="blabel">${block.label||agT('l_break','☕ Networking &amp; Refreshments')}</span><span class="no-print bmins"> · <span class="bdur">${block.dur}</span> ${agT('l_min','min')}</span></td>`;
+        /* words + its times, printed; the minutes stay editable on screen
+           only. When it is the last thing on the sheet (refreshments after
+           the closing), its end time IS the meeting's end — say so. */
+        const shown=orderedBlocks().filter(b=>b.type==='break'||!blockHidden(b));
+        const isLast=shown[shown.length-1]===block;
+        tr.innerHTML=`<td colspan="6"><span class="blabel">${block.label||agT('l_break','☕ Networking &amp; Refreshments')}</span> (<span class="bfrom"></span> – <span class="bto"></span>)${isLast?` · <span>${agT('l_end','End of meeting')}</span>`:''}<span class="no-print bmins"> · <span class="bdur">${block.dur}</span> ${agT('l_min','min')}</span></td>`;
         /* the wording is this meeting's own (click to edit); cleared = the
            standard words, which still follow the Urdu switch */
         const lblEl=tr.querySelector('.blabel');
