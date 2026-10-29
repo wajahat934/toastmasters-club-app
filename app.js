@@ -5267,7 +5267,11 @@ const AgendaApp=(function(){
         const tr=document.createElement('tr'); tr.className='break';
         /* the printed sheet shows just the words (club's call, Oct 2026); the
            minutes stay editable on screen only and still count in the timings */
-        tr.innerHTML=`<td colspan="6">${agT('l_break','☕ Networking &amp; Refreshments')}<span class="no-print bmins"> · <span class="bdur">${block.dur}</span> ${agT('l_min','min')}</span></td>`;
+        tr.innerHTML=`<td colspan="6"><span class="blabel">${block.label||agT('l_break','☕ Networking &amp; Refreshments')}</span><span class="no-print bmins"> · <span class="bdur">${block.dur}</span> ${agT('l_min','min')}</span></td>`;
+        /* the wording is this meeting's own (click to edit); cleared = the
+           standard words, which still follow the Urdu switch */
+        const lblEl=tr.querySelector('.blabel');
+        makeEditable(lblEl,()=>{ block.label=lblEl.innerText.trim()?lblEl.innerHTML:undefined; });
         block._fromEl=tr.querySelector('.bfrom'); block._toEl=tr.querySelector('.bto');
         const durEl=tr.querySelector('.bdur');
         makeEditable(durEl,()=>{ block.dur=parseFloat(durEl.innerText)||0; updateTimes(); });
@@ -5636,7 +5640,7 @@ const AgendaApp=(function(){
   }
   function collectAgState(){
     return {
-      blocks:blocks.map(b=>b.type==='break'?{type:'break',dur:b.dur,moved:b.moved}
+      blocks:blocks.map(b=>b.type==='break'?{type:'break',dur:b.dur,moved:b.moved,label:b.label}
         :{type:b.type,id:b.id,k:b.k,_pk:b._pk,title:b.title,removable:b.removable,
           rows:b.rows.map(r=>({kind:r.kind,n:r.n,k:r.k,fill:r.fill,act:r.act,label:r.label,introRow:r.introRow,who:r.who,dur:r.dur,preset:r.preset,autoDur:r.autoDur,autoMode:r.autoMode,lights:[...(r.lights||['','',''])]}))}),
       inputs:{date:g('agDate').value,start:g('agStart').value,no:g('agNo').value,
