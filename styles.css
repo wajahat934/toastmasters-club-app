@@ -1,23 +1,31 @@
 :root{
-  --bg:#EDF1F4; --surface:#FFFFFF; --surface2:#F6F9FB; --ink:#17242F; --muted:#5B6B77;
-  --line:#D6DEE4; --accent:#004165; --accent-ink:#FFFFFF; --accent-soft:#E1EAF1;
-  --gold:#C99A2E; --gold-soft:#F6ECD3; --maroon:#772432; --maroon-soft:#F5E4E7;
-  --good:#2E7D4F; --good-soft:#E2F0E8;
+  --bg:#F3F5F7; --surface:#FFFFFF; --surface2:#F7F9FA; --ink:#17242F; --muted:#556572;
+  --line:#DDE3E8; --accent:#004165; --accent-ink:#FFFFFF; --accent-soft:#E6EEF4;
+  --gold:#C99A2E; --gold-soft:#F8F0DC; --maroon:#772432; --maroon-soft:#F7E8EB;
+  --good:#2E7D4F; --good-soft:#E5F2EA;
+  /* the header stays Toastmasters blue with white text in BOTH modes — in dark
+     mode it used to take the pale link blue, which clashed with the page.
+     Buttons are their own token for the same reason: solid blue, white text. */
+  --head:#004165; --head2:#01598A; --head-ink:#FFFFFF;
+  --btn:#004165; --btn-ink:#FFFFFF;
+  --shadow:0 1px 3px rgba(23,36,47,.07);
   --serif:'Charter','Sitka Display',Cambria,Georgia,serif;
   --sans:'Seravek','Segoe UI',system-ui,-apple-system,sans-serif;
 }
 @media (prefers-color-scheme: dark){
   :root{
-    --bg:#0E161D; --surface:#18242F; --surface2:#121C25; --ink:#E6EDF2; --muted:#8FA1AE;
-    --line:#2B3B48; --accent:#7FB2D4; --accent-ink:#0E161D; --accent-soft:#1C3140;
-    --gold:#D9AE4B; --gold-soft:#33290F; --maroon:#C76B7B; --maroon-soft:#33191F;
-    --good:#5FB98A; --good-soft:#152A1E;
+    --bg:#161E26; --surface:#1F2A35; --surface2:#19232C; --ink:#E9EEF2; --muted:#A7B5C0;
+    --line:#32414E; --accent:#8FC3E8; --accent-ink:#10202C; --accent-soft:#233543;
+    --gold:#E3BC62; --gold-soft:#332C1A; --maroon:#E58C9B; --maroon-soft:#3A1F26;
+    --good:#6CC596; --good-soft:#18301F;
+    --btn:#2472AD; --btn-ink:#FFFFFF;
+    --shadow:0 1px 3px rgba(0,0,0,.25);
   }
 }
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--sans);margin:0;font-size:15px;line-height:1.45}
 .wrap{max-width:1080px;margin:0 auto;padding:0 20px 80px}
-header.app{background:var(--accent);color:var(--accent-ink);border-bottom:4px solid var(--gold)}
+header.app{background:linear-gradient(120deg,var(--head),var(--head2));color:var(--head-ink);border-bottom:3px solid #C99A2E}
 header.app .wrap{padding:22px 20px 14px}
 header.app h1{font-family:var(--serif);font-size:1.6rem;margin:0;letter-spacing:.01em;text-wrap:balance}
 header.app .sub{opacity:.75;font-size:.82rem;margin-top:2px;text-transform:uppercase;letter-spacing:.12em}
@@ -33,9 +41,9 @@ header.app{position:relative}
   header.app .userline #uName{flex:1 1 100%;text-align:right}
 }
 nav.tabs{display:flex;gap:4px;margin-top:16px;flex-wrap:wrap}
-nav.tabs button{background:transparent;border:none;color:var(--accent-ink);opacity:.7;padding:8px 14px;font:inherit;font-weight:600;cursor:pointer;border-radius:6px 6px 0 0;border-bottom:3px solid transparent}
+nav.tabs button{background:transparent;border:none;color:var(--head-ink);opacity:.8;padding:8px 14px;font:inherit;font-weight:600;cursor:pointer;border-radius:6px 6px 0 0;border-bottom:3px solid transparent}
 nav.tabs button:hover{opacity:1}
-nav.tabs button.on{opacity:1;border-bottom-color:var(--gold);background:rgba(255,255,255,.08)}
+nav.tabs button.on{opacity:1;border-bottom-color:#F2DF74;background:rgba(255,255,255,.12)}
 /* the rehearsal tab: set apart, dimmer and smaller, so a thumb reaching for a
    real tab mid-meeting doesn't land on it */
 /* forced onto a line of its own: when the bar wraps on a phone it would
@@ -52,7 +60,7 @@ nav.tabs button.practice.on{opacity:1;border-style:dashed;border-color:var(--gol
 .banner.practice-banner{background:var(--gold-soft);border:1.5px dashed var(--gold);font-size:.88rem}
 h2{font-family:var(--serif);font-size:1.25rem;margin:28px 0 12px}
 h3{font-size:.98rem;margin:0 0 8px}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:var(--shadow)}
 .card.sub{background:var(--surface2)}
 .muted{color:var(--muted)}
 .small{font-size:.83rem}
@@ -67,7 +75,7 @@ select,textarea,input[type=text],input[type=date],input[type=number],input[type=
 input[type=number]{width:70px}
 input[type=checkbox]{accent-color:var(--accent)}
 select:focus-visible,input:focus-visible,button:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
-button.btn{background:var(--accent);color:var(--accent-ink);border:none;border-radius:6px;padding:7px 14px;font:inherit;font-weight:600;cursor:pointer}
+button.btn{background:var(--btn);color:var(--btn-ink);border:none;border-radius:8px;padding:7px 14px;font:inherit;font-weight:600;cursor:pointer}
 button.btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--line)}
 button.btn.small{padding:4px 10px;font-size:.83rem}
 button.btn.danger{background:var(--maroon);color:#fff}
@@ -388,7 +396,7 @@ details.mem .body{padding:12px 16px}
 
 /* a link that looks like the app's main button (the practice-tool card) */
 a.btn.linkbtn{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;
-  background:var(--accent);color:var(--accent-ink);border-radius:6px;font-weight:600;font-size:1rem;text-decoration:none}
+  background:var(--btn);color:var(--btn-ink);border-radius:8px;font-weight:600;font-size:1rem;text-decoration:none}
 
 /* 🤝 joint-meeting agenda: joint banner instead of the club line; meeting No.,
    Forward Planner and Club Mission hidden (applyJoint) */
