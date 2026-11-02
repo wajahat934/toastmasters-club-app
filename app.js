@@ -3686,7 +3686,22 @@ function viewMembers(){
   const active=state.members.filter(m=>!m.archived&&(m.approved||!m.hasAccount));
   html+=notSeenLatelyHtml(active);
   if(!active.length)html+=`<div class="empty">No members yet.</div>`;
-  for(const mem of active)html+=memberCard(mem,h[mem.id]||{},abs[mem.id]||0);
+  /* RTC members first; people from other clubs (home_club set) fold away
+     under their own heading, grouped by club, so the roster reads as the
+     club's own list */
+  const own=active.filter(m=>!m.external), guests=active.filter(m=>m.external);
+  html+=`<h3 style="margin:14px 0 8px">RTC members <span class="muted small">(${own.length})</span></h3>`;
+  for(const mem of own)html+=memberCard(mem,h[mem.id]||{},abs[mem.id]||0);
+  if(guests.length){
+    const clubs={};
+    for(const g of guests){ const c=(g.homeClub||'other club').trim(); const k=c.toLowerCase(); (clubs[k]=clubs[k]||{name:c,list:[]}).list.push(g); }
+    const order=Object.keys(clubs).sort((a,b)=>(a==='other club')-(b==='other club')||a.localeCompare(b));
+    html+=`<details class="card sub" style="margin-top:14px" ${guestsOpen?'open':''} ontoggle="guestsToggle(this.open)">
+      <summary style="cursor:pointer"><b>Guests from other clubs</b> <span class="muted small">(${guests.length})</span></summary>
+      ${order.map(k=>`<h4 style="margin:12px 0 6px">${esc(clubs[k].name)} <span class="muted small">(${clubs[k].list.length})</span></h4>
+        ${clubs[k].list.map(mem=>memberCard(mem,h[mem.id]||{},abs[mem.id]||0)).join('')}`).join('')}
+    </details>`;
+  }
   const archived=state.members.filter(m=>m.archived);
   if(archived.length){
     html+=`<details class="card sub"><summary class="small" style="cursor:pointer">Deactivated (${archived.length})</summary>`+
@@ -3698,6 +3713,8 @@ function viewMembers(){
    held a role in a while. The cheapest retention tool a club has is the TMOD
    calling exactly these people before booking closes. External guests and
    absent-marked bookings do not count as being seen. */
+let guestsOpen=false;
+function guestsToggle(o){ guestsOpen=o; }
 const NOT_SEEN_WEEKS=6;
 function notSeenLatelyHtml(active){
   const t=todayStr();
@@ -6651,7 +6668,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{specialAdd,specialDel,roleExtra,shiftOpen,shiftClose,shiftToggle,shiftLockToggle,shiftRun,backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{guestsToggle,specialAdd,specialDel,roleExtra,shiftOpen,shiftClose,shiftToggle,shiftLockToggle,shiftRun,backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,
