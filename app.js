@@ -1129,7 +1129,7 @@ function noticesHtml(){
       const last=state.meetings.filter(m=>!m.cancelled&&m.date.slice(0,7)===ym).sort((a,b)=>a.date<b.date?1:-1)[0];
       const monthName=parseD(ym+'-01').toLocaleDateString(undefined,{month:'long'});
       const overdue=ym<cur;
-      html+=`<div class="banner" style="border-color:var(--maroon)"><strong>🍰 ${esc(monthName)} birthday cake${overdue?' — still to do':''}:</strong>
+      html+=`<div class="banner" style="background:var(--surface);border-color:var(--gold)"><strong>🍰 ${esc(monthName)} birthday cake${overdue?' — still to do':''}:</strong>
         ${born.map(x=>`<b>${esc(x.name)}</b> (${MD_MONTHS[Number(x.birthday.slice(0,2))-1]} ${Number(x.birthday.slice(3))})`).join(', ')}
         ${last?`— cake at the last meeting of the month, ${fmtDate(last.date)}.`:''}
         <button class="btn small" style="margin-left:8px" onclick="cakeDone('${ym}')">✓ Cake done</button></div>`;

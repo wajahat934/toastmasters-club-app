@@ -1,11 +1,11 @@
-/* The club's look (owner's pick, Nov 2026): white first, Toastmasters blue for
-   the header and buttons, traces of maroon as on the agenda, Happy Yellow on the
-   active tab. Always bright — no dark mode — so every member sees the same app;
+/* The club's look (owner's pick, Nov 2026): warm ivory page with white cards,
+   Toastmasters blue for the header and buttons, gold lines, traces of maroon as
+   on the agenda, Happy Yellow on the active tab. Always bright — no dark mode — so every member sees the same app;
    color-scheme:light keeps native pickers light on phones set to dark. */
 :root{
   color-scheme:light;
-  --bg:#FFFFFF; --surface:#FFFFFF; --surface2:#F7F9FA; --ink:#17242F; --muted:#556572;
-  --line:#DDE3E8; --accent:#004165; --accent-ink:#FFFFFF; --accent-soft:#E6EEF4;
+  --bg:#FBF8F1; --surface:#FFFFFF; --surface2:#F9F6EE; --ink:#17242F; --muted:#556572;
+  --line:#E6DFD1; --accent:#004165; --accent-ink:#FFFFFF; --accent-soft:#E6EEF4;
   --gold:#C99A2E; --gold-ink:#6B5B13; --gold-soft:#FBF6D5; --maroon:#772432; --maroon-soft:#F7E8EB;
   --good:#27704A; --good-soft:#E5F2EA;
   --head:#004165; --head2:#004165; --head-ink:#FFFFFF;
@@ -17,7 +17,7 @@
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--sans);margin:0;font-size:15px;line-height:1.45}
 .wrap{max-width:1080px;margin:0 auto;padding:0 20px 80px}
-header.app{background:linear-gradient(120deg,var(--head),var(--head2));color:var(--head-ink);border-bottom:3px solid var(--maroon)}
+header.app{background:linear-gradient(120deg,var(--head),var(--head2));color:var(--head-ink);border-bottom:3px solid var(--gold)}
 header.app .wrap{padding:22px 20px 14px}
 header.app h1{font-family:var(--serif);font-size:1.6rem;margin:0;letter-spacing:.01em;text-wrap:balance}
 header.app .sub{opacity:.75;font-size:.82rem;margin-top:2px;text-transform:uppercase;letter-spacing:.12em}
