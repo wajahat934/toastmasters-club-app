@@ -1,31 +1,23 @@
+/* The club's look (owner's pick, Nov 2026): white first, Toastmasters blue for
+   the header and buttons, traces of maroon as on the agenda, Happy Yellow on the
+   active tab. Always bright — no dark mode — so every member sees the same app;
+   color-scheme:light keeps native pickers light on phones set to dark. */
 :root{
-  --bg:#F3F5F7; --surface:#FFFFFF; --surface2:#F7F9FA; --ink:#17242F; --muted:#556572;
+  color-scheme:light;
+  --bg:#FFFFFF; --surface:#FFFFFF; --surface2:#F7F9FA; --ink:#17242F; --muted:#556572;
   --line:#DDE3E8; --accent:#004165; --accent-ink:#FFFFFF; --accent-soft:#E6EEF4;
-  --gold:#C99A2E; --gold-soft:#F8F0DC; --maroon:#772432; --maroon-soft:#F7E8EB;
-  --good:#2E7D4F; --good-soft:#E5F2EA;
-  /* the header stays Toastmasters blue with white text in BOTH modes — in dark
-     mode it used to take the pale link blue, which clashed with the page.
-     Buttons are their own token for the same reason: solid blue, white text. */
-  --head:#004165; --head2:#01598A; --head-ink:#FFFFFF;
+  --gold:#C99A2E; --gold-ink:#6B5B13; --gold-soft:#FBF6D5; --maroon:#772432; --maroon-soft:#F7E8EB;
+  --good:#27704A; --good-soft:#E5F2EA;
+  --head:#004165; --head2:#004165; --head-ink:#FFFFFF;
   --btn:#004165; --btn-ink:#FFFFFF;
   --shadow:0 1px 3px rgba(23,36,47,.07);
   --serif:'Charter','Sitka Display',Cambria,Georgia,serif;
   --sans:'Seravek','Segoe UI',system-ui,-apple-system,sans-serif;
 }
-@media (prefers-color-scheme: dark){
-  :root{
-    --bg:#161E26; --surface:#1F2A35; --surface2:#19232C; --ink:#E9EEF2; --muted:#A7B5C0;
-    --line:#32414E; --accent:#8FC3E8; --accent-ink:#10202C; --accent-soft:#233543;
-    --gold:#E3BC62; --gold-soft:#332C1A; --maroon:#E58C9B; --maroon-soft:#3A1F26;
-    --good:#6CC596; --good-soft:#18301F;
-    --btn:#2472AD; --btn-ink:#FFFFFF;
-    --shadow:0 1px 3px rgba(0,0,0,.25);
-  }
-}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--sans);margin:0;font-size:15px;line-height:1.45}
 .wrap{max-width:1080px;margin:0 auto;padding:0 20px 80px}
-header.app{background:linear-gradient(120deg,var(--head),var(--head2));color:var(--head-ink);border-bottom:3px solid #C99A2E}
+header.app{background:linear-gradient(120deg,var(--head),var(--head2));color:var(--head-ink);border-bottom:3px solid var(--maroon)}
 header.app .wrap{padding:22px 20px 14px}
 header.app h1{font-family:var(--serif);font-size:1.6rem;margin:0;letter-spacing:.01em;text-wrap:balance}
 header.app .sub{opacity:.75;font-size:.82rem;margin-top:2px;text-transform:uppercase;letter-spacing:.12em}
@@ -55,10 +47,10 @@ nav.tabs .tabbreak{flex-basis:100%;height:0;margin:0}
 nav.tabs button.practice{opacity:.45;font-size:.82rem;font-weight:500;padding:6px 10px;
   border:1px dashed rgba(255,255,255,.45);border-radius:6px;border-bottom-width:1px}
 nav.tabs button.practice:hover{opacity:.85}
-nav.tabs button.practice.on{opacity:1;border-style:dashed;border-color:var(--gold);
-  border-bottom-color:var(--gold);background:rgba(255,255,255,.10)}
+nav.tabs button.practice.on{opacity:1;border-style:dashed;border-color:#F2DF74;
+  border-bottom-color:#F2DF74;background:rgba(255,255,255,.10)}
 .banner.practice-banner{background:var(--gold-soft);border:1.5px dashed var(--gold);font-size:.88rem}
-h2{font-family:var(--serif);font-size:1.25rem;margin:28px 0 12px}
+h2{font-family:var(--serif);font-size:1.25rem;margin:28px 0 12px;color:var(--maroon)}
 h3{font-size:.98rem;margin:0 0 8px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:var(--shadow)}
 .card.sub{background:var(--surface2)}
@@ -89,9 +81,9 @@ button.btn:disabled{opacity:.5;cursor:default}
 .pill{display:inline-block;font-size:.74rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;border-radius:4px;padding:2px 8px}
 .pill.done{background:var(--good-soft);color:var(--good)}
 .pill.absent{background:var(--maroon-soft);color:var(--maroon)}
-.pill.other{background:var(--gold-soft);color:var(--gold)}
+.pill.other{background:var(--gold-soft);color:var(--gold-ink)}
 .pill.guest{background:var(--accent-soft);color:var(--accent)}
-.pill.admin{background:var(--gold-soft);color:var(--gold)}
+.pill.admin{background:var(--gold-soft);color:var(--gold-ink)}
 .pill.pending{background:var(--maroon-soft);color:var(--maroon)}
 .bar{height:8px;background:var(--surface2);border:1px solid var(--line);border-radius:99px;overflow:hidden;margin-top:6px}
 .bar > div{height:100%;background:var(--accent)}
@@ -136,7 +128,7 @@ details.mem .body{padding:12px 16px}
 .empty{color:var(--muted);font-style:italic;padding:8px 0}
 .cand{display:flex;gap:10px;align-items:baseline;padding:4px 0;border-bottom:1px dashed var(--line)}
 .cand:last-child{border-bottom:none}
-.cand .score{font-family:var(--serif);color:var(--gold);font-weight:700;min-width:28px;text-align:right}
+.cand .score{font-family:var(--serif);color:var(--maroon);font-weight:700;min-width:28px;text-align:right}
 
 /* ---- auth screens ---- */
 #authWrap{max-width:420px;margin:60px auto;padding:0 20px}
