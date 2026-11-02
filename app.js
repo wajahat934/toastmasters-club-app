@@ -615,6 +615,8 @@ let S={profiles:[],meetings:[],assignments:[],awards:[],goals:[],polls:[],votes:
 let state=null, me=null, isAdmin=false;
 
 function rebuild(){
+  SPECIAL_ROLES={};
+  for(const m of S.meetings)for(const sp of specialsOf(m))SPECIAL_ROLES[sp.id]=sp;
   const awardsBy={},goalsBy={};
   for(const a of S.awards)(awardsBy[a.profile_id]=awardsBy[a.profile_id]||[]).push(a);
   for(const g of S.goals)(goalsBy[g.profile_id]=goalsBy[g.profile_id]||[]).push(g);
@@ -679,6 +681,43 @@ const EDU_ROLE={id:'edu',name:'Educational Session Speaker'};
    ("Sergeant at Arms 2") — "Fill from bookings" keeps the names, unlike
    hand-typed agenda text. Speakers/evaluators keep their own − / ＋. */
 function extraFor(m,rid){ return Math.max(0,Number((((m||{}).config||{}).extra||{})[rid])||0); }
+/* ---- special roles for ONE meeting ----
+   Nov 2026: the club opened Active Listener and Joke Master for a single
+   meeting. A role added in Settings exists for every meeting; this one lives
+   in that meeting's config.special [{id,name,pts}], so nothing has to be
+   "closed" afterwards. It is a real bookable slot, carries its own points
+   (0 allowed), counts as a role for the 6-meeting bonus, and shows in the
+   agenda's Supporting Roles box. SPECIAL_ROLES (rebuilt in rebuild) lets
+   roleNameById and the points find it from a slot key alone. */
+let SPECIAL_ROLES={};
+function specialsOf(m){ const l=((m||{}).config||{}).special; return Array.isArray(l)?l:[]; }
+function specialBtn(m){ return `<button class="btn ghost small" onclick="specialAdd('${m.id}')" title="A role for this meeting only, with its own points">＋ Special role</button>`; }
+function specialCtl(m,s){
+  const sp=SPECIAL_ROLES[ridOf(s.key)]; if(!sp)return '';
+  return ` <span class="pill other" title="Special role — this meeting only">${fmtPts(Number(sp.pts)||0)} pts</span> <button class="btn ghost small" style="padding:0 6px" title="Remove this special role" onclick="specialDel('${m.id}','${sp.id}')">✕</button>`;
+}
+async function specialAdd(mid){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  const name=await appPrompt(`Name of the special role\n\nFor ${fmtDate(m.date)} only. For example: Active Listener.`);
+  if(!name||!name.trim())return;
+  /* a role the rules sheet knows starts at its points */
+  const R=gameRules(), known=R.pts[gameRoleKey(name.trim())];
+  const ans=await appPrompt(`Points for ${name.trim()}\n\nFor this role at this meeting. Use 0 for no points.`,known>0?known:2);
+  if(ans==null)return;
+  const pts=Math.max(0,Number(ans)||0);
+  m.config={...(m.config||{}),special:[...specialsOf(m),{id:'x'+uid(),name:name.trim(),pts}]};
+  saveMeetingConfig(m);
+  toast(name.trim()+' added to '+fmtDate(m.date));
+}
+async function specialDel(mid,rid){
+  const m=state.meetings.find(x=>x.id===mid); if(!m)return;
+  const sp=specialsOf(m).find(x=>x.id===rid); if(!sp)return;
+  const key=rid+'|0', a=(m.assignments||{})[key], mem=a&&a.memberId&&memberById(a.memberId);
+  if(!await appConfirm(`Remove ${sp.name} from this meeting?${mem?`\n\n${mem.name} is booked in it and loses this role and its points.`:''}`,'Remove'))return;
+  if(a&&a.memberId)unbookLocal(mid,key);
+  m.config={...(m.config||{}),special:specialsOf(m).filter(x=>x.id!==rid)};
+  saveMeetingConfig(m);
+}
 function extraCtl(m,s){
   const rid=ridOf(s.key);
   if(rid==='spk'||rid==='eval'||rid==='edu')return '';
@@ -725,6 +764,7 @@ function slotListFor(m){
      speaker, so the name lives in bookings like every other role instead of
      as hand-typed agenda text that can be lost */
   if(m&&eduOn(m))out.push({key:'edu|0',role:EDU_ROLE,label:EDU_ROLE.name});
+  if(m)for(const sp of specialsOf(m))out.push({key:sp.id+'|0',role:{id:sp.id,name:sp.name,count:1},label:sp.name});
   return out;
 }
 /* A removed role's bookings stay in the database, so past meetings still
@@ -736,6 +776,7 @@ function slotListFor(m){
 function roleNameById(id){
   if(id==='edu')return EDU_ROLE.name;
   const r=state.settings.roles.find(r=>r.id===id); if(r)return r.name;
+  if(SPECIAL_ROLES[id])return SPECIAL_ROLES[id].name;
   const old=(state.settings.retiredRoles||{})[id]||(rtcRoleSet().find(x=>x.id===id)||{}).name;
   return old||'(removed role)';
 }
@@ -1640,6 +1681,9 @@ function gameScores(){
       if(!a||!a.memberId||a.status==='absent')continue;
       const mem=memberById(a.memberId); if(!eligible(mem))continue;
       const name=a.status==='other'&&a.actualRole?a.actualRole:roleNameById(key.split('|')[0]);
+      /* a one-meeting special role carries its own points */
+      const sp=a.status==='other'?null:SPECIAL_ROLES[key.split('|')[0]];
+      if(sp){ take(mem.id,'special',name,Number(sp.pts)||0); continue; }
       const k=gameRoleKey(name);
       take(mem.id,k,name,R.pts[k]);
     }
@@ -2659,6 +2703,7 @@ function meetingBookingCard(m){
       <button class="btn ghost small" onclick="copyRolePlayers('${m.id}')" title="Copy a WhatsApp message listing who has which role, with speakers asked to send their evaluation forms">📣 Role list</button>
       <button class="btn ghost small" onclick="cancelMeeting('${m.id}')">Cancel meeting</button>
       <button class="btn ghost small" onclick="shiftOpen('${m.id}')" title="This meeting becomes a special one: move its bookings forward to later meetings">⏭ Shift bookings…</button>
+      ${specialBtn(m)}
     </div>
     <div class="row small" style="margin-top:8px;padding:6px 10px;background:var(--surface2);border:1px solid var(--line);border-radius:8px">
       <span class="muted">This meeting:</span>
@@ -2697,7 +2742,7 @@ function meetingBookingCard(m){
         const when=at?`booked ${new Date(at).toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}`
                      :'booking time not recorded yet';
         const blocked=slotBlocked(m,s.key);
-        return `<div class="slot"><label>${esc(s.label)}${extraCtl(m,s)}${(a&&(a.durationMin||0)>=LONG_MIN)?` <span class="pill other" title="long-format speech — one speaker slot fewer this meeting">⏱ ${a.durationMin}m</span>`:''}${blocked?` <span class="pill absent" title="Members cannot book this slot — you assign it from the dropdown">🚫 reserved</span>`:''}${isNext?` <span class="pill other" title="Booked last of the ${esc(roleNameById(rid))}s — gives way first">gives way</span>`:''}${canDefer?`
+        return `<div class="slot"><label>${esc(s.label)}${extraCtl(m,s)}${specialCtl(m,s)}${(a&&(a.durationMin||0)>=LONG_MIN)?` <span class="pill other" title="long-format speech — one speaker slot fewer this meeting">⏱ ${a.durationMin}m</span>`:''}${blocked?` <span class="pill absent" title="Members cannot book this slot — you assign it from the dropdown">🚫 reserved</span>`:''}${isNext?` <span class="pill other" title="Booked last of the ${esc(roleNameById(rid))}s — gives way first">gives way</span>`:''}${canDefer?`
             <button class="btn ghost small" style="float:right;padding:0 6px"
               title="Move to a later meeting — ${esc(when)}" onclick="deferBooking('${m.id}','${s.key}')">⏩</button>`:''}${!(a&&a.memberId)?`
             <button class="btn ghost small" style="float:right;padding:0 6px"
@@ -2797,10 +2842,17 @@ function meetingReviewCard(m,compact){
       <div class="grid-roles">
         ${slotListFor(m).map(s=>{
           const a=(m.assignments||{})[s.key];
-          return `<div class="slot"><label>${esc(s.label)}</label>
+          return `<div class="slot"><label>${esc(s.label)}${specialCtl(m,s)}</label>
             <select onchange="assign('${m.id}','${s.key}',this)">${memberOptions(a&&a.memberId)}</select></div>`;
         }).join('')}
+        ${/* bookings on roles since removed (Nov 2026: Active Listener, Joke Master
+             were swapped at the last minute after the role was closed). They
+             still earn points, so they must stay correctable here. */
+          Object.entries(m.assignments||{}).filter(([k,a])=>a&&a.memberId&&!slotListFor(m).some(s=>s.key===k)).map(([k,a])=>
+          `<div class="slot"><label>${esc(roleNameById(ridOf(k)))} <span class="pill other" title="This role has since been removed; the booking still counts">removed role</span></label>
+            <select onchange="assign('${m.id}','${k}',this)">${memberOptions(a.memberId)}</select></div>`).join('')}
       </div>
+      <div style="margin-top:6px">${specialBtn(m)}</div>
     </details>
   </div>`;
 }
@@ -5649,6 +5701,18 @@ const AgendaApp=(function(){
       el.parentElement.style.display=(!SUP_RE[k]||has(k)||map[k])?'':'none';
     });
     const jb=g('agJoke'); if(jb)jb.style.display=has('jm')?'':'none';
+    /* this meeting's special roles join the box — plain text built fresh from
+       the booking, so they never enter the positional staticEditables */
+    const box=document.querySelector('#agSheet .roles2');
+    if(box){
+      box.querySelectorAll('.sup-special').forEach(e=>e.remove());
+      for(const sp of specialsOf(m)){
+        const a=(m&&m.assignments||{})[sp.id+'|0'], who=a&&a.memberId&&memberById(a.memberId);
+        const d=document.createElement('div'); d.className='sup-special';
+        d.innerHTML=`<b>${esc(sp.name)}</b><br><span>${who?esc(tmName(who)):agT('p_blank','TBD')}</span>`;
+        box.appendChild(d);
+      }
+    }
   }
   function staticEditables(){
     /* saved as a POSITIONAL array — inserting a new editable mid-order shifts
@@ -6587,7 +6651,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{roleExtra,shiftOpen,shiftClose,shiftToggle,shiftLockToggle,shiftRun,backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{specialAdd,specialDel,roleExtra,shiftOpen,shiftClose,shiftToggle,shiftLockToggle,shiftRun,backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,
