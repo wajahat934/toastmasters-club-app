@@ -4407,14 +4407,33 @@ const URDU_NAME_PARTS={
   abdul:'عبدال',rehman:'رحمان',rahman:'رحمان',aslam:'اسلم',akram:'اکرم',
   javed:'جاوید',nadeem:'ندیم',asif:'آصف',tariq:'طارق',kamran:'کامران',
   saad:'سعد',zeeshan:'ذیشان',arslan:'ارسلان',iqbal:'اقبال',anwar:'انور',
-  sana:'ثنا',hira:'حرا',maryam:'مریم',amna:'آمنہ',sadia:'سعدیہ',nida:'ندا'
+  sana:'ثنا',hira:'حرا',maryam:'مریم',amna:'آمنہ',sadia:'سعدیہ',nida:'ندا',
+  /* members and guests who joined after the first list (Nov 2026) */
+  aatif:'عاطف',atif:'عاطف',naeem:'نعیم',areesha:'اریشہ',farheen:'فرحین',erum:'ارم',
+  burhan:'برہان',haadiyah:'ہادیہ',hadiya:'ہادیہ',haque:'حق',imran:'عمران',hamid:'حامد',
+  kanwar:'کنور',waleed:'ولید',saqib:'ثاقب',riaz:'ریاض',rasheed:'رشید',afzal:'افضل',
+  azeemullah:'عظیم اللہ',rizvi:'رضوی',abiola:'ابیولا',noman:'نعمان',nauman:'نعمان',
+  abid:'عابد',irfan:'عرفان',abrar:'ابرار',wani:'وانی',zubair:'زبیر',faisal:'فیصل',
+  rana:'رانا',arsalan:'ارسلان',
+  dtm:'ڈی ٹی ایم'
 };
 function suggestUrduName(name){
   const parts=String(name||'').trim().split(/\s+/).filter(Boolean);
   if(!parts.length)return '';
   const mapped=parts.map(p=>URDU_NAME_PARTS[p.toLowerCase().replace(/[^a-z]/g,'')]||null);
   if(mapped.every(x=>x===null))return '';
-  return mapped.map((x,i)=>x||parts[i]).join(' ');
+  /* "ul / ud / al" join the next word in Urdu: Ejaz ul Haq → اعجاز الحق,
+     Noor ud din → نور الدین (not "اعجاز ال حق") */
+  const out=[];
+  for(let i=0;i<parts.length;i++){
+    const w=parts[i].toLowerCase().replace(/[^a-z]/g,'');
+    if((w==='ul'||w==='ud'||w==='al')&&i+1<parts.length){
+      const nx=mapped[i+1]||parts[i+1];
+      out.push('ال'+nx); i++; continue;
+    }
+    out.push(mapped[i]||parts[i]);
+  }
+  return out.join(' ');
 }
 /* The club's name and its Club No. / District / Area / Division line belong to
    the club, not to one meeting's agenda. They used to ride along in the
@@ -4453,14 +4472,18 @@ function setUrduName(id,v){
 }
 function suggestUrduNames(){
   const map={...urduNames()};
-  let n=0;
+  const added=[];
+  /* guests too: presidents and guest role players appear on Urdu agendas */
   for(const m of state.members){
-    if(m.external||m.archived||map[m.id])continue;
+    if(m.archived||map[m.id])continue;
     const g=suggestUrduName(m.name);
-    if(g){ map[m.id]=g; n++; }
+    if(g){ map[m.id]=g; added.push(m.id); }
   }
+  const n=added.length;
   state.settings.urduNames=map; S.settings=state.settings;
-  saveSettingsFields(['urduNames']); render();
+  /* only the new entries are written, merged into the server's list */
+  if(n)saveSettingsFields(['urduNames'],{urduNames:added});
+  render();
   toast(n?`${n} name${n>1?'s':''} filled in — please check each one`:'Nothing new matched the dictionary');
 }
 function urduNamesHtml(){
@@ -4624,6 +4647,8 @@ const AG_UR={
   r_call:'اجلاس کا آغاز — ناظمِ انتظامات',
   r_welcome:'خیرمقدمی کلمات — صدرِ اجلاس',
   r_poAddr:'صدارتی خطاب',
+  excom_bar:'راولپنڈی ٹوسٹ ماسٹرز کلب — ایگزیکٹو کمیٹی 2026-27',
+  joint_banner:'<div class="jt">مشترکہ اجلاس</div><div class="jc">راولپنڈی ٹوسٹ ماسٹرز کلب &nbsp;•&nbsp; آئی کیپ ٹوسٹ ماسٹرز کلب &nbsp;•&nbsp; آئی کیپ ایگزیکٹو ٹوسٹ ماسٹرز کلب</div>',
   r_tmod:'میزبانِ اجلاس',
   r_ttm:'فی البدیہہ تقاریر کے میزبان',
   r_tt:'فی البدیہہ تقاریر <span class="role-note">(فی مقرر ۱–۲ منٹ)</span>',
@@ -4761,7 +4786,8 @@ const AG_EN={};
     p_timerVc:'Timer &amp; Vote Counter',p_rolePlayers:'Role Players',p_everyone:'Everyone',
     p_tmod:'TMOD',p_guestSpk:'Guest Speaker — ____________',p_guestTmod:'Guest Speaker &amp; TMOD',
     r_tmodGe:'TMOD invites the General Evaluator',
-    r_poAddr:'Presidential Address',r_certs:'Certificate Distribution',r_closing:'Closing Address &amp; Vote of Thanks',
+    r_poAddr:'Presidential Address',excom_bar:'Rawalpindi Toastmasters Club — ExCom 2026-27',
+    joint_banner:'<div class="jt">Joint Meeting</div><div class="jc">Rawalpindi Toastmasters Club &nbsp;•&nbsp; ICAP Toastmasters Club &nbsp;•&nbsp; ICAP Executive Toastmasters Club</div>',r_certs:'Certificate Distribution',r_closing:'Closing Address &amp; Vote of Thanks',
     s_edu:'Educational Session',r_eduIntro:'Introduction of Guest Speaker',
     r_eduTalk:'Educational Session <span class="role-note">(topic)</span>',
     r_eduQa:'Q&amp;A &amp; Vote of Thanks',
@@ -4938,7 +4964,7 @@ const AgendaApp=(function(){
         <div>
           <h1 contenteditable="true" data-k="h_club">Rawalpindi Toastmasters Club</h1>
           <div class="sub" contenteditable="true" data-sub="1">Club No. 07247940 &nbsp;•&nbsp; District 122 &nbsp;•&nbsp; Area A9 &nbsp;•&nbsp; Division B</div>
-          <div class="jointhead" contenteditable="true"><div class="jt">Joint Meeting</div><div class="jc">Rawalpindi Toastmasters Club &nbsp;•&nbsp; ICAP Toastmasters Club &nbsp;•&nbsp; ICAP Executive Toastmasters Club</div></div>
+          <div class="jointhead" contenteditable="true" data-k="joint_banner"><div class="jt">Joint Meeting</div><div class="jc">Rawalpindi Toastmasters Club &nbsp;•&nbsp; ICAP Toastmasters Club &nbsp;•&nbsp; ICAP Executive Toastmasters Club</div></div>
         </div>
         <div class="meet-chips">
           <span class="mchip spk" id="agChipSpk">🎤 <span data-k="h_speakathon">SPEAKATHON</span></span>
@@ -5000,7 +5026,7 @@ const AgendaApp=(function(){
         </div>
       </div>
       <div class="excom" id="agExcomSec">
-        <h3><span contenteditable="true">Rawalpindi Toastmasters Club — ExCom 2026-27</span><button
+        <h3><span contenteditable="true" data-k="excom_bar">Rawalpindi Toastmasters Club — ExCom 2026-27</span><button
           class="del no-print" id="agHideBar" title="Hide this bar (keeps the photo)">✕ bar</button><button
           class="del no-print" id="agHideSec" title="Hide the whole ExCom banner">✕ banner</button></h3>
         <div class="restore no-print" id="agExcomRestore">ExCom bar/banner hidden (won’t print) — click to restore</div>
@@ -5010,7 +5036,16 @@ const AgendaApp=(function(){
     </div></div></div>`;
   }
   function fmtT(mins){ const h24=Math.floor(mins/60),mm=String(Math.round(mins%60)).padStart(2,'0'); return `${((h24+11)%12)+1}:${mm}`; }
-  function ampm(mins){ return Math.floor(mins/60)%24>=12?'PM':'AM'; }
+  /* Urdu sheets say the time of day in words (صبح / سہ پہر / شام / رات), the
+     month in Urdu, and نمبر for the meeting number — they printed AM/PM,
+     "November" and "No." before */
+  function ampm(mins){
+    const h=Math.floor(mins/60)%24;
+    if(!agUrdu)return h>=12?'PM':'AM';
+    return h<12?'صبح':h<16?'سہ پہر':h<19?'شام':'رات';
+  }
+  const UR_MONTHS=['جنوری','فروری','مارچ','اپریل','مئی','جون','جولائی','اگست','ستمبر','اکتوبر','نومبر','دسمبر'];
+  function chipNo(n){ return (agUrdu?'نمبر ':'No. ')+n; }
   function startMins(){ const [h,m]=(g('agStart').value||'16:30').split(':').map(Number); return h*60+m; }
   function halfRound(v){ return Math.round(v*2)/2; }
   function autoStep(t){ return t<=2?0.5:Math.max(1,Math.round(t/4)); }
@@ -5187,6 +5222,9 @@ const AgendaApp=(function(){
       const cur=el.innerHTML.trim();
       if(cur===''||eq(cur,other[k])||stale(cur,k))el.innerHTML=mine[k];
     });
+    /* the number chip and the dates are written by code, not keyed text */
+    if(g('agChipNo')&&g('agNo'))g('agChipNo').innerText=chipNo(g('agNo').value);
+    updateDates();
     /* Booked names were written in whichever language was active when the
        bookings were filled, so re-render them — but only strings that still
        match a member exactly, leaving anything hand-typed alone. */
@@ -5598,7 +5636,7 @@ const AgendaApp=(function(){
       note.style.display=bits.length?'':'none';
     }
   }
-  function agFmtDate(d){ return `${String(d.getDate()).padStart(2,'0')} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`; }
+  function agFmtDate(d){ return `${String(d.getDate()).padStart(2,'0')} ${(agUrdu?UR_MONTHS:MONTHS)[d.getMonth()]} ${d.getFullYear()}`; }
   function updateDates(){
     const v=g('agDate').value; if(!v)return;
     const [y,m,d]=v.split('-').map(Number);
@@ -5774,7 +5812,7 @@ const AgendaApp=(function(){
       const i=st.inputs||{};
       if(i.date)g('agDate').value=i.date;
       if(i.start)g('agStart').value=i.start;
-      if(i.no!=null){ g('agNo').value=i.no; g('agChipNo').innerText='No. '+i.no; }
+      if(i.no!=null){ g('agNo').value=i.no; g('agChipNo').innerText=chipNo(i.no); }
       if(i.buf!=null)g('agBuf').value=i.buf;
       if(i.bufE!=null)g('agBufE').value=i.bufE;
       if(i.bufO!=null)g('agBufO').value=i.bufO;
@@ -6063,7 +6101,7 @@ const AgendaApp=(function(){
     else{
       const tpl=agTemplate(); if(tpl)useTemplate(tpl);
       if(m)g('agDate').value=m.date;
-      const no=nextNo(m); g('agNo').value=no; g('agChipNo').innerText='No. '+no;
+      const no=nextNo(m); g('agNo').value=no; g('agChipNo').innerText=chipNo(no);
       applyBookings();
     }
     ensureEduBlock();   /* a 🎓-flagged meeting carries its block even on a saved sheet */
@@ -6133,7 +6171,7 @@ const AgendaApp=(function(){
     g('agBuf').addEventListener('input',()=>{ updateTimes(); queueAgSave(); });
     g('agBufE').addEventListener('input',()=>{ updateTimes(); queueAgSave(); });
     g('agBufO').addEventListener('input',()=>{ updateTimes(); queueAgSave(); });
-    g('agNo').addEventListener('input',()=>{ g('agChipNo').innerText='No. '+g('agNo').value; queueAgSave(); });
+    g('agNo').addEventListener('input',()=>{ g('agChipNo').innerText=chipNo(g('agNo').value); queueAgSave(); });
     function updateToggles(){
       showTT=g('agTT').checked; showSpeech=g('agSp').checked;
       swapOrder=g('agSwap').checked; juniorFirstOn=g('agJr').checked;

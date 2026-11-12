@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=141**.
+   every deploy or browsers serve the old `app.js`. Currently **v=142**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-10-02
 
-**Live at v141, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v142, repo clean, nothing half-built.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **How to work on this app (each rule exists because breaking it once hurt the club):**
@@ -162,6 +162,17 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Fixed 2026-11-12 — Urdu agenda leftovers; Urdu names for new members and guests (v142)
+
+Audit of an Urdu sheet (every visible Latin text node): the meeting-number chip, both date chips and
+the time chip were code-written in English. Now `chipNo()` → "نمبر 351", `agFmtDate` uses `UR_MONTHS`,
+`ampm()` says صبح / سہ پہر / شام / رات; `applyLanguage` refreshes the chip and dates. The ExCom bar and
+the joint banner got `data-k` keys (`excom_bar`, `joint_banner`) so they swap language while unedited.
+Names: `URDU_NAME_PARTS` extended with the newer members and guests; `suggestUrduName` joins
+"ul/ud/al" to the next word (اعجاز الحق, نور الدین — was "اعجاز ال حق"); "✨ Suggest" now covers guests
+and saves only the entries it adds (per-id merge). Still Latin by design: the header's area/division
+codes (A9, B) and any text a member typed (e.g. the theme). Names are machine-transliterated — review.
 
 ## Changed 2026-11-03 — white + Toastmasters blue + traces of maroon; no dark mode (v140)
 
