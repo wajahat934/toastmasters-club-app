@@ -1334,6 +1334,7 @@ function vcPollCard(p){
     <div class="tblwrap" data-scroll="poll-${p.id}"><table class="vctbl"><thead><tr><th>Name</th><th class="num">App</th><th class="num">Paper</th><th class="num">Total</th></tr></thead><tbody>
       ${(p.candidates||[]).map(c=>`<tr>
         <td title="${esc(c.name)}">${esc(vcShortName(c.name))} ${p.winner_key===c.key?'🏆':''}
+          ${!c.profileId?`<button class="del no-print" style="background:#4a6572" title="Fix this name" onclick="renameCandidate('${p.id}','${c.key}')">✎</button>`:''}
           ${p.status==='open'?`<button class="del no-print" title="Remove this candidate" onclick="removeCandidate('${p.id}','${c.key}')">✕</button>`:''}</td>
         <td class="num" data-app="${p.id}:${c.key}">${app[c.key]}</td>
         <td class="num"><span class="pp">
@@ -1444,6 +1445,19 @@ async function deletePoll(pollId){
   S.votes=S.votes.filter(v=>v.poll_id!==pollId);
   sync(api.deletePoll(pollId));
   render();
+}
+/* A typed-in (guest) name can be corrected in place. Votes are counted by the
+   candidate's key, never the name, so app and paper votes stay put; works on
+   a closed vote too, so the Winners board shows the fixed spelling. Member
+   candidates have no ✎ — their name comes from the roster. */
+async function renameCandidate(pollId,key){
+  const p=S.polls.find(p=>p.id===pollId); if(!p)return;
+  const c=(p.candidates||[]).find(c=>c.key===key); if(!c||c.profileId)return;
+  const name=await appPrompt('Correct the name\n\nVotes already cast stay with this person.',c.name);
+  if(name==null||!name.trim()||name.trim()===c.name)return;
+  p.candidates=p.candidates.map(x=>x.key===key?{...x,name:name.trim()}:x);
+  sync(api.updatePoll(pollId,{candidates:p.candidates}));
+  render(); toast('Name corrected');
 }
 async function removeCandidate(pollId,key){
   const p=S.polls.find(p=>p.id===pollId); if(!p)return;
@@ -1901,6 +1915,13 @@ async function pAdd(pollId,v){
   }
   render();
 }
+async function pRename(pollId,key){   /* practice mirror of renameCandidate */
+  const p=pPolls.find(x=>x.id===pollId); if(!p)return;
+  const c=p.candidates.find(x=>x.key===key); if(!c)return;
+  const name=await appPrompt('Correct the name\n\nVotes already cast stay with this person.',c.name);
+  if(name==null||!name.trim())return;
+  c.name=name.trim(); render();
+}
 async function pRemove(pollId,key){
   const p=pPolls.find(x=>x.id===pollId); if(!p)return;
   const c=p.candidates.find(x=>x.key===key); if(!c)return;
@@ -2004,6 +2025,7 @@ function pPollCard(p){
     <div class="tblwrap" data-scroll="prac-${p.id}"><table class="vctbl"><thead><tr><th>Name</th><th class="num">App</th><th class="num">Paper</th><th class="num">Total</th></tr></thead><tbody>
       ${p.candidates.map(c=>`<tr>
         <td title="${esc(c.name)}">${esc(vcShortName(c.name))} ${p.winner_key===c.key?'🏆':''}
+          ${String(c.key).startsWith('pc')?`<button class="del no-print" style="background:#4a6572" title="Fix this name" onclick="pRename('${p.id}','${c.key}')">✎</button>`:''}
           ${p.status==='open'?`<button class="del no-print" title="Remove this candidate" onclick="pRemove('${p.id}','${c.key}')">✕</button>`:''}</td>
         <td class="num">${app[c.key]}</td>
         <td class="num"><span class="pp">
@@ -6706,7 +6728,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{guestsToggle,specialAdd,specialDel,roleExtra,shiftOpen,shiftClose,shiftToggle,shiftLockToggle,shiftRun,backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{renameCandidate,pRename,guestsToggle,specialAdd,specialDel,roleExtra,shiftOpen,shiftClose,shiftToggle,shiftLockToggle,shiftRun,backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,
