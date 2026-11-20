@@ -1012,6 +1012,10 @@ function render(){
        sheet from defaults — meeting number fell back to 351 and one edit
        saved that empty sheet over the club's real one. Hold the tab instead. */
     if(!agendasLoaded){ main.innerHTML='<div class="empty">📄 Loading the saved agendas…</div>'; return; }
+    /* the agenda's built-in badge and banner images (assets.js, ~170 KB) are
+       fetched only here — members never open the agenda, and they used to
+       download it again after every update */
+    if(!window.AG_BADGE){ main.innerHTML='<div class="empty">📄 Loading the agenda…</div>'; loadAgImages().then(()=>{ if(tab==='agenda')render(); }); return; }
     AgendaApp.mount(main); return;
   }
   else if(tab==='voting')main.innerHTML=viewVoting();
@@ -5057,12 +5061,14 @@ const AgendaApp=(function(){
       <div class="foot"><span class="motto" contenteditable="true" data-k="motto">“For better listening, for better thinking, for better speaking — we learn by doing.”</span></div>
     </div></div></div>`;
   }
-  function fmtT(mins){ const h24=Math.floor(mins/60),mm=String(Math.round(mins%60)).padStart(2,'0'); return `${((h24+11)%12)+1}:${mm}`; }
+  /* round to a whole minute FIRST: with 0.5-min changeovers a time of 4:59.5
+     printed as "4:60" when the minutes were rounded after splitting */
+  function fmtT(mins){ const t=Math.round(mins), h24=Math.floor(t/60), mm=String(t%60).padStart(2,'0'); return `${((h24+11)%12)+1}:${mm}`; }
   /* Urdu sheets say the time of day in words (صبح / سہ پہر / شام / رات), the
      month in Urdu, and نمبر for the meeting number — they printed AM/PM,
      "November" and "No." before */
   function ampm(mins){
-    const h=Math.floor(mins/60)%24;
+    const h=Math.floor(Math.round(mins)/60)%24;   /* same rounding as fmtT */
     if(!agUrdu)return h>=12?'PM':'AM';
     return h<12?'صبح':h<16?'سہ پہر':h<19?'شام':'رات';
   }
@@ -6442,6 +6448,24 @@ async function doReload(){
 /* the agenda tab may not mount, and must never SAVE, before the saved sheets
    have arrived at least once this session */
 let agendasLoaded=false;
+let agImgP=null;
+function loadAgImages(){
+  if(window.AG_BADGE)return Promise.resolve();
+  if(agImgP)return agImgP;
+  /* same folder and same ?v= as app.js, so the demo (../) and caching both work */
+  const app=document.querySelector('script[src*="app.js"]');
+  const v=app&&(/[?&]v=(\d+)/.exec(app.src)||[])[1];
+  const base=app?app.src.replace(/app\.js.*$/,''):'';
+  agImgP=new Promise(res=>{
+    const s=document.createElement('script');
+    s.src=base+'assets.js'+(v?'?v='+v:'');
+    s.onload=res;
+    /* offline: render the sheet anyway, without the built-in pictures */
+    s.onerror=()=>{ agImgP=null; window.AG_BADGE=window.AG_BADGE||' '; window.AG_EXCOM=window.AG_EXCOM||' '; res(); };
+    document.head.appendChild(s);
+  });
+  return agImgP;
+}
 /* ---- instant open: the last good load, kept on the device ----
    Painting it makes the app appear in well under a second; the real load then
    replaces it quietly. The snapshot is per-member (votes and admin-only rows
