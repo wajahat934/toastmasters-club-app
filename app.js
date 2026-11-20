@@ -1622,7 +1622,7 @@ function openVoteCardsHtml(){
      don't stack); attending with no role = 1; a Table Topics speaker = 3
      (taken from that meeting's Best Table Topics candidates — club's choice);
    - every vote won adds a flat bonus (3), on top;
-   - a one-time +10 the meeting a member logs a role at their 6th meeting;
+   - +10 at every 6th meeting with a role (6th, 12th, 18th…; was one-time until Nov 2026);
    - newcomer multiplier on ROLE points only: max(1, 2 − months_in_RTC/6),
      months from the joining date officers enter (no date = 1.0x);
    - a meeting's points count once an officer marks it reviewed (that is
@@ -1723,7 +1723,9 @@ function gameScores(){
       add(id,ym,rnd(b.pts*mult),{date:m.date,what:b.label,base:b.pts,mult,pts:rnd(b.pts*mult)});
       if(isRole){
         streak[id]=(streak[id]||0)+1;
-        if(streak[id]===R.streakN)add(id,ym,R.streakBonus,{date:m.date,what:R.streakN+'-meeting bonus',base:R.streakBonus,mult:1,pts:R.streakBonus});
+        /* every Nth role meeting, not just the first time (club's call, Nov 2026):
+           +10 at the 6th, 12th, 18th… — keeps rewarding regular members */
+        if(R.streakN>0&&streak[id]%R.streakN===0)add(id,ym,R.streakBonus,{date:m.date,what:`${R.streakN}-meeting bonus (${streak[id]} meetings with a role)`,base:R.streakBonus,mult:1,pts:R.streakBonus});
       }
     }
     /* vote winners: flat bonus per award, on top of the role */
@@ -1743,6 +1745,7 @@ function gameMonthRanking(sc,ym){
 }
 let gameMonth=null, gameEditing=false;
 const fmtPts=x=>Number.isInteger(x)?String(x):Number(x).toFixed(1);
+function ordN(n){ const t=n%100; return n+((t>10&&t<14)?'th':({1:'st',2:'nd',3:'rd'}[n%10]||'th')); }
 function ymLabel(ym){ return parseD(ym+'-01').toLocaleDateString(undefined,{month:'long',year:'numeric'}); }
 function viewPoints(){
   const R=gameRules(), sc=gameScores();
@@ -1803,7 +1806,7 @@ function viewPoints(){
       <li>Each meeting you earn the points of your <b>highest</b> role only — roles don't add up.</li>
       <li>Table Topics speaker: <b>${fmtPts(R.ttSpeaker)}</b>. Attending with no role: <b>${fmtPts(R.attend)}</b>.</li>
       <li>Winning any vote (Best Speaker, Best Evaluator…): <b>+${fmtPts(R.award)}</b> each.</li>
-      <li>Your ${R.streakN}th meeting with a role: one-time <b>+${fmtPts(R.streakBonus)}</b>.</li>
+      <li>Every ${R.streakN} meetings with a role (the ${ordN(R.streakN)}, ${ordN(R.streakN*2)}, ${ordN(R.streakN*3)}…): <b>+${fmtPts(R.streakBonus)}</b>.</li>
       <li>Newcomers get up to <b>×${fmtPts(R.multMax)}</b> on role points, fading to ×1 after ${R.multMonths} months in the club.</li>
       <li>Points count once officers mark the meeting reviewed. Highest total in a month = <b>Toastmaster of the Month</b>.</li>
     </ul>

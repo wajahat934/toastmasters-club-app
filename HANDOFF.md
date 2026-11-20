@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=144**.
+   every deploy or browsers serve the old `app.js`. Currently **v=145**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -33,10 +33,32 @@
 
 ---
 
-## Start here — state as of 2026-10-02
+## Start here — state as of 2026-11-20
 
-**Live at v144, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v145, repo clean, nothing half-built.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
+
+**Read first:** the dated "Added / Fixed / Changed" sections below, newest first — each names the
+functions involved. Biggest areas since October: points/gamification (🏆 tab), DCP speech plan
+(officers only, DCP tab), backup speakers, one-meeting special roles, extra slots per role (＋),
+shift-bookings tool, joint-meeting agenda template, Urdu agenda, ivory + Toastmasters-blue theme
+(always bright, no dark mode), members' lite load (speed), in-app dialogs (`appConfirm/appPrompt`).
+
+**Open decisions (offered to the owner, not built yet):**
+- **Move-forward safety** — ⏩ and speaker-count "−" move people at once and can push a chain of
+  members silently (the toast names only the first). Offered: (1) preview every affected person
+  before moving, (2) no pushing unless explicitly chosen, (3) after-move list with WhatsApp
+  "copy message" per moved member, (4) restrict chain moves to the VPE. Recommended 1 + 3.
+- **One-tap WhatsApp reminders** (wa.me links with a prefilled message per booked member; needs a
+  phone-number column). Automatic WhatsApp needs Meta's paid Business API — advised against bots.
+- **Supabase quota:** last cycle exceeded egress (6.4 GB / 5); the grace period is OVER, so going
+  over again blocks the app. Fixes shipped (images out of settings, lite loads, members don't load
+  agenda images). Ask the owner to check Usage → Egress each cycle.
+
+**Shell trap (bit again in Nov 2026):** Python edits sent through a bash heredoc lose one level of
+backslashes (`
+` arrived as a real newline). Use the Edit tool for anything with a backslash, or
+build it with `chr(92)`; always `node --check app.js` after scripted edits.
 
 **How to work on this app (each rule exists because breaking it once hurt the club):**
 - Test in a demo copy, never on live data. The scratchpad copy gets wiped between sessions —
@@ -75,12 +97,8 @@ key — never copy it into this repo.
 ## Outstanding — needs the user, not code
 
 - ~~**Run `migrations/2026-10-11-backup-speakers.sql`**~~ **Done** (2026-10-11).
-- **Run `migrations/2026-10-03-gamification.sql`** — adds `profiles.joined` + a trigger so only
-  officers can change it. Until then the "Joined RTC" field is hidden and nobody gets the
-  newcomer boost. Then officers fill in each member's joining month (Members → member card).
-- **Run `migrations/2026-10-02-voting.sql`** (SQL Editor). Creates `agenda_assets` (images leave the
-  settings row every phone downloads) and the one-poll-per-award unique index. If old duplicate
-  polls exist the index is skipped and the notice lists them. App works either way.
+- ~~**Run `migrations/2026-10-03-gamification.sql`**~~ **Done** (joining dates in use).
+- ~~**Run `migrations/2026-10-02-voting.sql`**~~ **Done** (settings row confirmed 2 KB, images moved).
 - **Backups are built but not switched on.** Add repo secrets `SUPABASE_SERVICE_KEY` and
   `BACKUP_PASSPHRASE`, then run the `backup` workflow once from the Actions tab. Steps are in
   the private setup sheet. Until then, nothing is backed up.
@@ -162,6 +180,12 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Changed 2026-11-20 — streak bonus every 6 role meetings (v145)
+
+`gameScores`: +streakBonus at every multiple of `streakN` role meetings (6th, 12th, 18th…), was once
+only (owner's call). Log line reads "6-meeting bonus (12 meetings with a role)"; How points work
+text uses `ordN()` for 6th/12th/18th. Counted from `gameRules().start` as before.
 
 ## Fixed 2026-11-20 — "4:60" on the agenda; agenda images no longer load for members (v144)
 
