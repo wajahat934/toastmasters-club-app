@@ -644,10 +644,17 @@ const DemoApi=(function(){
    read/render logic carries over. Mutations patch it AND call api.
    ============================================================ */
 let S={profiles:[],meetings:[],assignments:[],awards:[],goals:[],polls:[],votes:[],announcements:[],birthdayChanges:[],suggestions:[],settings:defaultSettings(),dcp:{},agendas:{},backups:[],backupsOn:false};
-let state=null, me=null, isAdmin=false, isFull=false;
+let state=null, me=null, isAdmin=false, isFull=false, realFull=false, viewAsOfficer=false;
 /* isAdmin = officer OR full admin (runs meetings). isFull = full admin (the VPE):
    settings, mass moves and members admin are for full admins only. The database
    enforces the same split once migrations/2026-11-24-officer-level.sql has run. */
+function toggleOfficerView(){
+  if(!realFull)return;
+  viewAsOfficer=!viewAsOfficer; viewAsMember=false; isFull=realFull&&!viewAsOfficer;
+  if(!tabsFor().some(([id])=>id===tab))tab='schedule';
+  render(); window.scrollTo(0,0);
+  if(viewAsOfficer)toast('Officer view — this is what officers see. Changes you make here still count as yours.');
+}
 function fullOnly(){ if(isFull)return true; toast('Only the full admin (VPE) can do this'); return false; }
 
 function rebuild(){
@@ -1032,9 +1039,14 @@ function render(){
   clearInterval(liveTimer);
   const keepScroll=grabScroll();
   document.getElementById('hClub').textContent=state.settings.clubName||'Toastmasters Club';
-  document.getElementById('uName').textContent=(me?me.name:'')+(isAdmin?(viewAsMember?' (member view)':(isFull?' (admin)':' (officer)')):'');
+  document.getElementById('uName').textContent=(me?me.name:'')+(isAdmin?(viewAsMember?' (member view)':viewAsOfficer?' (officer view)':(isFull?' (admin)':' (officer)')):'');
   const va=document.getElementById('viewAs');
-  if(va){ va.style.display=isAdmin?'':'none'; va.textContent=viewAsMember?'← Back to admin':'👁 View as member'; }
+  if(va){ va.style.display=isAdmin&&!viewAsOfficer?'':'none'; va.textContent=viewAsMember?'← Back to admin':'👁 View as member'; }
+  /* full admins can preview exactly what an officer sees; their own writes
+     still go out as a full admin (the server neither blocks nor logs them) */
+  let vo=document.getElementById('viewOff');
+  if(!vo&&va){ vo=document.createElement('button'); vo.id='viewOff'; va.after(vo); vo.addEventListener('click',toggleOfficerView); }
+  if(vo){ vo.style.display=realFull&&!viewAsMember?'':'none'; vo.textContent=viewAsOfficer?'← Back to full admin':'👁 View as officer'; }
   const TABS=tabsFor();
   if(!TABS.some(([id])=>id===tab))tab=TABS[0][0];
   document.getElementById('tabs').innerHTML=TABS.map(([id,label])=>
@@ -6651,7 +6663,7 @@ function wantVotesLive(){ return !!(me&&(isAdmin||vcMeetings().length)); }
 async function enterApp(profile){
   me={profileId:profile.id,name:profile.name};
   isAdmin=profile.role==='admin'||profile.role==='officer';
-  isFull=profile.role==='admin';
+  realFull=profile.role==='admin'; viewAsOfficer=false; isFull=realFull;
   /* instant open: paint the device's last snapshot while the fresh load runs */
   let painted=false;
   if(!entered&&paintSnapshot(profile.id)){
@@ -6887,6 +6899,7 @@ function bindAuth(){
   document.getElementById('pendingOut').addEventListener('click',async()=>{ authLog('signout:pending-screen'); await api.signOut(); route(); });
   document.getElementById('signOut').addEventListener('click',async()=>{ authLog('signout:button'); try{localStorage.removeItem(SNAP_KEY);}catch(e){} await api.signOut(); entered=false; route(); });
   document.getElementById('viewAs').addEventListener('click',()=>{
+    viewAsOfficer=false; isFull=realFull;
     viewAsMember=!viewAsMember;
     tab=viewAsMember?'book':'schedule';
     render();
