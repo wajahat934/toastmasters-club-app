@@ -3930,9 +3930,12 @@ function memberCard(mem,hist,absCount){
       </div>`}
       <div class="sect"><h3>Roles completed</h3>${roleChips}</div>
       <div class="sect row">
-        ${mem.external||!isFull?'':`<select onchange="if(this.value){mergeProfiles('${mem.id}',this.value);}" style="width:auto" title="Combine this entry with another — bookings, history and awards merge">
-          <option value="">Merge into…</option>
-          ${state.members.filter(x=>x.id!==mem.id&&!x.external&&!x.archived&&!(x.hasAccount&&mem.hasAccount)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
+        ${!isFull?'':`<select onchange="if(this.value){mergeProfiles('${mem.id}',this.value);}" style="width:auto" title="${mem.external?'This guest joined RTC (or signed up separately)? Merge their guest history into their RTC entry':'Combine this entry with another — bookings, history and awards merge'}">
+          <option value="">${mem.external?'Merge this guest into RTC member…':'Merge into…'}</option>
+          ${/* a guest entry may merge INTO an RTC member (the member keeps their
+               login, name, pathways and birthday; the guest's history moves over);
+               a member entry still never merges into a guest */
+            state.members.filter(x=>x.id!==mem.id&&(mem.external||!x.external)&&!x.archived&&!(x.hasAccount&&mem.hasAccount)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
         </select>`}
         ${isFull&&mem.hasAccount?`<label class="small muted">Rights
           <select style="width:auto" onchange="setRole('${mem.id}',this.value)" title="Officer = runs meetings (bookings, agenda, voting). Full admin = also settings, mass moves, members admin.">
