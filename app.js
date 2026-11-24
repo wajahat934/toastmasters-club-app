@@ -488,7 +488,7 @@ const DemoApi=(function(){
   const goals=[{id:uid(),profile_id:profiles[1].id,text:'Give my Ice Breaker before September',done:false}];
   const polls=[{id:'pollPast',meeting_id:'mtPast',category:'Best Speaker',status:'closed',
     candidates:[{key:profiles[1].id,name:profiles[1].name,profileId:profiles[1].id},{key:profiles[0].id,name:profiles[0].name,profileId:profiles[0].id}],
-    adjust:{},winner_key:profiles[1].id}];
+    adjust:{},winner_key:profiles[1].id,announced:true}];
   const votes=[];
   const announcements=[{id:'annDemo',text:'🧪 Welcome to the training sandbox — everything here is sample data. Play any role freely!',created_at:new Date().toISOString()}];
   const birthdayChanges=[];
@@ -556,7 +556,7 @@ const DemoApi=(function(){
     async markBcSeen(id){ const r=birthdayChanges.find(b=>b.id===id); if(r)r.seen=true; },
     async addAnnouncement(text){ const row={id:uid(),text,created_at:new Date().toISOString()}; announcements.push(row); emit('announcements','INSERT',row); return row; },
     async delAnnouncement(id){ const i=announcements.findIndex(a=>a.id===id); if(i>=0)announcements.splice(i,1); emit('announcements','DELETE',null,{id}); },
-    async createPoll(f){ const row={id:uid(),status:'open',candidates:[],adjust:{},paper_voters:[],winner_key:null,...f}; polls.push(row); emit('polls','INSERT',row); return row; },
+    async createPoll(f){ const row={id:uid(),status:'open',candidates:[],adjust:{},paper_voters:[],winner_key:null,announced:false,...f}; polls.push(row); emit('polls','INSERT',row); return row; },
     async updatePoll(id,f){ const p=polls.find(p=>p.id===id); Object.assign(p||{},f); if(p)emit('polls','UPDATE',p); },
     async deletePoll(id){ const i=polls.findIndex(p=>p.id===id); if(i>=0)polls.splice(i,1); emit('polls','DELETE',null,{id}); },
     async castVote(poll_id,voter,candidate_key){
@@ -1254,9 +1254,27 @@ function pollTally(p){
 }
 function myVoteKey(p){ const v=S.votes.find(v=>v.poll_id===p.id&&v.voter===me.profileId); return v?v.candidate_key:null; }
 function winnerName(p){ const c=(p.candidates||[]).find(c=>c.key===p.winner_key); return c?c.name:'—'; }
+/* Winners stay hidden from members until the Vote Counter presses 📣 Announce
+   winners — or automatically from 8:00 pm on the meeting day (WINNERS_AUTO_HOUR,
+   device time; dateRollCheck redraws at 8 pm). Officers always see them.
+   Stored as polls.announced (migrations/2026-11-24-announce-winners.sql); while
+   that column is missing every winner shows at once, as before. NOTE: this
+   hides the winner on screen only — polls rows (winner_key) stay readable. */
+const WINNERS_AUTO_HOUR=20;
+function annColumn(){ return S.polls.length>0&&S.polls.every(p=>'announced' in p); }
+function winnersAnnounced(mid){ return S.polls.some(p=>p.meeting_id===mid&&p.announced); }
+function winnersAutoOut(m){
+  if(!m)return true;
+  const now=new Date(), at=parseD(m.date); at.setHours(WINNERS_AUTO_HOUR,0,0,0);
+  return now>=at;
+}
+function winnersShown(mid){
+  if(actingAdmin()||!annColumn())return true;
+  return winnersAnnounced(mid)||winnersAutoOut(state.meetings.find(m=>m.id===mid));
+}
 function latestWinners(){
   const byM={};
-  for(const p of S.polls)if(p.status==='closed'&&p.winner_key)(byM[p.meeting_id]=byM[p.meeting_id]||[]).push(p);
+  for(const p of S.polls)if(p.status==='closed'&&p.winner_key&&winnersShown(p.meeting_id))(byM[p.meeting_id]=byM[p.meeting_id]||[]).push(p);
   const withPolls=state.meetings.filter(m=>byM[m.id]&&!m.cancelled);
   /* most recent past/today meeting with winners; else (votes closed early /
      testing ahead of the date) the nearest upcoming one that has winners */
@@ -1275,7 +1293,7 @@ function winnersBoardHtml(){
 function congratsHtml(){
   const today=parseD(todayStr()); let html='';
   for(const p of S.polls){
-    if(p.status!=='closed'||!p.winner_key)continue;
+    if(p.status!=='closed'||!p.winner_key||!winnersShown(p.meeting_id))continue;
     const c=(p.candidates||[]).find(c=>c.key===p.winner_key);
     if(!c||c.profileId!==me.profileId)continue;
     const m=state.meetings.find(m=>m.id===p.meeting_id); if(!m)continue;
@@ -1330,10 +1348,11 @@ function viewVoting(){
       ${ms.map(x=>`<option value="${x.id}" ${x.id===vcSelMeeting?'selected':''}>${fmtDate(x.date)}</option>`).join('')}
     </select>
   </div>
-  <p class="small muted">Open a category, members vote from their phones, and the count is live. “Paper” adds the manual votes from the room — the app and paper ballots combine. Closing announces the winner (you break any tie).</p>`;
+  <p class="small muted">Open a category, members vote from their phones, and the count is live. “Paper” adds the manual votes from the room — the app and paper ballots combine. Closing picks the winner (you break any tie). Members see the winners only when you press <b>📣 Announce winners</b> — or automatically at 8:00 pm.</p>`;
   /* officers only ever saw the tally, never a ballot — their own vote lives on
      the member Book tab, which admins do not have */
   html+=openVoteCardsHtml();
+  html+=announceCardHtml(polls,winnersAnnounced(m.id),annColumn(),`announceWinners('${m.id}')`);
   for(const p of polls)html+=vcPollCard(p);
   const open=new Set(polls.map(p=>p.category));
   const starters=STANDARD_CATS.filter(c=>!open.has(c));
@@ -1476,6 +1495,29 @@ function closePoll(pollId){
   const top=Object.keys(t).filter(k=>t[k]===max);
   if(top.length===1)finalizePoll(pollId,top[0]);
   else{ tieState[pollId]=top; render(); }
+}
+/* shared by the real Vote Counter and the Practice mirror (PARITY) */
+function announceCardHtml(polls,announced,hasCol,onclick){
+  const closed=polls.filter(p=>p.status==='closed'&&p.winner_key);
+  if(!closed.length||!hasCol)return '';
+  if(announced)return `<div class="card sub" style="border-color:var(--good)">✅ <b>Winners announced</b> — every member can see them now.</div>`;
+  const open=polls.filter(p=>p.status==='open').length;
+  return `<div class="card" style="border-color:var(--gold)">
+    <button class="btn" style="width:100%;min-height:48px;font-size:1.05rem" onclick="${onclick}">📣 Announce winners (${closed.length})</button>
+    <p class="small muted" style="margin:6px 0 0">Members can't see the winners yet.${open?` ${open} vote${open===1?' is':'s are'} still open — close ${open===1?'it':'them'} first if they should be included.`:''} If nobody presses this, the app announces them at 8:00 pm.</p>
+  </div>`;
+}
+let announcing=new Set();
+async function announceWinners(mid){
+  if(announcing.has(mid))return;
+  const polls=pollsFor(mid);
+  const closed=polls.filter(p=>p.status==='closed'&&p.winner_key);
+  if(!closed.length)return;
+  if(!await appConfirm(`Announce the winners to every member now?\n\n${closed.map(p=>p.category+': '+winnerName(p)).join('\n')}`,'📣 Announce'))return;
+  announcing.add(mid);
+  for(const p of polls){ if(!p.announced){ p.announced=true; sync(api.updatePoll(p.id,{announced:true})); } }
+  announcing.delete(mid);
+  render(); toast('📣 Winners announced');
 }
 function finalizePoll(pollId,key){
   const p=S.polls.find(p=>p.id===pollId); if(!p)return;
@@ -1914,7 +1956,7 @@ function gameUnconfirm(ym){
 const PRACTICE_NAMES=['John Carter','David Mills','Sarah Bennett','Emily Hayes','Michael Doyle',
   'Olivia Grant','James Whitfield','Sophia Reynolds','Daniel Foster','Grace Sullivan',
   'Christopher Anderson','Ruth Bell'];
-let pMembers=null,pPolls=[],pVotes=[],pTie={},pTrickle=null;
+let pMembers=null,pPolls=[],pVotes=[],pTie={},pTrickle=null,pAnnounced=false;
 /* the trainee's own ballot on the "what members see" card — not in the roster,
    so the trickle of random votes never overwrites their choice */
 const P_ME='pme';
@@ -2065,7 +2107,13 @@ function pDelete(pollId){
 async function pReset(){
   if(pPolls.length&&!await appConfirm('Clear the whole practice run and start fresh?','Clear'))return;
   if(pTrickle){ clearInterval(pTrickle); pTrickle=null; }
-  pPolls=[]; pVotes=[]; pTie={}; render();
+  pPolls=[]; pVotes=[]; pTie={}; pAnnounced=false; render();
+}
+async function pAnnounce(){
+  const closed=pPolls.filter(p=>p.status==='closed'&&p.winner_key);
+  const nm=p=>(p.candidates.find(c=>c.key===p.winner_key)||{}).name||'—';
+  if(!await appConfirm(`Announce the winners to every member now?\n\n${closed.map(p=>p.category+': '+nm(p)).join('\n')}`,'📣 Announce'))return;
+  pAnnounced=true; render(); toast('📣 Practice: members would now see the winners');
 }
 function pPollCard(p){
   const app=pAppVotes(p),total=pTally(p),tie=pTie[p.id];
@@ -2136,6 +2184,7 @@ function viewPractice(){
     </div>
   </div>
   ${pPolls.filter(p=>p.status==='open').map(pBallotCard).join('')}
+  ${announceCardHtml(pPolls,pAnnounced,true,'pAnnounce()')}
   ${pPolls.map(pPollCard).join('')||'<div class="empty">No practice votes yet — start a category below.</div>'}
   <div class="card sub"><div class="row">
       ${starters.map(c=>`<button class="btn small" onclick="pStart('${c}')">＋ ${c} vote</button>`).join('')}
@@ -4426,7 +4475,7 @@ function actSlot(k){
   return roleNameById(rid)+((i>0||rid==='spk'||rid==='eval')?' '+(i+1):'');
 }
 const ACT_FIELDS={cancelled:'cancelled / restored',reviewed:'review',theme:'theme',wod:'word of the day',config:'set-up (speakers, reserved slots, Table Topics…)',date:'date',
-  candidates:'candidates',adjust:'paper votes',paper_voters:'paper voters',winner_key:'winner',status:'status',
+  candidates:'candidates',adjust:'paper votes',paper_voters:'paper voters',winner_key:'winner',announced:'announced the winners',status:'status',
   name:'name',birthday:'birthday',paths:'pathways',joined:'joining date',home_club:'home club',email:'email',duration_min:'speech length',booked_at:'booking time'};
 function actText(r){
   const i=r.info||{}, on=i.date?` · ${esc(fmtDate(i.date))}`:'';
@@ -6914,7 +6963,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{actToggle,actPick,actFetch,renameCandidate,pRename,guestsToggle,specialAdd,specialDel,roleExtra,shiftOpen,shiftClose,shiftToggle,shiftLockToggle,shiftRun,backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{announceWinners,pAnnounce,actToggle,actPick,actFetch,renameCandidate,pRename,guestsToggle,specialAdd,specialDel,roleExtra,shiftOpen,shiftClose,shiftToggle,shiftLockToggle,shiftRun,backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,
