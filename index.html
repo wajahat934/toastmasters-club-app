@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#004165">
 <link rel="icon" type="image/png" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=145">
+<link rel="stylesheet" href="styles.css?v=146">
 </head>
 <body>
 
@@ -21,6 +21,7 @@
       <b>Demo mode</b> — no server configured yet. Try the app with sample data:
       <div class="row" style="margin-top:8px">
         <button class="btn small" id="demoAdmin">Enter as admin</button>
+        <button class="btn ghost small" id="demoOfficer">Enter as officer</button>
         <button class="btn ghost small" id="demoMember">Enter as member</button>
       </div>
     </div>
@@ -107,8 +108,8 @@
   <button class="btn ghost small" id="installNo">Not now</button>
 </div>
 
-<script src="config.js?v=145"></script>
-<script type="module" src="app.js?v=145"></script>
+<script src="config.js?v=146"></script>
+<script type="module" src="app.js?v=146"></script>
 <script>
 /* Boot watchdog — plain script, no dependence on app.js. If the app's code
    never arrives (flaky connection mid-update), every screen stays hidden and

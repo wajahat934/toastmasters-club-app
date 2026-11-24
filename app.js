@@ -287,6 +287,12 @@ const SupabaseApi={
     if(ids.length){ const r=await sb.from('votes').select('*').in('poll_id',ids); if(r.error)throw r.error; votes=r.data||[]; }
     return {polls:polls||[],votes,pollIds:ids};
   },
+  /* officer change log — written by database triggers, readable by full
+     admins only; null = the table is not there yet (migration not run) */
+  async loadActivity(){
+    const {data,error}=await sb.from('activity_log').select('*').order('at',{ascending:false}).limit(300);
+    return error?null:(data||[]);
+  },
   async addSuggestion(f){ const {data,error}=await sb.from('suggestions').insert(f).select().single(); if(error)throw error; return data; },
   async updSuggestion(id,f){ const {error}=await sb.from('suggestions').update(f).eq('id',id); if(error)throw error; },
   async delSuggestion(id){ const {error}=await sb.from('suggestions').delete().eq('id',id); if(error)throw error; },
@@ -460,7 +466,8 @@ const DemoApi=(function(){
     P('Fazal Akbar',{home_club:'ICMAP'}),
     P('Mesum Haider',{home_club:'Contour'}),
     P('Muhammad Bilal Rana',{home_club:'ITC'}),
-    P('Pending Signup',{auth_id:'demo-x',email:'new@demo',approved:false})
+    P('Pending Signup',{auth_id:'demo-x',email:'new@demo',approved:false}),
+    P('Demo Officer (you)',{auth_id:'demo-officer',role:'officer',email:'officer@demo',path:'Dynamic Leadership',base_level:1,projects_done:2})
   ];
   const day=n=>{const d=new Date();d.setDate(d.getDate()+n);return dstr(d);};
   const meetings=[
@@ -509,15 +516,16 @@ const DemoApi=(function(){
     }
     if(onEvt)onEvt(table,payload);
   };
+  const demoLog=[];
   const T={profiles,meetings,assignments,awards,goals};
-  return {
+  const API={
     demo:true,
     async init(){},
     async session(){ return auth?{user:{id:auth}}:null; },
     async refresh(){ return auth?{user:{id:auth}}:null; },
-    demoEnter(kind){ auth=kind==='admin'?'demo-admin':'demo-member'; route(); },
+    demoEnter(kind){ auth=kind==='admin'?'demo-admin':kind==='officer'?'demo-officer':'demo-member'; route(); },
     async signUp(email,pass,name){ profiles.push(P(name,{auth_id:'demo-'+uid(),email,approved:false})); throw {message:'Demo: account created as pending — sign in as admin to see the approval flow.'}; },
-    async signIn(email){ if(email==='admin@demo')auth='demo-admin'; else if(email==='member@demo')auth='demo-member'; else throw {message:'Demo mode: use the buttons above, or admin@demo / member@demo.'}; },
+    async signIn(email){ if(email==='admin@demo')auth='demo-admin'; else if(email==='officer@demo')auth='demo-officer'; else if(email==='member@demo')auth='demo-member'; else throw {message:'Demo mode: use the buttons above, or admin@demo / officer@demo / member@demo.'}; },
     async resetPassword(email){ throw {message:'Demo: a reset link would be emailed to '+email+'.'}; },
     async updatePassword(){ /* demo: nothing to store */ },
     async signOut(){ auth=null; },
@@ -534,6 +542,7 @@ const DemoApi=(function(){
       const cp=a=>a.map(o=>({...o}));
       return {polls:cp(polls),votes:cp(votes),pollIds:polls.map(p=>p.id)};
     },
+    async loadActivity(){ return demoLog.slice().reverse().slice(0,300); },
     async loadRest(){
       const cp=a=>a.map(o=>({...o}));
       return {awards:cp(awards),goals:cp(goals),dcpRows:cp(dcpRows),agendaRows:cp(agendaRows),
@@ -605,6 +614,29 @@ const DemoApi=(function(){
     async savePushSub(){}, async deletePushSub(){}, notifyPush(){},
     _tables:T
   };
+  /* the real officer log is written by database triggers; the sandbox fakes
+     the same rows for the commonest officer writes so the log view can be
+     rehearsed (sign in as officer, change things, then sign in as admin) */
+  const logAs=(tbl,op,info,ref)=>{
+    const me=profiles.find(p=>p.auth_id===auth);
+    if(!me||me.role!=='officer')return;
+    demoLog.push({id:demoLog.length+1,at:new Date().toISOString(),actor:me.id,actor_name:me.name,tbl,op,ref:ref||null,info});
+  };
+  const dateOf=mid=>(meetings.find(m=>m.id===mid)||{}).date;
+  const nameOf=pid=>(profiles.find(p=>p.id===pid)||{}).name;
+  const wrap=(k,fn)=>{ const orig=API[k]; API[k]=async function(...a){ const before=fn.pre?fn.pre(...a):null; const r=await orig.apply(this,a); try{ fn(before,...a); }catch(e){} return r; }; };
+  const asgPre=(mid,key)=>{ const x=assignments.find(r=>r.meeting_id===mid&&r.slot_key===key); return x?{...x}:null; };
+  const f1=(b,mid,key,pid)=>logAs('assignments',b?'UPDATE':'INSERT',{date:dateOf(mid),slot:key,who:nameOf(pid),was:b?nameOf(b.profile_id):undefined,changed:b?['profile_id']:undefined},mid); f1.pre=asgPre;
+  const f2=(b,mid,key,pid)=>logAs('assignments',b?'UPDATE':'INSERT',{date:dateOf(mid),slot:key,who:nameOf(pid),was:b?nameOf(b.profile_id):undefined,changed:b?['profile_id']:undefined},mid); f2.pre=asgPre;
+  const f3=(b,mid,key)=>{ if(b)logAs('assignments','DELETE',{date:dateOf(mid),slot:key,was:nameOf(b.profile_id)},mid); }; f3.pre=asgPre;
+  const f4=(b,mid,key,f)=>logAs('assignments','UPDATE',{date:dateOf(mid),slot:key,who:nameOf((b||{}).profile_id),status:f.status,oldStatus:(b||{}).status,changed:Object.keys(f)},mid); f4.pre=asgPre;
+  wrap('book',f1); wrap('adminAssign',f2); wrap('unbook',f3); wrap('setAsg',f4);
+  wrap('updateMeeting',(b,id,f)=>logAs('meetings','UPDATE',{date:dateOf(id),changed:Object.keys(f),cancelled:f.cancelled},id));
+  wrap('createPoll',(b,f)=>logAs('polls','INSERT',{date:dateOf(f.meeting_id),category:f.category,status:'open'}));
+  wrap('addAnnouncement',(b,text)=>logAs('announcements','INSERT',{text:String(text).slice(0,140)}));
+  wrap('saveAgenda',(b,mid)=>logAs('agendas','UPDATE',{date:dateOf(mid),changed:['data']},mid));
+  wrap('updateProfile',(b,id,f)=>logAs('profiles','UPDATE',{name:nameOf(id),changed:Object.keys(f)},id));
+  return API;
 })();
 
 /* ============================================================
@@ -612,7 +644,11 @@ const DemoApi=(function(){
    read/render logic carries over. Mutations patch it AND call api.
    ============================================================ */
 let S={profiles:[],meetings:[],assignments:[],awards:[],goals:[],polls:[],votes:[],announcements:[],birthdayChanges:[],suggestions:[],settings:defaultSettings(),dcp:{},agendas:{},backups:[],backupsOn:false};
-let state=null, me=null, isAdmin=false;
+let state=null, me=null, isAdmin=false, isFull=false;
+/* isAdmin = officer OR full admin (runs meetings). isFull = full admin (the VPE):
+   settings, mass moves and members admin are for full admins only. The database
+   enforces the same split once migrations/2026-11-24-officer-level.sql has run. */
+function fullOnly(){ if(isFull)return true; toast('Only the full admin (VPE) can do this'); return false; }
 
 function rebuild(){
   SPECIAL_ROLES={};
@@ -957,7 +993,7 @@ let viewAsMember=false;
 function actingAdmin(){ return isAdmin&&!viewAsMember; }
 function tabsFor(){
   if(isAdmin&&!viewAsMember)
-    return [['schedule','Roles & Meetings'],['agenda','Agenda'],['voting','Voting'],['members','Members'],['points','🏆 Points'],['dcp','DCP Goals'],['me','My Profile'],['settings','Settings'],['practice','🧪 Practice']];
+    return [['schedule','Roles & Meetings'],['agenda','Agenda'],['voting','Voting'],['members','Members'],['points','🏆 Points'],['dcp','DCP Goals'],['me','My Profile'],...(isFull?[['settings','Settings']]:[]),['practice','🧪 Practice']];
   const t=[['book','Book a Role'],['points','🏆 Points'],['me','My Profile']];
   if(state&&vcMeetings().length){ t.push(['voting','Vote Counter']); t.push(['practice','🧪 Practice']); }
   return t;
@@ -996,7 +1032,7 @@ function render(){
   clearInterval(liveTimer);
   const keepScroll=grabScroll();
   document.getElementById('hClub').textContent=state.settings.clubName||'Toastmasters Club';
-  document.getElementById('uName').textContent=(me?me.name:'')+(isAdmin?(viewAsMember?' (member view)':' (admin)'):'');
+  document.getElementById('uName').textContent=(me?me.name:'')+(isAdmin?(viewAsMember?' (member view)':(isFull?' (admin)':' (officer)')):'');
   const va=document.getElementById('viewAs');
   if(va){ va.style.display=isAdmin?'':'none'; va.textContent=viewAsMember?'← Back to admin':'👁 View as member'; }
   const TABS=tabsFor();
@@ -1817,7 +1853,7 @@ function viewPoints(){
         .map(([k,l])=>`<tr><td>${l}</td><td class="num"><input type="number" min="0" step="0.5" style="width:70px" value="${R[k]}" onchange="gameSet('${k}',this.value)"></td></tr>`).join('')
         +`<tr><td>Points count from</td><td class="num"><input type="date" style="width:auto" value="${R.start}" onchange="gameSet('start',this.value)"></td></tr>`:''}
     </tbody></table></div>
-    ${admin?`<button class="btn ghost small" style="margin-top:8px" onclick="gameToggleEdit()">${gameEditing?'Done':'✎ Edit the numbers'}</button>`:''}
+    ${admin&&isFull?`<button class="btn ghost small" style="margin-top:8px" onclick="gameToggleEdit()">${gameEditing?'Done':'✎ Edit the numbers'}</button>`:''}
   </details>`;
   if(admin&&!S.profiles.some(p=>'joined' in p))
     html+=`<p class="small muted">⚠ Joining dates aren't set up yet — run <code>migrations/2026-10-03-gamification.sql</code>. Until then nobody gets the newcomer boost.</p>`;
@@ -2731,7 +2767,7 @@ function meetingBookingCard(m){
       <button class="btn ghost small" onclick="copyOpenRoles('${m.id}')" title="Copy a WhatsApp message listing this meeting's open roles">📋 Open roles</button>
       <button class="btn ghost small" onclick="copyRolePlayers('${m.id}')" title="Copy a WhatsApp message listing who has which role, with speakers asked to send their evaluation forms">📣 Role list</button>
       <button class="btn ghost small" onclick="cancelMeeting('${m.id}')">Cancel meeting</button>
-      <button class="btn ghost small" onclick="shiftOpen('${m.id}')" title="This meeting becomes a special one: move its bookings forward to later meetings">⏭ Shift bookings…</button>
+      ${isFull?`<button class="btn ghost small" onclick="shiftOpen('${m.id}')" title="This meeting becomes a special one: move its bookings forward to later meetings">⏭ Shift bookings…</button>`:''}
       ${specialBtn(m)}
     </div>
     <div class="row small" style="margin-top:8px;padding:6px 10px;background:var(--surface2);border:1px solid var(--line);border-radius:8px">
@@ -2771,7 +2807,7 @@ function meetingBookingCard(m){
         const when=at?`booked ${new Date(at).toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}`
                      :'booking time not recorded yet';
         const blocked=slotBlocked(m,s.key);
-        return `<div class="slot"><label>${esc(s.label)}${extraCtl(m,s)}${specialCtl(m,s)}${(a&&(a.durationMin||0)>=LONG_MIN)?` <span class="pill other" title="long-format speech — one speaker slot fewer this meeting">⏱ ${a.durationMin}m</span>`:''}${blocked?` <span class="pill absent" title="Members cannot book this slot — you assign it from the dropdown">🚫 reserved</span>`:''}${isNext?` <span class="pill other" title="Booked last of the ${esc(roleNameById(rid))}s — gives way first">gives way</span>`:''}${canDefer?`
+        return `<div class="slot"><label>${esc(s.label)}${extraCtl(m,s)}${specialCtl(m,s)}${(a&&(a.durationMin||0)>=LONG_MIN)?` <span class="pill other" title="long-format speech — one speaker slot fewer this meeting">⏱ ${a.durationMin}m</span>`:''}${blocked?` <span class="pill absent" title="Members cannot book this slot — you assign it from the dropdown">🚫 reserved</span>`:''}${isNext?` <span class="pill other" title="Booked last of the ${esc(roleNameById(rid))}s — gives way first">gives way</span>`:''}${canDefer&&isFull?`
             <button class="btn ghost small" style="float:right;padding:0 6px"
               title="Move to a later meeting — ${esc(when)}" onclick="deferBooking('${m.id}','${s.key}')">⏩</button>`:''}${!(a&&a.memberId)?`
             <button class="btn ghost small" style="float:right;padding:0 6px"
@@ -3038,7 +3074,7 @@ const asgKey=a=>a.meeting_id+'|'+a.slot_key;
    Grammarian; DCP plan rows on those dates move too. One ↩ Undo restores
    the bookings. */
 let shiftStart=null, shiftPick=new Set(), shiftLock=true;
-function shiftOpen(mid){ shiftStart=mid; shiftPick=new Set(); shiftLock=true; render(); window.scrollTo(0,0); }
+function shiftOpen(mid){ if(!fullOnly())return; shiftStart=mid; shiftPick=new Set(); shiftLock=true; render(); window.scrollTo(0,0); }
 function shiftClose(){ shiftStart=null; render(); }
 function shiftToggle(mid,on){ if(on)shiftPick.add(mid); else shiftPick.delete(mid); render(); }
 function shiftLockToggle(on){ shiftLock=on; }
@@ -3068,6 +3104,7 @@ function shiftPanelHtml(){
   </div>`;
 }
 async function shiftRun(){
+  if(!fullOnly())return;
   const chain=shiftChain(); if(chain.length<2)return;
   const total=chain.slice(0,-1).reduce((s,m)=>s+Object.values(m.assignments||{}).filter(a=>a&&a.memberId).length,0);
   if(!await appConfirm(`Shift ${total} booking${total===1?'':'s'} forward?\n\n${chain.map(m=>fmtDate(m.date)).join(' → ')}\n\nNothing is deleted: a booking with no free slot stays where it is and is listed. You can undo the bookings afterwards.`,'Shift bookings'))return;
@@ -3177,6 +3214,7 @@ function moveEvaluatorWith(mid,spkKey,landed){
   return moveForward(mid,evKey,want)?(who?who.name:'their evaluator'):null;
 }
 function deferBooking(mid,key){
+  if(!fullOnly())return;
   const m=state.meetings.find(x=>x.id===mid); if(!m)return;
   const a=(m.assignments||{})[key]; if(!a||!a.memberId)return;
   const rid=ridOf(key);
@@ -3339,6 +3377,15 @@ async function spkDelta(mid,d){
      meeting has no prepared speeches at all */
   const cur=speakersFor(m), next=Math.min(8,Math.max(0,cur+d));
   if(next===cur)return;
+  if(d<0&&!isFull){
+    /* officers: never move anyone — only drop an empty last pair */
+    const held=k=>{ const a=(m.assignments||{})[k]; return !!(a&&a.memberId); };
+    const ks=['spk|'+(cur-1),'eval|'+(cur-1)];
+    if(ks.some(held)){ toast('The last speaker or evaluator slot is booked. Only the full admin (VPE) can move people.'); return; }
+    m.config={...(m.config||{}),speakers:next,blockedSlots:((m.config||{}).blockedSlots||[]).filter(k=>!ks.includes(k))};
+    saveMeetingConfig(m);
+    return;
+  }
   if(d<0){
     const c=compactSpeakerSlot(mid,cur);
     if(c==='abort'){ render(); return; }
@@ -3685,13 +3732,13 @@ function viewMembers(){
         const match=state.members.find(x=>!x.hasAccount&&!x.external&&!x.archived&&x.id!==m.id&&x.name.trim().toLowerCase()===m.name.trim().toLowerCase());
         return `<div class="row" style="padding:4px 0">
         <span class="grow"><b>${esc(m.name)}</b> <span class="muted small">${esc(m.email)}</span></span>
-        ${match?`<button class="btn good small" onclick="approveMerge('${m.id}','${match.id}')" title="Link this login to the existing roster entry so their booking history carries over">Approve &amp; merge with roster</button>`:''}
+        ${!isFull?'<span class="muted small">the full admin (VPE) approves sign-ups</span>':`${match?`<button class="btn good small" onclick="approveMerge('${m.id}','${match.id}')" title="Link this login to the existing roster entry so their booking history carries over">Approve &amp; merge with roster</button>`:''}
         <select onchange="if(this.value){mergeProfiles('${m.id}',this.value);}" style="width:auto" title="Link this login to a roster entry even if the names differ">
           <option value="">Merge into roster entry…</option>
           ${state.members.filter(x=>!x.hasAccount&&!x.archived&&x.id!==m.id).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
         </select>
         <button class="btn ${match?'ghost':'good'} small" onclick="approveMember('${m.id}',true)">Approve as new</button>
-        <button class="btn danger small" onclick="delMember('${m.id}')">Reject</button>
+        <button class="btn danger small" onclick="delMember('${m.id}')">Reject</button>`}
       </div>`;}).join('')}</div>`;
   }
   html+=`<div class="card sub"><div class="row">
@@ -3778,7 +3825,7 @@ function memberCard(mem,hist,absCount){
   return `<details class="mem" id="mem-${mem.id}">
     <summary>
       <span class="mname">${esc(mem.name)}</span>
-      ${mem.role==='admin'?'<span class="pill admin">admin</span>':''}
+      ${mem.role==='admin'?'<span class="pill admin">admin</span>':mem.role==='officer'?'<span class="pill admin">officer</span>':''}
       ${mem.hasAccount?'':'<span class="pill guest">no login</span>'}
       ${mem.external?`<span class="pill guest">guest · ${esc(mem.homeClub||'other club')}</span>`:pathSummary(mem)}
       ${absCount?`<span class="chip bad small">absent ×${absCount}</span>`:''}
@@ -3822,15 +3869,16 @@ function memberCard(mem,hist,absCount){
       </div>`}
       <div class="sect"><h3>Roles completed</h3>${roleChips}</div>
       <div class="sect row">
-        ${mem.external?'':`<select onchange="if(this.value){mergeProfiles('${mem.id}',this.value);}" style="width:auto" title="Combine this entry with another — bookings, history and awards merge">
+        ${mem.external||!isFull?'':`<select onchange="if(this.value){mergeProfiles('${mem.id}',this.value);}" style="width:auto" title="Combine this entry with another — bookings, history and awards merge">
           <option value="">Merge into…</option>
           ${state.members.filter(x=>x.id!==mem.id&&!x.external&&!x.archived&&!(x.hasAccount&&mem.hasAccount)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}
         </select>`}
-        ${mem.hasAccount?(mem.role==='admin'
-          ?`<button class="btn ghost small" onclick="setRole('${mem.id}','member')">Remove admin</button>`
-          :`<button class="btn ghost small" onclick="setRole('${mem.id}','admin')">Make admin</button>`):''}
-        <button class="btn ghost small" onclick="toggleArchive('${mem.id}')">${mem.archived?'Reactivate':'Deactivate'}</button>
-        <button class="btn danger small" onclick="delMember('${mem.id}')">Delete permanently</button>
+        ${isFull&&mem.hasAccount?`<label class="small muted">Rights
+          <select style="width:auto" onchange="setRole('${mem.id}',this.value)" title="Officer = runs meetings (bookings, agenda, voting). Full admin = also settings, mass moves, members admin.">
+            ${[['member','Member'],['officer','Officer'],['admin','Full admin']].map(([v,t])=>`<option value="${v}" ${(mem.role||'member')===v?'selected':''}>${t}</option>`).join('')}
+          </select></label>`:''}
+        ${isFull?`<button class="btn ghost small" onclick="toggleArchive('${mem.id}')">${mem.archived?'Reactivate':'Deactivate'}</button>
+        <button class="btn danger small" onclick="delMember('${mem.id}')">Delete permanently</button>`:''}
       </div>
     </div>
   </details>`;
@@ -3902,6 +3950,7 @@ function admGoalDel(id,memId){ S.goals=S.goals.filter(g=>g.id!==id); sync(api.de
 /* Merge one profile into another: bookings, history, awards and goals move
    to the surviving entry; the login (if any) carries over; the duplicate goes. */
 async function mergeProfiles(fromId,intoId){
+  if(!fullOnly())return;
   const from=S.profiles.find(p=>p.id===fromId), into=S.profiles.find(p=>p.id===intoId);
   if(!from||!into||fromId===intoId)return;
   if(from.auth_id&&into.auth_id){ toast('Both entries have logins — merge is for combining a login with a roster entry. Deactivate one instead.'); render(); return; }
@@ -3924,6 +3973,7 @@ async function mergeProfiles(fromId,intoId){
   }catch(e){ toast('Merge failed: '+(e.message||e)); }
 }
 async function approveMerge(pendId,rosterId){
+  if(!fullOnly())return;
   const pend=S.profiles.find(p=>p.id===pendId); if(!pend)return;
   try{
     /* the signed-up member's own spelling of their name wins */
@@ -3937,23 +3987,27 @@ async function approveMerge(pendId,rosterId){
   }catch(e){ toast('Merge failed: '+(e.message||e)); }
 }
 function approveMember(id,ok){
+  if(!fullOnly())return;
   const p=S.profiles.find(p=>p.id===id); if(p)p.approved=ok;
   sync(api.updateProfile(id,{approved:ok}));
   rebuild();render();toast(ok?'Approved ✓':'Updated');
 }
 function setRole(id,role){
-  if(id===me.profileId&&role==='member'&&!confirm('Remove YOUR OWN admin rights?'))return;
+  if(!fullOnly())return;
+  if(id===me.profileId&&role!=='admin'&&!confirm('Remove YOUR OWN full admin rights?')){ render(); return; }
   const p=S.profiles.find(p=>p.id===id); if(p)p.role=role;
   sync(api.updateProfile(id,{role}));
-  rebuild();render();toast(role==='admin'?'Promoted to admin':'Admin rights removed');
+  rebuild();render();toast(role==='admin'?'Now a full admin':role==='officer'?'Now an officer':'Now a member');
 }
 function toggleArchive(id){
+  if(!fullOnly())return;
   const p=S.profiles.find(p=>p.id===id); if(!p)return;
   p.active=!p.active;
   sync(api.updateProfile(id,{active:p.active}));
   rebuild();render();
 }
 function delMember(id){
+  if(!fullOnly())return;
   const m=memberById(id); if(!m)return;
   if(!confirm('Delete '+m.name+' permanently? Their role history and bookings disappear too. Deactivating is usually better.'))return;
   S.profiles=S.profiles.filter(p=>p.id!==id);
@@ -4150,6 +4204,7 @@ function planMeeting(ds){
 }
 const speaksAt=(m,pid)=>Object.entries((m&&m.assignments)||{}).some(([k,a])=>/^spk\|/.test(k)&&a&&a.memberId===pid);
 async function dcpPlanBookAll(yr){
+  if(!fullOnly())return;
   const from=bookingDayStr();
   const rows=dcpPlan(yr).filter(r=>r.name&&r.date>=from);
   const byName=n=>state.members.find(m=>m.name.trim().toLowerCase()===n.trim().toLowerCase());
@@ -4201,7 +4256,7 @@ function dcpPlanHtml(yr){
   const opts=sel=>`<option value="">— free slot —</option>`+state.members.filter(m=>!m.archived&&!m.external)
     .map(m=>`<option ${m.name===sel?'selected':''}>${esc(m.name)}</option>`).join('');
   return `<div class="card" id="dcpPlanCard"><div class="row"><h3 style="margin:0" class="grow">📅 DCP speech plan <span class="muted small">— officers only · one reserved speaker slot per meeting</span></h3>
-      <button class="btn small no-print" onclick="dcpPlanBookAll(${yr})" title="Book every remaining speech in this plan, creating future meetings as needed">📌 Book the whole plan</button>
+      ${isFull?`<button class="btn small no-print" onclick="dcpPlanBookAll(${yr})" title="Book every remaining speech in this plan, creating future meetings as needed">📌 Book the whole plan</button>`:''}
       <button class="btn ghost small no-print" onclick="printDcpPlan()" title="Print just this plan">🖨 Print plan</button>
       <button class="btn ghost small no-print" onclick="dcpPlanToggle()">${dcpPlanEdit?'Done':'✎ Edit'}</button></div>
     <p class="print-only small">Rawalpindi Toastmasters Club · printed ${fmtDate(todayStr())}</p>
@@ -4339,10 +4394,98 @@ function setDcp(yr,k,v){
   render();
 }
 
+/* ================= FULL ADMIN: officer change log =================
+   Rows come from database triggers (migrations/2026-11-24-officer-level.sql):
+   every write an OFFICER makes, one line each (agenda typing and paper-vote
+   taps are folded to one line per 10 minutes). Fetched only when a full admin
+   opens Settings — nobody else downloads it. */
+let actLog=undefined, actLoading=false, actWho='', actOpen=false;
+async function actFetch(){
+  if(actLoading)return; actLoading=true;
+  try{ actLog=await api.loadActivity(); }catch(e){ actLog=null; }
+  actLoading=false;
+  if(tab==='settings')render();
+}
+function actToggle(open){ if(open===actOpen)return; actOpen=open; if(open&&actLog===undefined)actFetch(); render(); }
+function actPick(v){ actWho=v; render(); }
+function actSlot(k){
+  if(!k)return 'a role';
+  const [rid,n]=String(k).split('|'), i=Number(n)||0;
+  return roleNameById(rid)+((i>0||rid==='spk'||rid==='eval')?' '+(i+1):'');
+}
+const ACT_FIELDS={cancelled:'cancelled / restored',reviewed:'review',theme:'theme',wod:'word of the day',config:'set-up (speakers, reserved slots, Table Topics…)',date:'date',
+  candidates:'candidates',adjust:'paper votes',paper_voters:'paper voters',winner_key:'winner',status:'status',
+  name:'name',birthday:'birthday',paths:'pathways',joined:'joining date',home_club:'home club',email:'email',duration_min:'speech length',booked_at:'booking time'};
+function actText(r){
+  const i=r.info||{}, on=i.date?` · ${esc(fmtDate(i.date))}`:'';
+  const ch=(i.changed||[]).map(k=>ACT_FIELDS[k]||k).filter((v,j,a)=>a.indexOf(v)===j).join(', ');
+  const nm=x=>`<b>${esc(x||'someone')}</b>`;
+  switch(r.tbl){
+    case 'assignments':
+      if(r.op==='INSERT')return `booked ${nm(i.who)} as ${esc(actSlot(i.slot))}${on}`;
+      if(r.op==='DELETE')return `removed ${nm(i.was)} from ${esc(actSlot(i.slot))}${on}`;
+      if(i.was&&i.who&&i.was!==i.who)return `swapped ${esc(actSlot(i.slot))}: ${nm(i.was)} → ${nm(i.who)}${on}`;
+      if(i.status&&i.status!==i.oldStatus)return `marked ${nm(i.who)} <i>${esc(i.status)}</i> in ${esc(actSlot(i.slot))}${on}`;
+      return `changed ${nm(i.who)}'s ${esc(actSlot(i.slot))} booking (${esc(ch)})${on}`;
+    case 'meetings':
+      if(r.op==='INSERT')return `created the meeting${on}`;
+      if(r.op==='DELETE')return `<b>deleted</b> the meeting${on}`;
+      if((i.changed||[]).includes('cancelled'))return `${i.cancelled?'<b>cancelled</b>':'restored'} the meeting${on}`;
+      return `changed the meeting: ${esc(ch)}${on}`;
+    case 'polls':
+      if(r.op==='INSERT')return `opened voting: ${esc(i.category||'')}${on}`;
+      if(r.op==='DELETE')return `<b>deleted</b> the poll ${esc(i.category||'')}${on}`;
+      if((i.changed||[]).includes('status'))return `${i.status==='closed'?'closed':'reopened'} voting: ${esc(i.category||'')}${on}`;
+      return `changed ${esc(ch)} in ${esc(i.category||'a poll')}${on}`;
+    case 'votes': return `<b>deleted a vote</b> in ${esc(i.category||'a poll')}`;
+    case 'profiles':
+      if(r.op==='INSERT')return `added ${nm(i.name)} to the roster`;
+      if(r.op==='DELETE')return `<b>deleted</b> ${nm(i.name)}`;
+      return `edited ${nm(i.name)} (${esc(ch)})`;
+    case 'announcements': return r.op==='DELETE'?'removed an announcement':`posted: “${esc(i.text||'')}”`;
+    case 'awards': return `${r.op==='DELETE'?'removed':'recorded'} Level ${esc(i.level||'')}${i.path?' '+esc(i.path):''} for ${nm(i.name)}`;
+    case 'dcp': return `edited the DCP sheet ${esc(i.year||'')}`;
+    case 'agendas': return `${r.op==='INSERT'?'started':'edited'} the agenda${on}`;
+    case 'settings': return `changed ${esc((i.keys||[]).join(', '))}`;
+  }
+  return `${esc(r.op)} ${esc(r.tbl)}`;
+}
+function activityCardHtml(){
+  const officers=state.members.filter(m=>m.role==='officer');
+  let body;
+  if(!actOpen)body='';
+  else if(actLog===undefined)body='<p class="small muted">Loading…</p>';
+  else if(actLog===null)body=`<p class="small muted">The log is not switched on yet. Run <code>migrations/2026-11-24-officer-level.sql</code> in Supabase → SQL Editor once.</p>`;
+  else{
+    const rows=actLog.filter(r=>!actWho||r.actor===actWho);
+    let lastDay='';
+    body=rows.length?rows.map(r=>{
+      const d=new Date(r.at), day=d.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'});
+      const head=day!==lastDay?`<h4 style="margin:12px 0 4px">${esc(day)}</h4>`:''; lastDay=day;
+      return `${head}<div class="small" style="padding:3px 0;border-bottom:1px solid var(--line)">
+        <span class="muted">${esc(d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}))}</span>
+        &nbsp;<b>${esc(r.actor_name||'(removed)')}</b> ${actText(r)}</div>`;
+    }).join(''):'<p class="small muted">No officer changes yet.</p>';
+    body=`<div class="row" style="margin:8px 0">
+        <select style="width:auto" onchange="actPick(this.value)">
+          <option value="">All officers</option>
+          ${officers.map(o=>`<option value="${o.id}" ${actWho===o.id?'selected':''}>${esc(o.name)}</option>`).join('')}
+        </select>
+        <button class="btn ghost small" onclick="actFetch()">↻ Refresh</button>
+        <span class="small muted">latest 300 changes · kept 6 months</span>
+      </div>${body}`;
+  }
+  return `<details class="card" ${actOpen?'open':''} ontoggle="actToggle(this.open)">
+    <summary style="cursor:pointer"><b>🕵 Officer activity</b> <span class="muted small">— every change an officer makes. Only full admins see this.</span></summary>
+    ${officers.length?'':'<p class="small muted">No officers yet. Members → open a person → Rights → Officer.</p>'}
+    ${body}</details>`;
+}
+
 /* ================= ADMIN: settings ================= */
 function viewSettings(){
   const s=state.settings;
   return `<h2>Club settings</h2>
+  ${activityCardHtml()}
   <div class="card">
     <div class="row">
       <div class="grow"><label class="small muted">Club name</label><br>
@@ -6507,7 +6650,8 @@ let liveOpts={};
 function wantVotesLive(){ return !!(me&&(isAdmin||vcMeetings().length)); }
 async function enterApp(profile){
   me={profileId:profile.id,name:profile.name};
-  isAdmin=profile.role==='admin';
+  isAdmin=profile.role==='admin'||profile.role==='officer';
+  isFull=profile.role==='admin';
   /* instant open: paint the device's last snapshot while the fresh load runs */
   let painted=false;
   if(!entered&&paintSnapshot(profile.id)){
@@ -6751,11 +6895,13 @@ function bindAuth(){
     document.getElementById('demoBanner').style.display='';
     document.getElementById('demoAdmin').addEventListener('click',()=>DemoApi.demoEnter('admin'));
     document.getElementById('demoMember').addEventListener('click',()=>DemoApi.demoEnter('member'));
+    const dOff=document.getElementById('demoOfficer');
+    if(dOff)dOff.addEventListener('click',()=>DemoApi.demoEnter('officer'));
   }
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{renameCandidate,pRename,guestsToggle,specialAdd,specialDel,roleExtra,shiftOpen,shiftClose,shiftToggle,shiftLockToggle,shiftRun,backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{actToggle,actPick,actFetch,renameCandidate,pRename,guestsToggle,specialAdd,specialDel,roleExtra,shiftOpen,shiftClose,shiftToggle,shiftLockToggle,shiftRun,backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,

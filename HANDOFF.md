@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=145**.
+   every deploy or browsers serve the old `app.js`. Currently **v=146**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -33,9 +33,9 @@
 
 ---
 
-## Start here — state as of 2026-11-20
+## Start here — state as of 2026-11-24
 
-**Live at v145, repo clean, nothing half-built.** The owner is the club's VPE and one of three
+**Live at v146, repo clean. Officer level shipped; its SQL waits for the owner to run it.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **Read first:** the dated "Added / Fixed / Changed" sections below, newest first — each names the
@@ -95,6 +95,10 @@ backups and alerts (`push-and-backup-setup.txt`). The setup sheet holds the VAPI
 key — never copy it into this repo.
 
 ## Outstanding — needs the user, not code
+
+- **Run `migrations/2026-11-24-officer-level.sql`** (Supabase → SQL Editor), THEN set the
+  co-officer and president to Officer (Members → open person → Rights). Until it runs, picking
+  "Officer" fails with a sync error and the Officer activity card says the log is off.
 
 - ~~**Run `migrations/2026-10-11-backup-speakers.sql`**~~ **Done** (2026-10-11).
 - ~~**Run `migrations/2026-10-03-gamification.sql`**~~ **Done** (joining dates in use).
@@ -180,6 +184,31 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Added 2026-11-24 — Officer level + officer activity log (v146)
+
+Three levels: `admin` = full admin (VPE), `officer` (new), `member`. App: `isAdmin` = admin OR
+officer (runs meetings, unchanged), `isFull` = admin; `fullOnly()` guards the locked actions.
+Officers have NO Settings tab, no ⏩ move-forward, no ⏭ Shift bookings, no 📌 Book the whole DCP
+plan, no points-rules edit, and speaker "−" only drops an EMPTY last speaker+evaluator pair (never
+moves anyone). Members tab: no Rights picker, approve/merge, deactivate or delete (pending card says
+"the full admin approves sign-ups"). Full admin sets rights from a Member / Officer / Full admin
+picker on the member card.
+DB (`migrations/2026-11-24-officer-level.sql`): `is_admin()` now includes officers (every old
+rule keeps working), new `is_full_admin()`; `guard_profile_update` (now BEFORE INSERT OR UPDATE)
+blocks officers changing role/approved/active/auth_id or creating non-members; profiles delete is
+full-admin only; `settings_guard` lets officers change only cakeDone, gameWinners, agendaHeader,
+urduNames, agendaChecklist, agendaAssets, agendaTemplate — ADD a key there if a new
+officer-reachable settings save is ever added, or it will fail for officers. Mass moves are app-only
+locks (they are ordinary booking writes; the DB can't tell them apart).
+Log: `activity_log`, written ONLY by trigger `log_officer_change` (security definer; officers can't
+read or forge it) on assignments, meetings, polls, votes (deletes), profiles, announcements, awards,
+dcp, agendas, settings — officers only. Repeated agenda/poll/settings/profile/dcp updates fold to one
+line per 10 min; rows older than 180 days pruned now and then. Shown in Settings → 🕵 Officer
+activity (`activityCardHtml`, `actText`), fetched only when a full admin opens that card.
+The SQL was tested on PGlite (27 checks, incl. running it twice). Demo has an "Enter as officer"
+button (profile appended LAST so other demo ids stay put) and fakes log rows for common writes.
+notify Edge Function accepts officers for announcements (redeploy when push is switched on).
 
 ## Changed 2026-11-20 — streak bonus every 6 role meetings (v145)
 

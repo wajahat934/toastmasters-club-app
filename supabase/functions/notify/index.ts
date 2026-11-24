@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
 
   let title = "", body = "";
   if (type === "announcement") {
-    if (prof.role !== "admin") return new Response("admin only", { status: 403, headers: CORS });
+    if (prof.role !== "admin" && prof.role !== "officer") return new Response("admin only", { status: 403, headers: CORS });
     title = "📣 Club announcement";
     body = String(data?.text ?? "").slice(0, 140);
   } else if (type === "poll") {
