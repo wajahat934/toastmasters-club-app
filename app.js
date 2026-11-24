@@ -924,6 +924,29 @@ function eduCounts(yr){
   }
   return c;
 }
+/* who is behind each education goal: the same awards eduCounts counts, in
+   date order. Goals 2/3 and 5/6 share one pool — the first completions fill
+   the first goal, later ones the "more" goal, exactly like the counts above. */
+function eduAwards(yr){
+  const c={1:[],2:[],3:[],45:[]};
+  for(const mem of state.members){
+    if(mem.external)continue;
+    for(const a of (mem.awards||[])){
+      if(!a.date||!inClubYear(a.date,yr))continue;
+      const l=a.level==='DTM'?5:Number(a.level);
+      const row={name:mem.name,level:a.level,path:a.path||'',date:a.date};
+      if(l===1)c[1].push(row);else if(l===2)c[2].push(row);else if(l===3)c[3].push(row);else if(l>=4)c[45].push(row);
+    }
+  }
+  for(const k in c)c[k].sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.name.localeCompare(b.name));
+  return c;
+}
+function goalWho(n,yr){
+  const e=eduAwards(yr);
+  return {1:e[1],2:e[2].slice(0,2),3:e[2].slice(2),4:e[3],5:e[45].slice(0,1),6:e[45].slice(1)}[n]||null;
+}
+let dcpWhoOpen=new Set();
+function dcpWhoToggle(n,open){ if(open)dcpWhoOpen.add(n); else dcpWhoOpen.delete(n); }
 function dcpGoals(yr){
   const e=eduCounts(yr),d=dcpYear(yr);
   return [
@@ -4449,7 +4472,13 @@ function goalControls(n,yr,d){
   if(n===10)return `<div class="row small" style="margin-top:6px">
     <label><input type="checkbox" ${d.dues?'checked':''} onchange="setDcp(${yr},'dues',this.checked)"> dues on time</label>
     <label><input type="checkbox" ${d.officerList?'checked':''} onchange="setDcp(${yr},'officerList',this.checked)"> officer list</label></div>`;
-  return `<div class="small muted" style="margin-top:6px">auto-counted from dated level completions</div>`;
+  const who=goalWho(n,yr)||[];
+  if(!who.length)return `<div class="small muted" style="margin-top:6px">auto-counted from dated level completions · nobody yet</div>`;
+  return `<details class="small" style="margin-top:6px" ${dcpWhoOpen.has(n)?'open':''} ontoggle="dcpWhoToggle(${n},this.open)">
+    <summary style="cursor:pointer;color:var(--accent)">👥 Who counted (${who.length})</summary>
+    ${who.map(w=>`<div style="padding:3px 0;border-bottom:1px solid var(--line)"><b>${esc(w.name)}</b> — ${w.level==='DTM'?'DTM':'Level '+esc(w.level)}${w.path?' · '+esc(w.path):''} <span class="muted">· ${esc(fmtDate(w.date))}</span></div>`).join('')}
+    <div class="muted" style="margin-top:4px">from dated level completions (Members → Level completions)</div>
+  </details>`;
 }
 function setDcp(yr,k,v){
   dcpYear(yr)[k]=v;
@@ -6966,7 +6995,7 @@ function bindAuth(){
 }
 
 /* ---------- boot ---------- */
-Object.assign(window,{announceWinners,pAnnounce,actToggle,actPick,actFetch,renameCandidate,pRename,guestsToggle,specialAdd,specialDel,roleExtra,shiftOpen,shiftClose,shiftToggle,shiftLockToggle,shiftRun,backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
+Object.assign(window,{dcpWhoToggle,announceWinners,pAnnounce,actToggle,actPick,actFetch,renameCandidate,pRename,guestsToggle,specialAdd,specialDel,roleExtra,shiftOpen,shiftClose,shiftToggle,shiftLockToggle,shiftRun,backupJoin,backupLeave,backupPromote,backupRemove,dcpPlanBookAll,dcpPersonPick,dcpPersonCopy,printDcpPerson,dcpPlanReset,dcpPlanBook,printDcpPlan,dcpPlanSet,dcpPlanDel,dcpPlanAdd,dcpPlanToggle,printDcp,gameToggleMember,gameSet,gamePickMonth,gameToggleEdit,gameConfirm,gameUnconfirm,setTab,render,assign,setTheme,cancelMeeting,setOutcome,setActualRole,setReviewed,
   addMember,setMem,addAward,delAward,admGoalAdd,admGoalToggle,admGoalDel,approveMember,approveMerge,setRole,
   setUrduName,suggestUrduNames,
   authLogText,

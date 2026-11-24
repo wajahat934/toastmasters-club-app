@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=149**.
+   every deploy or browsers serve the old `app.js`. Currently **v=150**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-11-24
 
-**Live at v149, repo clean. Officer level + announce-winners shipped; both SQL files wait for the owner.** The owner is the club's VPE and one of three
+**Live at v150, repo clean. Officer level + announce-winners shipped; both SQL files wait for the owner.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **Read first:** the dated "Added / Fixed / Changed" sections below, newest first — each names the
@@ -187,6 +187,13 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Added 2026-11-24 — DCP goals 1–6 show who counted (v150)
+
+Each education goal card has "👥 Who counted (n)" (`goalControls` → `goalWho` → `eduAwards`): the
+same dated club-year awards `eduCounts` counts, date order. Goals 2/3 and 5/6 split one pool — the
+first two Level 2s fill goal 2, later ones goal 3 (same for L4+/5/6). Open state kept across redraws
+(`dcpWhoOpen`). Prints collapsed.
 
 ## Changed 2026-11-24 — a guest entry can merge into an RTC member (v149)
 
