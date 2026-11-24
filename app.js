@@ -714,9 +714,33 @@ function speechFirstOn(m){
   const v=m.config&&m.config.speechFirst;
   return v===undefined?m.date>=SPEECH_FIRST_FROM:!!v;
 }
-/* attendance is opt-out: everyone counts as present unless listed here */
+/* Attendance.
+   Meetings before ATTEND_OPTIN_FROM: opt-out — everyone present unless listed
+   in config.absent.
+   From ATTEND_OPTIN_FROM (owner's call, Nov 2026): a member counts as PRESENT
+   only if the meeting shows it — a role they did, an app vote, or being a vote
+   candidate (Table Topics speakers) — or an officer ticked them (config.present).
+   Everyone else is absent by default. An officer can still mark someone with
+   only an app vote absent (config.absent).
+   Members' phones cannot see other people's votes (secret ballot), so the
+   result is FROZEN into config.absent when the meeting is marked reviewed
+   (config.attendSnap) — points only use reviewed meetings, so every phone
+   then agrees. After the freeze, ticks edit config.absent directly. */
+const ATTEND_OPTIN_FROM='2026-11-25';
 function absentList(m){ return (m&&m.config&&m.config.absent)||[]; }
-function isAbsent(m,pid){ return absentList(m).includes(pid); }
+function presentList(m){ return (m&&m.config&&m.config.present)||[]; }
+function attendOptIn(m){ return !!(m&&m.date>=ATTEND_OPTIN_FROM&&!(m.config&&m.config.attendSnap)); }
+function autoPresent(m,pid){ const ev=attendanceEvidence(m,pid); return !!(ev.roles.length||ev.voted||ev.nominated.length); }
+function isAbsent(m,pid){
+  if(!attendOptIn(m))return absentList(m).includes(pid);
+  if(absentList(m).includes(pid))return true;
+  if(presentList(m).includes(pid))return false;
+  return !autoPresent(m,pid);
+}
+function attendRoster(m){
+  return state.members.filter(x=>!x.archived&&!x.external&&x.approved!==false&&(!x.joined||x.joined<=m.date));
+}
+function absentIds(m){ return attendOptIn(m)?attendRoster(m).filter(x=>isAbsent(m,x.id)).map(x=>x.id):absentList(m); }
 const EDU_ROLE={id:'edu',name:'Educational Session Speaker'};
 /* ---- extra people for a role in ONE meeting ----
    Oct 2026 joint meeting: two Sergeants at Arms and three presidents. Stored
@@ -851,7 +875,7 @@ function roleHistory(){
     const counted=new Set();
     /* the attendance register is the wider record — someone can miss a meeting
        without ever having been booked for a role */
-    for(const pid of absentList(m)){ abs[pid]=(abs[pid]||0)+1; counted.add(pid); }
+    for(const pid of absentIds(m)){ abs[pid]=(abs[pid]||0)+1; counted.add(pid); }
     for(const o of meetingOutcomes(m)){
       if(UNTRACKED_ROLES.includes(o.rid))continue;
       if(o.status==='absent'){
@@ -2910,21 +2934,25 @@ function meetingBookingCard(m){
 /* Attendance is opt-out: everyone is present until someone says otherwise, so
    an unreviewed meeting never quietly records the whole club as missing. */
 function attendanceHtml(m){
-  const roster=state.members.filter(x=>!x.archived&&!x.external)
+  const optIn=attendOptIn(m), newRule=m.date>=ATTEND_OPTIN_FROM;
+  const roster=(newRule?attendRoster(m):state.members.filter(x=>!x.archived&&!x.external))
     .sort((a,b)=>a.name.localeCompare(b.name));
-  const away=absentList(m);
-  return `<details class="card sub" style="margin-top:8px" ${away.length?'open':''}>
+  const away=newRule?roster.filter(x=>isAbsent(m,x.id)).map(x=>x.id):absentList(m);
+  return `<details class="card sub" style="margin-top:8px" ${away.length&&(!newRule||!m.reviewed)?'open':''}>
     <summary class="small" style="cursor:pointer"><b>🙋 Attendance</b>
-      ${away.length?`<span class="pill absent">${away.length} absent</span>`
+      ${newRule?`<span class="pill done">${roster.length-away.length} present</span> <span class="pill absent">${away.length} absent</span>`
+        :away.length?`<span class="pill absent">${away.length} absent</span>`
                    :'<span class="muted">everyone marked present</span>'}</summary>
-    <p class="small muted" style="margin:6px 0">Untick anyone who wasn't there. Everybody counts as present unless you untick them.</p>
+    <p class="small muted" style="margin:6px 0">${newRule
+      ?`Members with a role or an app vote are ticked automatically. Everyone else is absent — tick anyone who was there.${optIn?'':' (Saved when the meeting was reviewed.)'}`
+      :"Untick anyone who wasn't there. Everybody counts as present unless you untick them."}</p>
     <div class="grid-roles">
       ${roster.map(x=>`<label class="small" style="display:flex;gap:6px;align-items:center">
         <input type="checkbox" ${isAbsent(m,x.id)?'':'checked'} onchange="setPresent('${m.id}','${x.id}',this.checked)">
-        <span style="${isAbsent(m,x.id)?'color:var(--muted);text-decoration:line-through':''}">${esc(x.name)}</span>
+        <span style="${isAbsent(m,x.id)?'color:var(--muted);text-decoration:line-through':''}">${esc(x.name)}</span>${optIn&&!isAbsent(m,x.id)&&!presentList(m).includes(x.id)?' <span class="muted" title="role, app vote or vote candidate">· auto</span>':''}
       </label>`).join('')}
     </div>
-    ${away.length?`<div class="row" style="margin-top:6px"><button class="btn ghost small" onclick="markAllPresent('${m.id}')">Everyone was here</button></div>`:''}
+    ${away.length&&!newRule?`<div class="row" style="margin-top:6px"><button class="btn ghost small" onclick="markAllPresent('${m.id}')">Everyone was here</button></div>`:''}
   </details>`;
 }
 function meetingReviewCard(m,compact){
@@ -3575,8 +3603,15 @@ function setPresent(mid,pid,present){
     if(soft.length&&!confirm(`${who} ${soft.join(' and ')} at this meeting — that usually means they were there.\n\nMark them absent anyway?`)){ render(); return; }
   }
   const list=new Set(absentList(m));
-  present?list.delete(pid):list.add(pid);
-  m.config={...(m.config||{}),absent:[...list]};
+  if(attendOptIn(m)){
+    const pres=new Set(presentList(m));
+    if(present){ pres.add(pid); list.delete(pid); }
+    else{ pres.delete(pid); if(autoPresent(m,pid))list.add(pid); }
+    m.config={...(m.config||{}),absent:[...list],present:[...pres]};
+  }else{
+    present?list.delete(pid):list.add(pid);
+    m.config={...(m.config||{}),absent:[...list]};
+  }
   saveMeetingConfig(m);
   rebuild(); render();
 }
@@ -3643,7 +3678,14 @@ async function creditPending(mid){
 async function setReviewed(id,v){
   if(v)await creditPending(id);
   const row=S.meetings.find(x=>x.id===id); if(row)row.reviewed=v;
-  sync(api.updateMeeting(id,{reviewed:v}));
+  const m=state.meetings.find(x=>x.id===id);
+  if(v&&m&&attendOptIn(m)){
+    /* freeze the register so members' phones (which can't see others' votes)
+       count the same attendance — see absentList() */
+    const cfg={...(m.config||{}),absent:absentIds(m),attendSnap:true};
+    if(row)row.config=cfg; m.config=cfg;
+    sync(api.updateMeeting(id,{reviewed:v,config:cfg}));
+  }else sync(api.updateMeeting(id,{reviewed:v}));
   rebuild(); render();
 }
 

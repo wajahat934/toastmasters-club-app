@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=150**.
+   every deploy or browsers serve the old `app.js`. Currently **v=151**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-11-24
 
-**Live at v150, repo clean. Officer level + announce-winners shipped; both SQL files wait for the owner.** The owner is the club's VPE and one of three
+**Live at v151, repo clean. Officer level + announce-winners shipped; both SQL files wait for the owner.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **Read first:** the dated "Added / Fixed / Changed" sections below, newest first — each names the
@@ -187,6 +187,18 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Changed 2026-11-24 — attendance is absent-by-default from 25 Nov 2026 (v151)
+
+Owner's call. Meetings dated from `ATTEND_OPTIN_FROM` ('2026-11-25'): a member is present only with
+evidence (`autoPresent` = a role not marked absent, an app vote, or being a vote candidate — TT
+speakers) or an officer tick (`config.present`); officers can still mark a vote-only member absent
+(`config.absent`). Older meetings keep the opt-out rule. Register shows "n present / m absent" and
+"· auto" beside evidence-based ticks. Members' phones can't see others' votes, so `setReviewed(true)`
+FREEZES the result into `config.absent` + `config.attendSnap`; after that every device uses
+absentList only (points use reviewed meetings only, so all phones agree). `absentIds(m)` feeds
+roleHistory's absent counts. Clubs rule: guests and members who joined after the date are left out
+(`attendRoster`).
 
 ## Added 2026-11-24 — DCP goals 1–6 show who counted (v150)
 
