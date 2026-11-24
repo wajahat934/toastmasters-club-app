@@ -926,6 +926,26 @@ function juniorFirst(a,b){
   const x=seniority(a),y=seniority(b);
   return x.level!==y.level?x.level-y.level:x.projects-y.projects;
 }
+/* ---- DTM title (Nov 2026) ----
+   A member is a DTM when a "DTM" level completion is recorded for them
+   (Members → Level completions → DTM) or their own name already says DTM
+   (e.g. "Erum Rizvi, DTM"). The agenda and WhatsApp messages then call them
+   "DTM <name>" instead of "TM <name>", and My Profile shows the badge.
+   plainName() strips any TM/DTM the member typed into their own name, so
+   the title is never doubled ("TM Erum Rizvi, DTM"). */
+const DTM_RE=/(^|[\s,(])DTM\b/i;
+function plainName(mem){
+  return String((mem&&mem.name)||'').trim()
+    .replace(/^(D?TM)\.?\s+/i,'').replace(/(?:,\s*|\s+)\(?D?TM\)?\.?$/i,'').trim();
+}
+function isDTM(mem){
+  if(!mem)return false;
+  if((mem.awards||[]).some(a=>String(a.level).toUpperCase()==='DTM'))return true;
+  return DTM_RE.test(String(mem.name||''));
+}
+function tmTitle(mem){ return isDTM(mem)?'DTM':'TM'; }
+function titledName(mem){ return tmTitle(mem)+' '+plainName(mem); }
+function titledFirst(mem){ return tmTitle(mem)+' '+plainName(mem).split(/\s+/)[0]; }
 function currentLevel(mem){   /* highest level reached across all paths */
   let lv=mem.baseLevel||0;
   for(const pe of memPaths(mem))lv=Math.max(lv,pathLevel(mem,pe));
@@ -2686,7 +2706,8 @@ function viewMe(){
   return `<h2>My profile</h2>
   ${pushCardHtml()}
   <div class="card">
-    <div class="row"><span class="mname">${esc(mem.name)}</span> ${pathSummary(mem)}</div>
+    <div class="row"><span class="mname">${esc(mem.name)}</span> ${isDTM(mem)?'<span class="pill dtm" title="Distinguished Toastmaster — the agenda calls you DTM">🎖 DTM</span>':''} ${pathSummary(mem)}</div>
+    ${isDTM(mem)?`<p class="small muted" style="margin:6px 0 0">🎖 Distinguished Toastmaster — agendas and club messages call you <b>${esc(titledName(mem))}</b>.</p>`:''}
     <div class="row" style="margin-top:10px">
       <div><label class="small muted">My name (as it appears on agendas)</label><br>
         <input type="text" value="${esc(mem.name)}" style="max-width:240px" onchange="meSet('name',this.value)"></div>
@@ -3795,7 +3816,7 @@ function openRolesMessage(mid){
   const asg=m.assignments||{};
   /* reserved slots (double time for a long-format speech) are not offered */
   const open=slotListFor(m).filter(s=>{const a=asg[s.key]; return !(a&&a.memberId)&&!slotReserved(m,s.key)&&!slotBlocked(m,s.key);});
-  const firstName=k=>{const a=asg[k]; const p=a&&a.memberId&&memberById(a.memberId); return p?p.name.split(' ')[0]:null;};
+  const firstName=k=>{const a=asg[k]; const p=a&&a.memberId&&memberById(a.memberId); return p?titledFirst(p):null;};
   const wod=(m.wod||{}).word||'';
   const head=`🎤 *RTC Meeting — ${fmtDate(m.date)}*`+(m.theme?`\nTheme: *${m.theme}*`:'')
     +(wod?`\nWord of the Day: *${wod}*`:'')
@@ -3804,12 +3825,12 @@ function openRolesMessage(mid){
   /* nudge the booked role owners for whatever is still unset */
   const tmod=firstName('tmod|0'), gram=firstName('gram|0');
   const asks=[];
-  if(!m.theme&&tmod)asks.push(`🎯 Our TMOD TM ${tmod} is requested to pick the theme of the meeting in the app.`);
-  if(!wod&&gram)asks.push(`📖 Our Grammarian TM ${gram} is requested to choose the Word of the Day in the app.`);
+  if(!m.theme&&tmod)asks.push(`🎯 Our TMOD ${tmod} is requested to pick the theme of the meeting in the app.`);
+  if(!wod&&gram)asks.push(`📖 Our Grammarian ${gram} is requested to choose the Word of the Day in the app.`);
   const nudges=asks.length?`\n\n`+asks.join('\n'):'';
   /* the booked list doubles as a reminder to everyone who already has a role */
   const filled=slotListFor(m).filter(s=>{const a=asg[s.key];return a&&a.memberId&&memberById(a.memberId);})
-    .map(s=>{const a=asg[s.key];return `• ${s.label}: TM ${memberById(a.memberId).name}${(a.durationMin||0)>=LONG_MIN?` (⏱ ${a.durationMin} min)`:''}`;});
+    .map(s=>{const a=asg[s.key];return `• ${s.label}: ${titledName(memberById(a.memberId))}${(a.durationMin||0)>=LONG_MIN?` (⏱ ${a.durationMin} min)`:''}`;});
   const booked=filled.length?`\n\n*Already booked — your reminder:*\n`+filled.join('\n'):'';
   if(!open.length)return head+`\n\nEvery role is booked — see you there! 🎉`+booked+nudges;
   return head+`\n\nThese roles are still open:\n`+open.map(s=>`• ${s.label}`).join('\n')+booked+nudges
@@ -3821,7 +3842,8 @@ function copyOpenRoles(mid){ copyText(openRolesMessage(mid),'Open-roles message 
 function rolePlayersMessage(mid){
   const m=state.meetings.find(x=>x.id===mid); if(!m)return '';
   const asg=m.assignments||{};
-  const nameAt=k=>{const a=asg[k]; const p=a&&a.memberId&&memberById(a.memberId); return p?p.name:null;};
+  const memAt=k=>{const a=asg[k]; return a&&a.memberId&&memberById(a.memberId)||null;};
+  const nameAt=k=>{const p=memAt(k); return p?titledName(p):null;};
   const wod=(m.wod||{}).word||'';
   let out=`🎤 *RTC Meeting — ${fmtDate(m.date)}*`+(m.theme?`\nTheme: *${m.theme}*`:'')
     +(wod?`\nWord of the Day: *${wod}*`:'')+(ttOn(m)?'':'\n⭐ Speakathon meeting');
@@ -3830,15 +3852,15 @@ function rolePlayersMessage(mid){
     const n=nameAt(s.key);
     if(n){
       const a=asg[s.key];
-      filled.push(`• ${s.label}: TM ${n}${(a.durationMin||0)>=LONG_MIN?` (⏱ ${a.durationMin} min)`:''}`);
+      filled.push(`• ${s.label}: ${n}${(a.durationMin||0)>=LONG_MIN?` (⏱ ${a.durationMin} min)`:''}`);
     }else if(!slotReserved(m,s.key)&&!slotBlocked(m,s.key))stillOpen.push(s.label);
   }
   if(filled.length)out+=`\n\n*Role players:*\n`+filled.join('\n');
   const asks=[];
   for(let i=0;i<speakersFor(m);i++){
-    const spk=nameAt('spk|'+i), ev=nameAt('eval|'+i);
-    if(spk)asks.push(ev?`• TM ${spk.split(' ')[0]} → please share your project details and evaluation form with TM ${ev}`
-                       :`• TM ${spk.split(' ')[0]} → your evaluator slot is still open; share your project details once it's booked`);
+    const sm=memAt('spk|'+i), spk=sm&&titledFirst(sm), ev=nameAt('eval|'+i);
+    if(spk)asks.push(ev?`• ${spk} → please share your project details and evaluation form with ${ev}`
+                       :`• ${spk} → your evaluator slot is still open; share your project details once it's booked`);
   }
   if(asks.length)out+=`\n\n*Speakers, before the meeting:*\n`+asks.join('\n');
   if(stillOpen.length)out+=`\n\nStill open: ${stillOpen.join(', ')} — book in the app 👇\n${APP_URL}`;
@@ -3951,6 +3973,7 @@ function memberCard(mem,hist,absCount){
   return `<details class="mem" id="mem-${mem.id}">
     <summary>
       <span class="mname">${esc(mem.name)}</span>
+      ${isDTM(mem)?'<span class="pill dtm" title="Distinguished Toastmaster">🎖 DTM</span>':''}
       ${mem.role==='admin'?'<span class="pill admin">admin</span>':mem.role==='officer'?'<span class="pill admin">officer</span>':''}
       ${mem.hasAccount?'':'<span class="pill guest">no login</span>'}
       ${mem.external?`<span class="pill guest">guest · ${esc(mem.homeClub||'other club')}</span>`:pathSummary(mem)}
@@ -5128,8 +5151,8 @@ const AgendaApp=(function(){
   const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
   /* an Urdu agenda uses the member's Urdu name when one has been set */
   function tmName(mem){
-    if(agUrdu)return urduNameOf(mem.id)||mem.name.trim().replace(/^(TM|DTM)\s+/i,'');
-    const n=mem.name.trim(); return /^(TM|DTM)\b/i.test(n)?n:'TM '+n;
+    if(agUrdu)return urduNameOf(mem.id)||plainName(mem);
+    return titledName(mem);
   }
   function bookedNames(meeting,re){
     const out=[];
@@ -5539,9 +5562,13 @@ const AgendaApp=(function(){
        match a member exactly, leaving anything hand-typed alone. */
     const byForm=new Map();
     for(const m of state.members){
-      const latin=/^(TM|DTM)\b/i.test(m.name.trim())?m.name.trim():'TM '+m.name.trim();
-      byForm.set(agNorm(latin),m);
+      /* every spelling a saved sheet may carry: the old "TM <name as typed>",
+         the titled form, and the bare names */
+      byForm.set(agNorm(titledName(m)),m);
+      byForm.set(agNorm('TM '+m.name.trim()),m);
+      byForm.set(agNorm('TM '+plainName(m)),m);
       byForm.set(agNorm(m.name.trim()),m);
+      byForm.set(agNorm(plainName(m)),m);
       const u=urduNameOf(m.id);
       /* both forms indexed: sheets written before the honorific was dropped
          still carry "ٹی ایم <name>" and have to be recognised */
@@ -5550,8 +5577,8 @@ const AgendaApp=(function(){
     const reName=v=>{
       const m=byForm.get(agNorm(v)); if(!m)return v;
       const u=urduNameOf(m.id);
-      if(agUrdu)return u||m.name.trim().replace(/^(TM|DTM)\s+/i,'');
-      const n=m.name.trim(); return /^(TM|DTM)\b/i.test(n)?n:'TM '+n;
+      if(agUrdu)return u||plainName(m);
+      return titledName(m);
     };
     for(const b of blocks)for(const r of (b.rows||[]))if(r.who)r.who=reName(r.who);
     /* Names typed straight onto the sheet cannot be tied back to a member, so

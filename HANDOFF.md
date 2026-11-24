@@ -10,7 +10,7 @@
 1. **Bump the cache-buster.** `index.html` carries `?v=NN` on four asset URLs — and
    `demo/index.html` carries three more (the hosted sandbox at `/demo/` shares the ROOT
    app.js/styles/assets, so it goes stale silently if its `?v` is forgotten). Bump ALL of them on
-   every deploy or browsers serve the old `app.js`. Currently **v=151**.
+   every deploy or browsers serve the old `app.js`. Currently **v=152**.
 2. **Verify against a demo copy, not the live app.** Copy the repo to a scratch folder and replace
    `config.js` with placeholder values (`https://YOUR-PROJECT.supabase.co`) — the app then runs in
    DEMO MODE with fake in-memory data. Serve it and drive it with the browser tools.
@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-11-24
 
-**Live at v151, repo clean. Officer level + announce-winners shipped; both SQL files wait for the owner.** The owner is the club's VPE and one of three
+**Live at v152, repo clean. Officer level + announce-winners shipped; both SQL files wait for the owner.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **Read first:** the dated "Added / Fixed / Changed" sections below, newest first — each names the
@@ -187,6 +187,16 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Added 2026-11-24 — DTM title (v152)
+
+`isDTM(mem)`: a "DTM" level completion is recorded, or the name itself says DTM ("Erum Rizvi, DTM",
+"DTM X", "X (DTM)"). `plainName` strips any typed TM/DTM; `titledName` = "DTM|TM " + plain name;
+`titledFirst` for first-name nudges. Used by the agenda's `tmName`/`reName` (byForm also indexes the
+old "TM <typed name>" spellings so saved sheets re-title on Fill / language switch) and by the
+open-roles and role-players WhatsApp messages. 🎖 DTM pill (`.pill.dtm`) on My Profile (+ a line
+saying how agendas name them) and on the roster card. Members' phones only load their OWN awards,
+so for members only their own profile depends on this — the agenda is admin-only.
 
 ## Changed 2026-11-24 — attendance is absent-by-default from 25 Nov 2026 (v151)
 

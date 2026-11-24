@@ -84,6 +84,7 @@ button.btn:disabled{opacity:.5;cursor:default}
 .pill.other{background:var(--gold-soft);color:var(--gold-ink)}
 .pill.guest{background:var(--accent-soft);color:var(--accent)}
 .pill.admin{background:var(--gold-soft);color:var(--gold-ink)}
+.pill.dtm{background:var(--gold-soft);color:var(--gold-ink);border:1px solid var(--gold);font-weight:600}
 .pill.pending{background:var(--maroon-soft);color:var(--maroon)}
 .bar{height:8px;background:var(--surface2);border:1px solid var(--line);border-radius:99px;overflow:hidden;margin-top:6px}
 .bar > div{height:100%;background:var(--accent)}
