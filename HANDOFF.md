@@ -35,7 +35,7 @@
 
 ## Start here — state as of 2026-11-24
 
-**Live at v146, repo clean. Officer level shipped; its SQL waits for the owner to run it.** The owner is the club's VPE and one of three
+**Live at v147, repo clean. Officer level shipped; its SQL waits for the owner to run it.** The owner is the club's VPE and one of three
 admins. The club runs live voting in meetings, so `main` is production.
 
 **Read first:** the dated "Added / Fixed / Changed" sections below, newest first — each names the
@@ -184,6 +184,13 @@ key — never copy it into this repo.
   set it and rehearse the messy case (slow entry included: every call in the chain waits).
 - **Test the messy case, not the tidy one.** Three fixes came back because the demo sheet had keys
   and the club's did not. The club's saved agendas predate most of these features.
+
+## Added 2026-11-24 — 👁 View as officer (v147)
+
+Header button for full admins (`#viewOff`, created in render(), `toggleOfficerView`): sets
+`viewAsOfficer` and `isFull=false` so every officer lock applies on screen; `realFull` keeps the
+true level. Writes made in this view still go out as the full admin (not blocked, not logged).
+Hidden while viewing as member; "View as member" resets it.
 
 ## Added 2026-11-24 — Officer level + officer activity log (v146)
 
